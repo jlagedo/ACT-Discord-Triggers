@@ -2,13 +2,19 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-type FileLogLevel = 'INFO' | 'WARN' | 'ERROR';
+type FileLogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 let logPath: string | null = null;
 const writeQueue: string[] = [];
 let writing = false;
 
 const MAX_BYTES = 5 * 1024 * 1024;
+
+// Debug lines (discord.js voice [WS]/[UDP]/[NW]/[DAVE], mixer tick stats,
+// per-voice firstChunk timings) are gated by env var so production runs
+// don't drown the log file. Set BRIDGE_DEBUG=0 to silence; anything else
+// (including unset) keeps debug on while we're diagnosing playback latency.
+const debugEnabled = process.env['BRIDGE_DEBUG'] !== '0';
 
 function exeDir(): string {
     // Launcher: process.execPath is node.exe sitting next to bundle.js / launcher exe.
@@ -59,6 +65,7 @@ function drain(): void {
     });
 }
 
+export function debug(msg: string): void { if (debugEnabled) write('DEBUG', msg); }
 export function info(msg: string): void { write('INFO', msg); }
 export function warn(msg: string): void { write('WARN', msg); }
 

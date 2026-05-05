@@ -16,6 +16,12 @@ namespace DiscordAPI {
         private static readonly object lifecycleLock = new object();
         private static int initInProgress;
 
+        // Per-trigger sequence number used in log lines so a single audio
+        // event can be traced from C# through the named pipe into the bridge
+        // (which echoes its own reqId on the wire). Wraps at int.MaxValue
+        // — the volume is fine for the lifetime of an ACT session.
+        private static int triggerSeq;
+
         private static readonly SpeechAudioFormatInfo formatInfo =
             new SpeechAudioFormatInfo(48000, AudioBitsPerSample.Sixteen, AudioChannel.Stereo);
 
@@ -237,6 +243,8 @@ namespace DiscordAPI {
         public static void Speak(string text, string voice, int vol, int speed) {
             // Called from ACT's PlayTtsMethod hook on a background thread, not the UI.
             // Synthesis itself is sync; downstream IPC blocks the trigger thread by design.
+            int seq = Interlocked.Increment(ref triggerSeq);
+            string utc = DateTime.UtcNow.ToString("HH:mm:ss.fff");
             var swSynth = Stopwatch.StartNew();
             byte[] pcm;
             try {
@@ -250,30 +258,36 @@ namespace DiscordAPI {
                     pcm = ms.ToArray();
                 }
             } catch (Exception ex) {
-                Log?.Invoke("TTS synthesis failed: " + ex.Message);
+                Log?.Invoke($"trigger#{seq} utc={utc} TTS synthesis failed: {ex.Message}");
                 return;
             }
             swSynth.Stop();
             var swIpc = Stopwatch.StartNew();
             SendSpeakPcm(pcm);
             swIpc.Stop();
-            Log?.Invoke($"Speak timing: synth={swSynth.ElapsedMilliseconds}ms ipc={swIpc.ElapsedMilliseconds}ms bytes={pcm.Length}");
+            Log?.Invoke(
+                $"trigger#{seq} utc={utc} Speak " +
+                $"synth={swSynth.ElapsedMilliseconds}ms " +
+                $"ipc={swIpc.ElapsedMilliseconds}ms " +
+                $"bytes={pcm.Length}");
         }
 
         public static void SpeakFile(string path) {
             // Called from ACT's PlaySoundMethod hook (signature: void(string,int)) on
             // a background thread. The single sync-over-async boundary lives here.
+            int seq = Interlocked.Increment(ref triggerSeq);
+            string utc = DateTime.UtcNow.ToString("HH:mm:ss.fff");
             try {
-                Task.Run(() => SpeakFileAsync(path)).GetAwaiter().GetResult();
+                Task.Run(() => SpeakFileAsync(seq, utc, path)).GetAwaiter().GetResult();
             } catch (Exception ex) {
-                Log?.Invoke("SpeakFile error: " + ex.Message);
+                Log?.Invoke($"trigger#{seq} utc={utc} SpeakFile error: {ex.Message}");
             }
         }
 
-        private static async Task SpeakFileAsync(string path) {
+        private static async Task SpeakFileAsync(int seq, string utc, string path) {
             var pc = pipeClient;
             if (pc == null) {
-                Log?.Invoke("Cannot play file: bridge not connected.");
+                Log?.Invoke($"trigger#{seq} utc={utc} Cannot play file: bridge not connected.");
                 return;
             }
             var sw = Stopwatch.StartNew();
@@ -283,12 +297,15 @@ namespace DiscordAPI {
                     TimeSpan.FromSeconds(30));
                 sw.Stop();
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
-                    Log?.Invoke("Bridge file rejected: " + resp.Error);
+                    Log?.Invoke($"trigger#{seq} utc={utc} Bridge file rejected: {resp.Error}");
                 } else {
-                    Log?.Invoke($"SpeakFile timing: ipc={sw.ElapsedMilliseconds}ms");
+                    Log?.Invoke(
+                        $"trigger#{seq} utc={utc} SpeakFile " +
+                        $"ipc={sw.ElapsedMilliseconds}ms " +
+                        $"path={path}");
                 }
             } catch (Exception ex) {
-                Log?.Invoke("SpeakFile error: " + ex.Message);
+                Log?.Invoke($"trigger#{seq} utc={utc} SpeakFile error: {ex.Message}");
             }
         }
 

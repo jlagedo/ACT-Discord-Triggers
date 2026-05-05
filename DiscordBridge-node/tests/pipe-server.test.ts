@@ -314,8 +314,9 @@ test('SpeakPcm: binary frame decodes to byte-equal Buffer at host', async () => 
     assert.equal(frame!['ok'], true);
     const call = host.calls.find((c) => c.method === 'speakPcm');
     assert.ok(call);
-    assert.ok(Buffer.isBuffer(call.args[0]));
-    assert.equal(Buffer.compare(call.args[0] as Buffer, pcm), 0);
+    assert.equal(call.args[0], 130);
+    assert.ok(Buffer.isBuffer(call.args[1]));
+    assert.equal(Buffer.compare(call.args[1] as Buffer, pcm), 0);
 });
 
 test('SpeakPcm: mismatched sample rate is rejected without invoking host', async () => {
@@ -358,7 +359,8 @@ test('SpeakPcm: binary frame split byte-by-byte still dispatches correctly', asy
     assert.equal(frame!['reqId'], 7);
     const call = host.calls.find((c) => c.method === 'speakPcm');
     assert.ok(call);
-    assert.equal(Buffer.compare(call.args[0] as Buffer, pcm), 0);
+    assert.equal(call.args[0], 7);
+    assert.equal(Buffer.compare(call.args[1] as Buffer, pcm), 0);
 });
 
 test('SpeakFile: path passes through to host; SpeakResult ok=true', async () => {
@@ -371,7 +373,7 @@ test('SpeakFile: path passes through to host; SpeakResult ok=true', async () => 
     assert.equal(frame!['ok'], true);
     const call = host.calls.find((c) => c.method === 'speakFile');
     assert.ok(call);
-    assert.deepEqual(call.args, ['C:\\sounds\\beep.wav']);
+    assert.deepEqual(call.args, [140, 'C:\\sounds\\beep.wav']);
 });
 
 test('SpeakFile: host error echoed via SpeakResult', async () => {

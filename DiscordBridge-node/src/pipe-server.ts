@@ -34,8 +34,8 @@ export interface Host {
     setGame(text: string): Promise<void>;
     joinChannel(serverName: string, channelName: string): Promise<OpResult>;
     leaveChannel(): Promise<void>;
-    speakPcm(pcmBuffer: Buffer): OpResult;
-    speakFile(path: string): Promise<OpResult>;
+    speakPcm(reqId: number, pcmBuffer: Buffer): OpResult;
+    speakFile(reqId: number, path: string): Promise<OpResult>;
 }
 
 interface IncomingMessage {
@@ -143,7 +143,7 @@ export class PipeServer {
             return;
         }
         try {
-            const r = this.host.speakPcm(pcm);
+            const r = this.host.speakPcm(reqId, pcm);
             await this._sendFrame({ op: Op.SpeakResult, reqId, ok: r.ok, error: r.error });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -223,7 +223,11 @@ export class PipeServer {
                     break;
                 }
                 case Op.SpeakFile: {
-                    const r = await this.host.speakFile(asString(parsed['path']));
+                    // reqId is null only if the client sent a malformed
+                    // frame; in that path we wouldn't reach SpeakFile
+                    // dispatch (json parse + isIncomingMessage already ran).
+                    // Fall back to -1 so the host log line is well-formed.
+                    const r = await this.host.speakFile(reqId ?? -1, asString(parsed['path']));
                     await this._sendFrame({ op: Op.SpeakResult, reqId, ok: r.ok, error: r.error });
                     break;
                 }

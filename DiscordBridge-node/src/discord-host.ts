@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { ReadStream } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import {
     Client,
     GatewayIntentBits,
@@ -189,17 +190,25 @@ export class DiscordHost implements Host {
             }
 
             log.info('joinChannel: joinVoiceChannel + DAVE handshake');
+            // debug: true wires Networking's [WS]/[UDP]/[NW]/[DAVE] message
+            // stream into a 'debug' event. We forward those to the file log
+            // so latency reports include opus packet send cadence, UDP
+            // keepalive, gateway heartbeat timing, and DAVE re-key timing.
             this.connection = joinVoiceChannel({
                 channelId: channel.id,
                 guildId: guild.id,
                 adapterCreator: guild.voiceAdapterCreator,
                 selfDeaf: true,
                 selfMute: false,
+                debug: true,
             });
             this.currentGuildId = guild.id;
 
             this.connection.on('stateChange', (oldS, newS) => {
                 log.info(`voice ${oldS.status} -> ${newS.status}`);
+            });
+            this.connection.on('debug', (msg: string) => {
+                log.debug(`[voice] ${msg}`);
             });
             this.connection.on('error', (err: Error) => {
                 log.error('voice connection error', err);
@@ -216,11 +225,18 @@ export class DiscordHost implements Host {
             // GC pause that delays our _read by >100 ms (default tolerance)
             // would otherwise stop the player permanently. Disable the
             // missed-frame stop so transient delays just emit silence.
+            // debug: true here is currently the @discordjs/voice default but
+            // make it explicit so a future version flip doesn't silently
+            // drop our state-transition trace.
             this.player = createAudioPlayer({
                 behaviors: { maxMissedFrames: Number.MAX_SAFE_INTEGER },
+                debug: true,
             });
             this.player.on('stateChange', (oldS, newS) => {
                 log.info(`player ${oldS.status} -> ${newS.status}`);
+            });
+            this.player.on('debug', (msg: string) => {
+                log.debug(`[player] ${msg}`);
             });
             this.player.on('error', (err: Error) => {
                 log.error('player error', err);
@@ -265,17 +281,19 @@ export class DiscordHost implements Host {
         this.currentGuildId = null;
     }
 
-    speakPcm(pcmBuffer: Buffer): OpResult {
+    speakPcm(reqId: number, pcmBuffer: Buffer): OpResult {
         const guard = this._guardPlayback();
         if (!guard.ok) return guard;
-        const r = this.mixer!.addVoice(pcmBuffer);
+        const r = this.mixer!.addVoice(reqId, pcmBuffer);
         if (r.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${r.dropped} voice(s)`);
         return { ok: true, error: '' };
     }
 
-    async speakFile(path: string): Promise<OpResult> {
+    async speakFile(reqId: number, path: string): Promise<OpResult> {
         const guard = this._guardPlayback();
         if (!guard.ok) return guard;
+
+        const tStart = performance.now();
 
         // stat first so we can short-circuit on a cache hit and let mtime
         // invalidate stale entries when the user edits the file in place.
@@ -286,11 +304,16 @@ export class DiscordHost implements Host {
         } catch (e) {
             return { ok: false, error: `Cannot read file: ${log.errMsg(e)}` };
         }
+        const tStat = performance.now();
 
         const cachedPcm = this.wavCache.get(path, mtimeMs);
         if (cachedPcm) {
-            log.info(`SpeakFile cache hit: ${path} (${cachedPcm.length} bytes)`);
-            const r = this.mixer!.addVoice(cachedPcm);
+            log.info(
+                `SpeakFile reqId=${reqId} cache=hit ` +
+                `stat=${(tStat - tStart).toFixed(1)}ms ` +
+                `bytes=${cachedPcm.length} path=${path}`,
+            );
+            const r = this.mixer!.addVoice(reqId, cachedPcm);
             if (r.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${r.dropped} voice(s)`);
             return { ok: true, error: '' };
         }
@@ -318,6 +341,7 @@ export class DiscordHost implements Host {
                 fileStream.once('error', reject);
                 fileStream.pipe(reader);
             });
+            const tDecode = performance.now();
 
             const { format, pcm } = decoded;
 
@@ -340,11 +364,25 @@ export class DiscordHost implements Host {
 
             // Channel + sample-rate conversion to the format the bridge feeds Discord.
             const stereoPcm = format.channels === 1 ? upmixMonoToStereo16(pcm) : pcm;
+            const tUpmix = performance.now();
             const finalPcm = resampleStereo16(stereoPcm, format.sampleRate, TARGET_SAMPLE_RATE);
+            const tResample = performance.now();
 
             this.wavCache.set(path, mtimeMs, finalPcm);
-            const addRes = this.mixer!.addVoice(finalPcm);
+            const addRes = this.mixer!.addVoice(reqId, finalPcm);
             if (addRes.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${addRes.dropped} voice(s)`);
+            // tDecode is in the closure above; subtractions give per-stage cost.
+            // total = stat + decode + upmix + resample.
+            log.info(
+                `SpeakFile reqId=${reqId} cache=miss ` +
+                `stat=${(tStat - tStart).toFixed(1)}ms ` +
+                `decode=${(tDecode - tStat).toFixed(1)}ms ` +
+                `upmix=${(tUpmix - tDecode).toFixed(1)}ms ` +
+                `resample=${(tResample - tUpmix).toFixed(1)}ms ` +
+                `total=${(tResample - tStart).toFixed(1)}ms ` +
+                `srcFmt=${format.sampleRate}/${format.bitDepth}/${format.channels} ` +
+                `bytes=${finalPcm.length} path=${path}`,
+            );
             return { ok: true, error: '' };
         } catch (e) {
             try { fileStream.destroy(); } catch { /* ignore */ }
@@ -355,27 +393,49 @@ export class DiscordHost implements Host {
 
     private _startPingLog(): void {
         this._stopPingLog();
+        // Ring buffer of recent ws-ping samples for jitter computation. 12
+        // samples × 5 s = ~1 minute of history, which is short enough to
+        // catch transient gateway hiccups but long enough that a single
+        // high outlier doesn't dominate.
+        const windowSize = 12;
+        const wsSamples: number[] = [];
         const tick = (): void => {
             if (!this.connection) return;
             try {
                 // VoiceConnection.ping is { ws, udp } in @discordjs/voice 0.18+.
-                // ws = voice gateway heartbeat RTT. udp may be undefined for
-                // DAVE-encrypted connections — omit it from the log when so.
-                const p = this.connection.ping;
-                const parts: string[] = [];
-                if (typeof p.ws === 'number') parts.push(`ws=${p.ws}ms`);
-                if (typeof p.udp === 'number') parts.push(`udp=${p.udp}ms`);
-                if (parts.length > 0) log.info(`Discord voice RTT: ${parts.join(' ')}`);
+                // ws = voice gateway heartbeat RTT. The udp field is
+                // documented as deprecated and is not updated in current
+                // versions (VoiceUDPSocket no longer tracks RTT), so we
+                // don't log it — it would always show stale data.
+                const ws = this.connection.ping.ws;
+                if (typeof ws !== 'number') return;
+                wsSamples.push(ws);
+                if (wsSamples.length > windowSize) wsSamples.shift();
+                let min = wsSamples[0]!;
+                let max = wsSamples[0]!;
+                let sum = 0;
+                for (const s of wsSamples) {
+                    if (s < min) min = s;
+                    if (s > max) max = s;
+                    sum += s;
+                }
+                const avg = sum / wsSamples.length;
+                const jitter = max - min;
+                log.info(
+                    `voice RTT ws=${ws}ms ` +
+                    `(${wsSamples.length}@${windowSize}: ` +
+                    `min=${min} avg=${avg.toFixed(1)} max=${max} jitter=${jitter})`,
+                );
             } catch (e) {
                 log.warn('voice ping unavailable: ' + log.errMsg(e));
             }
         };
         // Wait 5s for the first WS heartbeat to populate before logging, then
-        // sample every 60s. Both timers go through `pingTimer` so _stopPingLog
+        // sample every 5s. Both timers go through `pingTimer` so _stopPingLog
         // cancels whichever is currently scheduled.
         this.pingTimer = setTimeout(() => {
             tick();
-            this.pingTimer = setInterval(tick, 60_000);
+            this.pingTimer = setInterval(tick, 5_000);
             if (this.pingTimer.unref) this.pingTimer.unref();
         }, 5_000);
         if (this.pingTimer.unref) this.pingTimer.unref();

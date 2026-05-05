@@ -73,14 +73,14 @@ export class FakeHost implements Host {
         this.calls.push({ method: 'leaveChannel', args: [] });
     }
 
-    speakPcm(pcmBuffer: Buffer): OpResult {
-        this.calls.push({ method: 'speakPcm', args: [pcmBuffer] });
+    speakPcm(reqId: number, pcmBuffer: Buffer): OpResult {
+        this.calls.push({ method: 'speakPcm', args: [reqId, pcmBuffer] });
         if (this._speakPcmThrows) throw this._speakPcmThrows;
         return this._nextSpeakPcm;
     }
 
-    async speakFile(path: string): Promise<OpResult> {
-        this.calls.push({ method: 'speakFile', args: [path] });
+    async speakFile(reqId: number, path: string): Promise<OpResult> {
+        this.calls.push({ method: 'speakFile', args: [reqId, path] });
         if (this._speakFileThrows) throw this._speakFileThrows;
         return this._nextSpeakFile;
     }

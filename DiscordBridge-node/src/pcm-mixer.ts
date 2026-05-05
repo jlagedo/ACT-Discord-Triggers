@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { performance } from 'node:perf_hooks';
 
 import * as log from './file-log.js';
 
@@ -19,9 +20,19 @@ const CHUNK_BYTES = FRAME_SAMPLES * CHANNELS * 2;
 const MAX_VOICES = 64;
 const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
 
+// Tick jitter window. _read is called by the Opus encoder every 20 ms when
+// playing; a window of 50 covers ~1 s of audio, which is short enough that
+// short stalls show up clearly without a long stall hiding in the average.
+const TICK_WINDOW = 50;
+// Threshold for the "over budget" counter: a single _read taking longer
+// than 30 ms means at least one Opus frame was late, which is audible.
+const TICK_OVER_BUDGET_MS = 30;
+
 interface Voice {
+    reqId: number;
     pcm: Buffer;
     position: number;
+    enqueueTs: number;
 }
 
 export interface AddVoiceResult {
@@ -44,14 +55,25 @@ export class PcmMixer extends Readable {
     private totalQueued = 0;
     private readonly acc = new Int32Array(FRAME_SAMPLES * CHANNELS);
 
-    addVoice(pcm: Buffer): AddVoiceResult {
+    // Tick jitter tracking. lastReadTs is captured from performance.now() at
+    // the end of every _read so the first sample after a quiet period
+    // doesn't include the silence-to-playing transition delay.
+    private lastReadTs = 0;
+    private readonly tickSamples: number[] = [];
+
+    addVoice(reqId: number, pcm: Buffer): AddVoiceResult {
         // Defensive: a trailing odd byte would let readInt16LE walk one
         // byte past the end. Callers always emit aligned s16le, so this
         // only fires on a malformed upstream.
         const aligned = pcm.length & ~1;
         if (aligned === 0) return { dropped: 0 };
         const safe = aligned === pcm.length ? pcm : pcm.subarray(0, aligned);
-        this.voices.push({ pcm: safe, position: 0 });
+        this.voices.push({
+            reqId,
+            pcm: safe,
+            position: 0,
+            enqueueTs: performance.now(),
+        });
         this.totalQueued += safe.length;
 
         let dropped = 0;
@@ -61,6 +83,13 @@ export class PcmMixer extends Readable {
         ) {
             const oldest = this.voices.shift()!;
             this.totalQueued -= (oldest.pcm.length - oldest.position);
+            // Per-voice drop log so we can tell which trigger got starved
+            // out by a flood of newer ones.
+            log.warn(
+                `mixer drop reqId=${oldest.reqId} ` +
+                `unplayedBytes=${oldest.pcm.length - oldest.position} ` +
+                `ageMs=${(performance.now() - oldest.enqueueTs).toFixed(1)}`,
+            );
             dropped++;
         }
         return { dropped };
@@ -69,6 +98,8 @@ export class PcmMixer extends Readable {
     clear(): void {
         this.voices.length = 0;
         this.totalQueued = 0;
+        this.lastReadTs = 0;
+        this.tickSamples.length = 0;
     }
 
     // Exposed for unit tests; not part of the AudioResource contract.
@@ -82,9 +113,20 @@ export class PcmMixer extends Readable {
 
         this.acc.fill(0);
 
+        const now = performance.now();
         for (const v of this.voices) {
             const remaining = v.pcm.length - v.position;
             if (remaining <= 0) continue;
+            // First time any byte of this voice is consumed, log how long
+            // it sat in the queue. This is the bridge-side "audible delay"
+            // for a trigger: time from addVoice() to first opus frame.
+            if (v.position === 0) {
+                log.debug(
+                    `mixer voice reqId=${v.reqId} ` +
+                    `firstChunk=${(now - v.enqueueTs).toFixed(1)}ms ` +
+                    `pcmBytes=${v.pcm.length}`,
+                );
+            }
             const take = remaining < CHUNK_BYTES ? remaining : CHUNK_BYTES;
             const samples = take >>> 1;
             for (let i = 0; i < samples; i++) {
@@ -117,6 +159,37 @@ export class PcmMixer extends Readable {
     }
 
     override _read(_size: number): void {
+        const now = performance.now();
+        // First _read after a silent period (lastReadTs unset, or gap > 1s)
+        // doesn't represent encoder cadence — the encoder isn't pulling
+        // when there's no resource demand. Skip those samples so the
+        // jitter window only measures real playback.
+        if (this.lastReadTs > 0 && now - this.lastReadTs <= 1000) {
+            const dt = now - this.lastReadTs;
+            this.tickSamples.push(dt);
+            if (this.tickSamples.length >= TICK_WINDOW) {
+                let min = this.tickSamples[0]!;
+                let max = this.tickSamples[0]!;
+                let sum = 0;
+                let over = 0;
+                for (const s of this.tickSamples) {
+                    if (s < min) min = s;
+                    if (s > max) max = s;
+                    sum += s;
+                    if (s > TICK_OVER_BUDGET_MS) over++;
+                }
+                log.debug(
+                    `mixer tick dtMs ` +
+                    `min=${min.toFixed(1)} ` +
+                    `avg=${(sum / this.tickSamples.length).toFixed(1)} ` +
+                    `max=${max.toFixed(1)} ` +
+                    `over${TICK_OVER_BUDGET_MS}=${over} ` +
+                    `voices=${this.voices.length} ` +
+                    `queued=${this.totalQueued}`,
+                );
+                this.tickSamples.length = 0;
+            }
+        }
         try {
             this.push(this._mixOneChunk());
         } catch (e) {
@@ -126,5 +199,6 @@ export class PcmMixer extends Readable {
             log.error('PcmMixer mix error', e);
             this.push(Buffer.alloc(CHUNK_BYTES));
         }
+        this.lastReadTs = performance.now();
     }
 }
