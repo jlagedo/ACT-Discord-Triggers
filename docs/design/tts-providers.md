@@ -1,18 +1,50 @@
 # Design: Pluggable TTS Providers
 
-Status: **proposed** · Owner: TBD · Last updated: 2026-06-17
+Status: **proposed** · Owner: TBD · Last updated: 2026-06-18
 
 Implements roadmap feature #1. This document is the single source of truth for
 the pluggable-TTS work; the roadmap entry only links here.
 
+> **Decisions so far (2026-06-18):**
+> 1. Synthesis lives in the **Node bridge**, not the .NET plugin (§2).
+> 2. `System.Speech` stays in .NET as the zero-config default + fallback (§2).
+> 3. **First provider to build: ElevenLabs** (premium, flagship quality, simplest
+>    auth). (§4, §10)
+> 4. **Second: one local/offline provider** — **Piper vs Kokoro is still open**,
+>    to be decided on maturity/safety for the end user (§7).
+> 5. **Dropped:** "Polly-first / five-provider" plan — Polly's callout-community
+>    evidence turned out weak (it's a streamer-donation / chat-TTS artifact, not a
+>    raid-callout favorite), and AWS key setup is the highest-friction option (§4,
+>    §11).
+
 ---
 
-## 1. Goal
+## 1. Goal & why this is needed at all
 
 Let users pick the voice engine that synthesizes ACT trigger callouts, instead of
-being locked to the in-process Windows `System.Speech` voices (the #1 complaint
-across the FFXIV/ACT community). Add high-quality cloud voices and local/offline
-engines without destabilizing the net48 plugin.
+being stuck with the robotic Windows `System.Speech` voices (David/Zira/Elsa) the
+plugin uses today — the #1 quality complaint across the FFXIV/ACT community.
+
+**Why we can't just lean on Windows for good voices.** This was researched
+thoroughly; the short version:
+
+- The callout community overwhelmingly runs the **default classic SAPI voices**,
+  and most users don't even know how to change them. The plugin already has a
+  voice picker (`DiscordPlugin.cs` → `SpeechSynthesizer.GetInstalledVoices()`),
+  so that pain is *selection*, not provider choice — and it's already solved.
+- Windows 11 **does** have good on-device **neural "Natural" voices**
+  (Aria/Jenny/Guy), powered by the same engine as Azure AI — but Microsoft
+  **deliberately walls them off to Narrator**. They are not exposed to
+  third-party apps through *any* official API (not `System.Speech`, not the WinRT
+  `Windows.Media.SpeechSynthesis`). Confirmed in Microsoft Q&A and Windows docs.
+- The only third-party route (NaturalVoiceSAPIAdapter) is a **self-described hack**
+  that extracts system keys, scrapes an unofficial Edge endpoint, runs native code
+  inside ACT, and has already broken on a Windows update. **Rejected** — too
+  fragile/untrusted to put in our setup docs (§11).
+- Microsoft's **official** recommended path for neural TTS in an app is **Azure AI
+  Speech (cloud)**. So building cloud/local providers isn't us inventing a need —
+  it's the supported architecture, because Windows refuses to lend apps its local
+  neural voices.
 
 Non-goals: streaming/partial synthesis (callouts are short, full-buffer is fine),
 voice cloning UI, and reading arbitrary game text (this is callouts only).
@@ -35,13 +67,15 @@ voice cloning UI, and reading arbitrary game text (this is callouts only).
    lets the bridge synthesize is the identical pattern — finishing a migration
    that is already ~90% done, not a new architectural burden.
 
-2. **Zero new dependencies.** Node 24 ships global `fetch`. Every cloud provider
-   is a REST call; if we **require providers to return PCM or WAV** (all the
-   majors support it), no SDK and no audio-decoder package is needed. The
-   `esbuild.config.mjs` `external:` list and `build.ps1` `$externals` list (which
-   must stay in agreement) **do not change**. By contrast, the .NET path would
-   pull in dying-support NuGet packages, native-DLL SDKs that fight Costura
-   (Azure Speech SDK), and net48 TLS-1.2 workarounds.
+2. **Dependencies are safe in the bridge; they are not in net48.** This is the
+   real driver. **.NET 4.8 is legacy** — packages are dropping net48/netstandard2.0
+   support, SDKs ship native DLLs that fight Costura, and we'd need TLS-1.2
+   workarounds. We deliberately **freeze the .NET surface**. Node, by contrast, is
+   actively maintained and everything is supported. So the **"no new dependency"
+   rule applies only to the .NET side** — the bridge is free to take dependencies
+   **where they earn their keep** (e.g. a local-TTS runtime). Cloud providers stay
+   lean anyway: Node 24 ships global `fetch`, so REST providers (ElevenLabs, Azure,
+   OpenAI-compatible) need no SDK at all.
 
 3. **No new trust boundary.** API keys cross the named pipe and live in Node
    memory — but the **Discord bot token already does exactly that**
@@ -55,59 +89,111 @@ voice cloning UI, and reading arbitrary game text (this is callouts only).
 ### Why `System.Speech` stays in .NET
 
 It is Windows SAPI, in-process, and cannot move to Node. It is also the only
-zero-download, zero-config, fully-offline option. Keep it exactly as-is on the
-existing binary `SpeakPcm` path. It doubles as the **fallback**: if a bridge-side
-provider errors or times out, the bridge returns `SpeakResult { ok:false }` and
-the plugin re-synthesizes the same text via `System.Speech` and sends `SpeakPcm`.
-A raid callout is never silently lost.
+zero-download, zero-config option, and it's already wired into the voice picker.
+Keep it exactly as-is on the existing binary `SpeakPcm` path. It doubles as the
+**fallback**: if a bridge-side provider errors or times out, the bridge returns
+`SpeakResult { ok:false }` and the plugin re-synthesizes the same text via
+`System.Speech` and sends `SpeakPcm`. A raid callout is never silently lost.
 
-### Hard constraint
+### Audio-format preference (was a hard rule, now a preference)
 
-> **Providers MUST return 16-bit signed PCM or PCM-WAV.** This keeps the bridge
-> dependency-free (no mp3/opus decoder). Request `pcm`/`wav`/`LINEAR16` output
-> from every provider. This is a design rule, not an implementation detail — a
-> provider that can only emit mp3 is not acceptable without first adding a
-> decoder, which would break the zero-dependency promise.
+> **Prefer providers that return 16-bit PCM or WAV** — it lets the audio drop
+> straight into the existing pipeline with no decode step and lowest latency. All
+> the cloud providers we care about support a PCM/WAV output, so request it.
+> Because the bridge may now take dependencies (point 2), a provider that only
+> emits mp3/opus is **acceptable** if it justifies adding a decoder — it's a
+> trade-off to weigh per provider, not a blanket ban.
 
 ---
 
-## 3. Provider lineup
+## 3. What users have today (baseline we're beating)
 
-Chosen to match where the FFXIV/ACT/streamer community already is, plus the
-quality and offline differentiators. (Adoption rationale: Polly is the gaming
-workhorse — TextToTalk default + the Streamlabs "Brian" voice; Azure is the
-familiar #2; ElevenLabs is the quality leader; Kokoro/Piper are the 2026
-free/offline movement.)
+| Tier | Examples | Accessible to the plugin? | Quality |
+|---|---|---|---|
+| Classic SAPI | David, Zira, Hazel | ✅ in use now | robotic |
+| OneCore "mobile" | Mark, Eva | ✅ via WinRT (not worth a dep) | mediocre, still not neural |
+| Win11 Narrator **Natural** (neural) | Aria/Jenny/Guy | ❌ Narrator-only, walled off | good, but unusable by us |
+| Azure neural (cloud) | — | ✅ with a key | great (Microsoft's official path) |
 
-| Provider | Where | Transport | Output requested | Ship phase |
-|---|---|---|---|---|
-| **System.Speech** | .NET (existing) | binary `SpeakPcm` | 48k/16/stereo PCM | shipped |
-| **Amazon Polly** | bridge | REST | `pcm` (16-bit, 16 kHz) → resample | 1 |
-| **Azure Neural** | bridge | REST | `raw-48khz-16bit-mono-pcm` (no resample) | 1 |
-| **ElevenLabs** | bridge | REST | `pcm_24000` / `pcm_44100` → resample | 1 |
-| **OpenAI-compatible** | bridge | REST (configurable base URL) | `pcm` / `wav` | 1 |
-| Google Cloud TTS | bridge | REST | `LINEAR16` (wav) | later |
+The whole point of this feature: deliver neural-grade voices into a context where
+Windows otherwise refuses to.
 
-**The OpenAI-compatible connector does double duty:** a configurable base URL
-points it at OpenAI cloud *or* at any local OpenAI-compatible server —
-**Kokoro-FastAPI**, **openedai-speech** (Piper / Coqui XTTS) — capturing the
-entire free/offline crowd with one provider and no dedicated local integration.
+---
 
-### Cost note (why premium providers are viable here)
+## 4. Provider lineup — a three-rung ladder
+
+Reframed from the old "five cloud providers" list into tiers by what the user has
+to do. Build order is driven by the §-top decisions: **ElevenLabs first, then one
+local provider.**
+
+**Rung 1 — Free / built-in / offline**
+- **System.Speech** *(shipped)* — zero-download baseline + fallback.
+- **Embedded local neural** *(build #2)* — **Piper or Kokoro, TBD (§7)**. Bundled/
+  downloaded voice, runs inside the bridge or as a shipped exe. No key, no server.
+
+**Rung 2 — Free / bring-your-own-server**
+- **OpenAI-compatible** connector (configurable base URL). One connector hits
+  OpenAI cloud *or* a local **Kokoro-FastAPI** / **openedai-speech** server. For
+  power users who already run a local TTS server; not the default free path
+  (Docker/Python friction).
+
+**Rung 3 — Paid / premium**
+- **ElevenLabs** *(build #1)* — flagship quality, simplest auth (one `xi-api-key`
+  header), cheap at callout volume. The "wow" voice; genuinely unreachable any
+  other way (no SAPI path exists for it).
+- **Azure Neural** *(later)* — Microsoft's official neural path; worthwhile for
+  users who already have an Azure key. REST, can emit 48k PCM directly.
+
+**Deferred / dropped:** Amazon **Polly** (weak callout evidence + AWS-key friction;
+see §11), Google Cloud TTS.
+
+### Per-provider request shapes
+
+| Provider | Transport | Output requested | Notes |
+|---|---|---|---|
+| ElevenLabs | REST (`fetch`) | `output_format=pcm_24000` → resample 24→48k | `xi-api-key` header; model e.g. `eleven_flash_v2_5` (low latency) |
+| OpenAI-compatible | REST (`fetch`) | `response_format=pcm` / `wav` | base URL → OpenAI cloud or local server |
+| Azure Neural | REST (`fetch`) | `raw-48khz-16bit-mono-pcm` (no resample) | `Ocp-Apim-Subscription-Key`; region host |
+| Embedded local | in-process / exec | native PCM → resample | see §7 |
+
+### Cost note (why premium is fine here)
 
 The community's fear of premium TTS comes from high-volume use (voicing all chat
 or NPC dialogue, where ElevenLabs can run ~$1000). **Raid callouts are the
 opposite**: a small set of short, repeated phrases. Monthly character counts are
-tiny, and the bridge cache (§6) makes repeats free after first synth. ElevenLabs
-and OpenAI therefore cost pennies/month in this use case and are offered as
-first-class.
+tiny, and the bridge cache (§9) makes repeats free after first synth. ElevenLabs
+costs pennies/month in this use case.
 
 ---
 
-## 4. Provider abstraction (TypeScript, in the bridge)
+## 5. Quality expectations
 
-Providers only *fetch* audio. Resample / normalize / mix / cache stay centralized
-in the existing pipeline — a provider cannot get the output format wrong.
+Rough MOS ladder (illustrative; ordering is robust, exact numbers vary by test):
+
+```
+ElevenLabs                         ~4.7–4.8   ← build #1, premium
+Kokoro                             ~4.3–4.5   ← #1 open-source (TTS Arena)
+Azure ≈ Win11 Narrator "Natural"   ~4.0–4.5   ← walled off from apps
+Piper (medium/high)                ~3.8–4.0   ← "good but synthetic"
+────────────────── big gap ──────────────────
+Classic SAPI (David/Zira)          ~3.0–3.3   ← what the plugin uses now
+```
+
+Takeaways that drove the decisions:
+- **vs what the plugin can use today (classic SAPI):** Piper and Kokoro are both a
+  *dramatic, obvious* upgrade. The feature is clearly worth it.
+- **vs the best Windows voices (Narrator Natural, which we can't touch):** Kokoro
+  is ~on par; Piper is roughly equal-to-slightly-behind. So the local tier
+  delivers "the quality Microsoft reserves for Narrator" into our context.
+- **Kokoro > Piper** on naturalness; **ElevenLabs > both**.
+
+---
+
+## 6. Provider abstraction (TypeScript, in the bridge)
+
+Providers only *produce* audio. Resample / normalize / mix / cache stay
+centralized in the existing pipeline — a provider cannot get the output format
+wrong. Providers may be REST (cloud) **or** local (in-process / child process).
 
 ```ts
 export interface TtsResult {
@@ -117,9 +203,10 @@ export interface TtsResult {
 }
 
 export interface TtsProvider {
-    readonly id: string;            // "polly" | "azure" | "elevenlabs" | "openai"
+    readonly id: string;            // "elevenlabs" | "openai" | "azure" | "kokoro" | "piper"
     synthesize(text: string, opts: TtsOpts, signal: AbortSignal): Promise<TtsResult>;
     listVoices?(signal: AbortSignal): Promise<VoiceInfo[]>;  // for the .NET dropdown
+    warm?(): Promise<void>;         // local engines: load model on channel join
 }
 
 export interface TtsOpts {
@@ -128,12 +215,12 @@ export interface TtsOpts {
     speed?: number;
     apiKey?: string;
     baseUrl?: string;   // OpenAI-compatible → local server or cloud
-    region?: string;    // Azure / Polly
+    region?: string;    // Azure
 }
 ```
 
 A `TtsRegistry` keyed by `id` holds the instances; `DiscordHost` keeps the
-currently-selected provider + its `TtsOpts`, set via `SetTtsConfig` (§5).
+currently-selected provider + its `TtsOpts`, set via `SetTtsConfig` (§8).
 
 ### Pipeline placement
 
@@ -153,7 +240,53 @@ No new audio code — only the synth source is new. Reuse `resampleStereo16` /
 
 ---
 
-## 5. Protocol changes
+## 7. Local/offline tier — Piper vs Kokoro (OPEN DECISION)
+
+The local provider is **build #2**. Which engine ships is **not yet decided** —
+the criterion is *maturity / safety for the end user*. Both clear the SAPI bar by
+a wide margin (§5); they differ on integration risk, licensing, and quality.
+
+### Integration patterns
+
+| Engine | How it runs in the bridge | Output |
+|---|---|---|
+| **Piper** | spawn `piper.exe --output-raw`, read stdout | 16-bit mono PCM @ ~22 kHz |
+| **Kokoro** | in-process via `kokoro-js` (`device:"cpu"`, `onnxruntime-node`) | PCM |
+
+### Decision matrix
+
+| Criterion | **Piper** | **Kokoro** |
+|---|---|---|
+| Gaming adoption / proven | **Strong** — default TTS in Mantella (large Skyrim AI-NPC mod) and forks | Rising/newer; FFXIV-TTS guide, #1 TTS Arena |
+| Out-of-box quality | Good, clearly synthetic (~3.8–4.0) | **Better** (~4.3–4.5) |
+| Integration risk | **Low** — shell out to a self-contained exe (espeak-ng embedded) | Higher — in-process **native `onnxruntime-node`** (must be staged like `@snazzah/davey`) |
+| License for bundling | GPL wrinkle: `rhasspy/piper` archived → `OHF-Voice/piper1-gpl` (GPL-3.0) + GPL espeak. Shell-out = mere aggregation, but we'd ship a GPL exe. (MIT `piper-plus` exists but is less proven.) | **Cleaner** — model Apache-2.0, `kokoro-js` MIT |
+| Package weight | voice model ~20–60 MB | ~80 MB model + ~28 MB voices (~110 MB) |
+| CPU cost | Lighter | Heavier (fine on gaming rigs) |
+| Latency | Lowest | Higher — but **cache-hideable** for callouts (§9) |
+
+### How to decide (the actual question to answer)
+
+Because callouts are short and cacheable, Piper's latency edge barely matters,
+which tilts the *quality* axis toward Kokoro. But Piper is the **proven, simplest,
+lowest-risk** integration in exactly this "TTS for a game" niche. So the decision
+reduces to:
+
+- **Pick Piper** if "matches what the gaming community already ships + simplest,
+  most robust integration" wins, and the GPL-exe distribution is acceptable.
+- **Pick Kokoro** if "best out-of-box quality + cleanest license to bundle" wins,
+  and we accept the newer in-process `onnxruntime-node` integration + ~110 MB
+  download.
+
+**Resolution plan:** prototype both behind the `TtsProvider` seam (they share the
+same interface), A/B the voices on real callouts, and confirm `onnxruntime-node`
+stages cleanly through `build.ps1` before committing to Kokoro. Whichever proves
+more robust for a non-technical end user wins. Model/exe assets should be
+**downloaded on first selection** (and cached), not bloat the base release zip.
+
+---
+
+## 8. Protocol changes
 
 Bump `PROTOCOL_VERSION` **3 → 4** in both `DiscordAPI/Protocol.cs` and
 `DiscordBridge-node/src/protocol.ts`. Update `pipe-server.ts` dispatch and extend
@@ -162,9 +295,6 @@ incompatible wire shape → version bump + both test suites).
 
 ### `SetTtsConfig` — global config push (mirrors `SetNormalization`)
 
-The plugin owns the settings UI and pushes config to the bridge, exactly as it
-already does for normalization.
-
 ```ts
 interface SetTtsConfigRequest extends BaseRequest {
     op: 'SetTtsConfig';
@@ -172,7 +302,7 @@ interface SetTtsConfigRequest extends BaseRequest {
     voice: string;
     model?: string;
     speed?: number;
-    apiKey?: string;        // never logged (see §7)
+    apiKey?: string;        // never logged (see §10)
     baseUrl?: string;
     region?: string;
 }
@@ -190,7 +320,7 @@ interface SpeakTextRequest extends BaseRequest {
 // Response reuses the existing SpeakResult { ok, error }.
 ```
 
-`GetVoices` (optional, phase 2) can back a "refresh voices" button in the UI:
+`GetVoices` (optional, later) can back a "refresh voices" button in the UI:
 `GetVoicesRequest{ providerId }` → `GetVoicesResult{ voices: VoiceInfo[] }`.
 
 ### Plugin-side routing (the ACT hook)
@@ -204,96 +334,117 @@ interface SpeakTextRequest extends BaseRequest {
 
 ---
 
-## 6. Caching
+## 9. Caching
 
 Reuse the spirit of `WavCache`, keyed on `hash(providerId, voice, model, speed,
 text)` → resampled 48k PCM. Short callout phrases repeat constantly, so this:
 
-- removes per-callout latency on repeats (cloud TTFA is 75–300 ms),
+- removes per-callout latency on repeats (cloud TTFA 75–300 ms; local model load),
 - drives recurring cloud cost to ~zero,
-- makes premium providers practical (§3 cost note).
+- **hides the local engines' synthesis latency** (relevant to the Piper/Kokoro
+  choice in §7).
 
 Bound the cache (LRU by entry count or bytes) and clear it on `SetTtsConfig`
-change (voice/model swap invalidates entries).
+change (voice/model swap invalidates entries). For local engines, also `warm()`
+the model on voice-channel join so the first callout isn't slow.
 
 ---
 
-## 7. Security & reliability
+## 10. Security & reliability
 
 - **API keys**: stored in the plugin settings; pushed over the pipe via
   `SetTtsConfig`; held in Node memory only. Same trust level as the bot token,
-  which already crosses this pipe. **Never** write keys to `DiscordBridge.log` —
-  follow the existing discipline (the bot token is already kept out of logs).
-- **TLS**: not a concern on the bridge side — Node handles modern TLS. (This is
-  one of the reasons not to do this in net48.)
-- **Timeouts / fallback**: each `synthesize()` takes an `AbortSignal` with a
-  short deadline (e.g. 5 s). On timeout/error the bridge returns
-  `SpeakResult{ok:false}` and the plugin falls back to `System.Speech` (§5).
-- **Latency**: cloud adds 75–300 ms TTFA; cache (§6) hides it for repeats. Local
-  servers (Kokoro/Piper) and `System.Speech` are near-instant.
+  which already crosses this pipe. **Never** write keys to `DiscordBridge.log`.
+- **TLS**: not a concern on the bridge side — Node handles modern TLS. (One of the
+  reasons not to do this in net48.)
+- **Timeouts / fallback**: each `synthesize()` takes an `AbortSignal` with a short
+  deadline (e.g. 5 s). On timeout/error the bridge returns `SpeakResult{ok:false}`
+  and the plugin falls back to `System.Speech` (§8).
+- **Latency**: cloud adds 75–300 ms TTFA; cache (§9) hides it for repeats.
+  `System.Speech` and warmed local engines are near-instant.
 
 ---
 
-## 8. Testing
+## 11. Rejected / deferred options (so we don't relitigate)
 
-- **Node unit tests** (`tests/`): each provider against a fake `fetch` — assert
-  it requests PCM/WAV, parses the response into `TtsResult`, and surfaces HTTP
-  errors as a rejected promise. Use the existing `FakeHost`/`FakeSocket` harness
-  for `SpeakText`/`SetTtsConfig` dispatch.
-- **Protocol tests**: round-trip `SetTtsConfig`/`SpeakText` on both sides; assert
-  `PROTOCOL_VERSION` parity (the Hello handshake already fails fast on mismatch).
-- **Pipeline test**: a fake provider returning 24 kHz mono PCM must come out
-  48 kHz stereo after `upmixMonoToStereo16` + `resampleStereo16`.
-- Bridge-side TTS does **not** need real API keys in CI — all provider tests run
-  against a stubbed `fetch`.
-
----
-
-## 9. Build / packaging impact
-
-**None expected.** No new runtime npm dependencies (plain `fetch`, PCM/WAV
-output), so:
-
-- `esbuild.config.mjs` `external:` list — unchanged.
-- `build.ps1` `$externals` staging list — unchanged.
-- net48 plugin managed deps / Costura set — unchanged.
-
-If a future provider forces an mp3/opus path, that is a separate decision: adding
-a decoder dependency must be weighed against the §2 zero-dependency rationale, and
-both the esbuild external list and `build.ps1` staging list must be updated
-together (npm hoists transitive deps; the externals list silently misses them).
+- **NaturalVoiceSAPIAdapter (third-party SAPI shim)** — *rejected.* Self-described
+  hack: extracts system encryption keys, scrapes an unofficial Edge endpoint, runs
+  native COM code inside ACT, already broke on a Windows update, single maintainer.
+  Not something to recommend in setup docs, even though it's currently maintained.
+- **Reading Win11 Narrator "Natural" voices directly** — *not possible.* Microsoft
+  walls them off to Narrator; no official app API (§1).
+- **WinRT `Windows.Media.SpeechSynthesis` from net48** — *not worth it.* Exposes
+  more *standard* voices than `System.Speech`, but still **not** the neural ones,
+  and it'd add a .NET-side dependency against the freeze.
+- **Polly-first / five-provider plan** — *dropped.* Polly's apparent popularity was
+  a **streamer-donation ("Brian") / chat-TTS (TextToTalk) artifact**, not raid-
+  callout adoption. It fills no SAPI gap and has the **highest setup friction**
+  (AWS account + IAM keys). Not worth leading with; may return as a low-priority
+  extra.
+- **Synthesizing in the .NET plugin** — *rejected* in favor of the bridge (§2).
 
 ---
 
-## 10. Implementation phases
+## 12. Build / packaging impact
+
+- **Cloud providers (ElevenLabs, OpenAI-compatible, Azure):** **none.** Plain
+  `fetch`, PCM/WAV output → no new npm deps, no esbuild/`build.ps1` changes, no
+  net48 changes.
+- **Local tier (Piper or Kokoro):** **real impact, and it's the main reason §7 is a
+  deliberate decision:**
+  - *Kokoro* → adds `kokoro-js` + native **`onnxruntime-node`**. The native
+    `.node` binary **cannot be esbuild-bundled** — it must be marked external and
+    **staged into `dist/node_modules/`** (the existing `@snazzah/davey` /
+    `opusscript` pattern; the `esbuild` external list and `build.ps1 $externals`
+    list must agree). Plus a ~110 MB model download-on-first-use.
+  - *Piper* → ship/download `piper.exe` + a voice model as **separate assets**
+    (not bundled into `bundle.js`); GPL component must be shipped with its license.
+  - Either way: assets **download on first selection**, cached locally — keep the
+    base release zip lean.
+
+---
+
+## 13. Implementation phases
 
 1. **Seam (no behavior change):** introduce `TtsProvider`/`TtsRegistry` in the
    bridge with a single `system`-disabled path; add `SetTtsConfig` + `SpeakText`
-   ops + version bump + tests. Plugin still uses `System.Speech`/`SpeakPcm` until
-   a provider is selected. Proves the wiring end-to-end.
-2. **OpenAI-compatible provider** (unlocks OpenAI cloud + local Kokoro/Piper) and
-   **Amazon Polly** (the community workhorse).
-3. **Azure Neural** + **ElevenLabs**.
-4. **Caching** (§6) + UI: provider dropdown, dynamic config panel, voice list
-   refresh, per-channel "test voice" button.
-5. Later: **Google Cloud TTS**; optional move of `SpeakFile` decoding fully into
-   the same provider pipeline.
+   ops + version bump 3→4 + tests. Plugin still uses `System.Speech`/`SpeakPcm`
+   until a provider is selected. Proves the wiring end-to-end.
+2. **ElevenLabs** *(decision #3)* — first real provider. REST + `xi-api-key`,
+   `output_format=pcm_24000`, model `eleven_flash_v2_5`. Plus UI: provider
+   dropdown, dynamic config panel (API key + voice), "test voice" button.
+3. **Local provider** *(decision #4)* — resolve **Piper vs Kokoro** per §7
+   (prototype both behind the seam, pick the more end-user-mature), then ship it as
+   the free/offline neural option with first-use asset download + `warm()`.
+4. **Caching** (§9) hardening + voice-list refresh.
+5. **Later / optional:** OpenAI-compatible (BYO local server), Azure Neural (for
+   key-holders), Google Cloud TTS.
 
 ---
 
 ## Appendix: source material
 
-Provider landscape and gaming-community adoption that informed the lineup:
+Research behind the decisions:
 
-- [karashiiro/TextToTalk — FFXIV chat TTS: System/Polly/Azure/Uberduck/Websocket](https://github.com/karashiiro/TextToTalk)
+**Community usage & Microsoft's voice walls**
+- [karashiiro/TextToTalk — FFXIV *chat* TTS providers (the Polly/Azure signal's real origin)](https://github.com/karashiiro/TextToTalk)
 - [TextToTalk #153 — ElevenLabs request, quality vs. cost](https://github.com/karashiiro/TextToTalk/discussions/153)
-- [Amazon Polly TTS setup for FFXIV](https://www.youtube.com/watch?v=VC5B-CXbabI)
-- [VRCWizard/TTS-Voice-Wizard — Polly/Azure/Google in VRChat](https://github.com/VRCWizard/TTS-Voice-Wizard/wiki/Amazon-Polly)
-- [Twitch TTS — Streamlabs/StreamElements + Polly heritage](https://murf.ai/blog/twitch-text-to-speech)
-- [Kokoro-FastAPI — OpenAI-compatible local server](https://github.com/remsky/Kokoro-FastAPI)
-- [openedai-speech — OpenAI-compatible Piper/XTTS server](https://github.com/matatonic/openedai-speech)
-- [MinhakaDev/FFXIV-TTS — Kokoro-based local TTS for FFXIV](https://github.com/MinhakaDev/FFXIV-TTS)
-- [rhasspy/piper — standalone offline neural TTS](https://github.com/rhasspy/piper)
-- [Azure TTS REST API (raw PCM output formats)](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)
-- [AWSSDK.Polly (NuGet, .NET Standard 2.0) — REST also available](https://www.nuget.org/packages/AWSSDK.Polly/)
+- [cactbot #4694 — users stuck on the default SAPI voice, don't know how to change it](https://github.com/quisquous/cactbot/issues/4694)
+- [Microsoft Q&A — Natural voices are Narrator-only, not for app Text-to-Speech](https://learn.microsoft.com/en-us/answers/questions/4125876/why-are-natural-voices-only-available-for-narrator)
+- [Stack Overflow — Narrator Natural voices not in System.Speech, not open to third-party devs](https://stackoverflow.com/questions/77443751/how-to-access-newly-added-natural-voices-in-powershell-after-windows-11-update)
+- [gexgd0419/NaturalVoiceSAPIAdapter — the third-party "hack" (rejected, §11)](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter)
+- [Azure AI Speech REST — Microsoft's official neural-TTS path](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech)
+
+**Local engines (Piper vs Kokoro)**
+- [art-from-the-machine/Mantella — Piper as default TTS in a major game AI mod](https://github.com/art-from-the-machine/Mantella)
+- [rhasspy/piper — `--output-raw` 16-bit mono PCM; now archived](https://github.com/rhasspy/piper)
+- [OHF-Voice/piper1-gpl — maintained GPL-3.0 successor](https://github.com/OHF-Voice/piper1-gpl)
+- [ayutaz/piper-plus — MIT, espeak-free, npm/WASM fork](https://github.com/ayutaz/piper-plus)
+- [kokoro-js (npm) — Kokoro on Node CPU, in-process](https://www.npmjs.com/package/kokoro-js)
+- [onnx-community/Kokoro-82M-ONNX — quantized model, Apache-2.0](https://huggingface.co/onnx-community/Kokoro-82M-ONNX)
+- [Kokoro-FastAPI / openedai-speech — OpenAI-compatible local servers (Rung 2)](https://github.com/remsky/Kokoro-FastAPI)
+- [Kokoro vs Piper comparison 2026](https://slashdot.org/software/comparison/Kokoro-TTS-vs-Piper-TTS/)
+
+**Provider landscape**
 - [Best TTS APIs 2026 — latency/quality (Speechmatics)](https://www.speechmatics.com/company/articles-and-news/best-tts-apis-in-2025-top-12-text-to-speech-services-for-developers)
+- [MinhakaDev/FFXIV-TTS — Kokoro-based local TTS for FFXIV](https://github.com/MinhakaDev/FFXIV-TTS)
