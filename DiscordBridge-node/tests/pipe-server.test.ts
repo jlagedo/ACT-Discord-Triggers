@@ -425,6 +425,26 @@ test('SetNormalization: missing targetDb defaults to -20; enabled defaults false
     assert.deepEqual(call!.args, [false, -20]);
 });
 
+test('SetAudioQuality: forwards bitrate to host; result ok=true', async () => {
+    const { sock, host } = makeHarness();
+    sock.emit('data', encodeFrame({ op: Op.SetAudioQuality, reqId: 160, bitrate: 128000 }));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['op'], Op.SetAudioQualityResult);
+    assert.equal(frame!['reqId'], 160);
+    assert.equal(frame!['ok'], true);
+    const call = host.calls.find((c) => c.method === 'setAudioQuality');
+    assert.ok(call);
+    assert.deepEqual(call.args, [128000]);
+});
+
+test('SetAudioQuality: missing bitrate defaults to 96000', async () => {
+    const { sock, host } = makeHarness();
+    sock.emit('data', encodeFrame({ op: Op.SetAudioQuality, reqId: 161 }));
+    await waitForFrames(sock, 1);
+    const call = host.calls.find((c) => c.method === 'setAudioQuality');
+    assert.deepEqual(call!.args, [96000]);
+});
+
 test('Unknown op: emits Log notification with no reqId, level=Error', async () => {
     const { sock } = makeHarness();
     sock.emit('data', encodeFrame({ op: 'Bogus', reqId: 999 }));

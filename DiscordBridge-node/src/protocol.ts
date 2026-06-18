@@ -21,7 +21,7 @@
 // streams the file itself (must be 48 kHz / 16-bit / stereo PCM WAV). Its
 // optional `randomEffect` flag mirrors the binary flags bit above.
 
-export const PROTOCOL_VERSION = 3 as const;
+export const PROTOCOL_VERSION = 4 as const;
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export const FRAME_JSON_MARKER = 0x7B; // '{'
@@ -44,6 +44,7 @@ export const Op = {
     SpeakFile: 'SpeakFile',
     SpeakResult: 'SpeakResult',
     SetNormalization: 'SetNormalization', SetNormalizationResult: 'SetNormalizationResult',
+    SetAudioQuality: 'SetAudioQuality', SetAudioQualityResult: 'SetAudioQualityResult',
     Shutdown: 'Shutdown',
     BotReady: 'BotReady', Log: 'Log', Disconnected: 'Disconnected',
 } as const;
@@ -69,13 +70,16 @@ export interface SpeakFileRequest    extends BaseRequest { op: 'SpeakFile'; path
 // Auto-leveling config. Global, not per-trigger: the bridge stores it and applies
 // it to every clip. targetDb is a negative dBFS RMS target (e.g. -20).
 export interface SetNormalizationRequest extends BaseRequest { op: 'SetNormalization'; enabled: boolean; targetDb: number }
+// Opus encoder bitrate config. Global, not per-trigger: the bridge stores it and
+// applies it to the live encoder via setBitrate (bits/sec, e.g. 96000).
+export interface SetAudioQualityRequest extends BaseRequest { op: 'SetAudioQuality'; bitrate: number }
 export interface ShutdownRequest     extends BaseRequest { op: 'Shutdown' }
 
 export type Request =
     | HelloRequest | InitRequest | DeinitRequest | IsConnectedRequest
     | GetServersRequest | GetChannelsRequest | SetGameRequest
     | JoinChannelRequest | LeaveChannelRequest | SpeakFileRequest
-    | SetNormalizationRequest | ShutdownRequest;
+    | SetNormalizationRequest | SetAudioQualityRequest | ShutdownRequest;
 
 export interface HelloResponse        { op: 'HelloResult';        reqId: ReqId; ok: boolean; bridgeVersion: string; error: string }
 export interface InitResponse         { op: 'InitResult';         reqId: ReqId; ok: boolean; error: string }
@@ -88,6 +92,7 @@ export interface JoinChannelResponse  { op: 'JoinChannelResult';  reqId: ReqId; 
 export interface LeaveChannelResponse { op: 'LeaveChannelResult'; reqId: ReqId; ok: true;    error: '' }
 export interface SpeakResponse        { op: 'SpeakResult';        reqId: ReqId; ok: boolean; error: string }
 export interface SetNormalizationResponse { op: 'SetNormalizationResult'; reqId: ReqId; ok: true; error: '' }
+export interface SetAudioQualityResponse { op: 'SetAudioQualityResult'; reqId: ReqId; ok: true; error: '' }
 
 // Generic shape used for the catch-all error response in pipe-server. Matches
 // C# OkResponse: any *Result op with reqId/ok/error fields parses as this.
@@ -97,7 +102,7 @@ export type Response =
     | HelloResponse | InitResponse | DeinitResponse | IsConnectedResponse
     | GetServersResponse | GetChannelsResponse | SetGameResponse
     | JoinChannelResponse | LeaveChannelResponse | SpeakResponse
-    | SetNormalizationResponse;
+    | SetNormalizationResponse | SetAudioQualityResponse;
 
 export interface BotReadyNotification     { op: 'BotReady' }
 export interface LogNotification          { op: 'Log'; level: LogLevel; message: string }

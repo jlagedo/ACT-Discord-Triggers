@@ -104,7 +104,7 @@ namespace ActDiscordTriggers.Tests {
             string[] requestsExpectingResult = {
                 Op.Hello, Op.Init, Op.Deinit, Op.IsConnected,
                 Op.GetServers, Op.GetChannels, Op.SetGame,
-                Op.JoinChannel, Op.LeaveChannel, Op.SetNormalization,
+                Op.JoinChannel, Op.LeaveChannel, Op.SetNormalization, Op.SetAudioQuality,
             };
             foreach (var req in requestsExpectingResult) {
                 Assert.Contains(req + "Result", ops);
@@ -118,6 +118,21 @@ namespace ActDiscordTriggers.Tests {
         [Fact]
         public void ProtocolVersion_is_positive() {
             Assert.True(ProtocolConstants.Version > 0);
+        }
+
+        [Fact]
+        public void ProtocolVersion_matches_bridge() {
+            // Tripwire: bump both this and PROTOCOL_VERSION in protocol.ts together.
+            Assert.Equal(4, ProtocolConstants.Version);
+        }
+
+        [Fact]
+        public void SetAudioQualityRequest_serializes_bitrate() {
+            var req = new SetAudioQualityRequest { ReqId = 6, Bitrate = 128000 };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, opts));
+            Assert.Equal("SetAudioQuality", doc.RootElement.GetProperty("op").GetString());
+            Assert.Equal(6, doc.RootElement.GetProperty("reqId").GetInt32());
+            Assert.Equal(128000, doc.RootElement.GetProperty("bitrate").GetInt32());
         }
 
         [Fact]

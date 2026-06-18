@@ -17,12 +17,14 @@ import {
     entersState,
     type VoiceConnection,
     type AudioPlayer,
+    type AudioResource,
 } from '@discordjs/voice';
 import * as log from './file-log.js';
 import decode from 'audio-decode';
 import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
 import { applyRandomEffect } from './effects.js';
 import { normalizePcm16, DEFAULT_NORMALIZE_ENABLED, DEFAULT_NORMALIZE_TARGET_DB } from './normalize.js';
+import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
 import type { LogLevel } from './protocol.js';
@@ -125,12 +127,39 @@ export class DiscordHost implements Host {
     private normalizeEnabled = DEFAULT_NORMALIZE_ENABLED;
     private normalizeTargetDb = DEFAULT_NORMALIZE_TARGET_DB;
 
+    // Opus encoder bitrate, pushed by the plugin via SetAudioQuality. Unlike
+    // normalization (a per-clip PCM op in _enqueue), bitrate is an encoder CTL:
+    // we hold the live encoder from the current resource and apply setBitrate on
+    // join and on every change. Default mirrors the C# DiscordClient default.
+    private audioBitrate = DEFAULT_AUDIO_BITRATE;
+    private encoder: AudioResource['encoder'] = undefined;
+
     setNotifier(fn: Notifier): void { this.notify = fn; }
 
     setNormalization(enabled: boolean, targetDb: number): void {
         this.normalizeEnabled = enabled;
         this.normalizeTargetDb = targetDb;
         log.info(`setNormalization: enabled=${enabled} targetDb=${targetDb}`);
+    }
+
+    setAudioQuality(bitrate: number): void {
+        this.audioBitrate = clampBitrate(bitrate);
+        log.info(`setAudioQuality: bitrate=${this.audioBitrate}`);
+        // Apply immediately when connected; otherwise joinChannel applies the
+        // stored value once the resource (and its encoder) exists.
+        this._applyBitrate();
+    }
+
+    // Push the current bitrate onto the live Opus encoder. No-op when not
+    // connected or when the resource has no encoder (e.g. a non-Raw input).
+    private _applyBitrate(): void {
+        if (!this.encoder) return;
+        try {
+            this.encoder.setBitrate(this.audioBitrate);
+            log.info(`opus setBitrate=${this.audioBitrate}`);
+        } catch (e) {
+            log.error('opus setBitrate failed', e);
+        }
     }
 
     async init(token: string, status: string): Promise<OpResult> {
@@ -284,6 +313,13 @@ export class DiscordHost implements Host {
             const resource = createAudioResource(this.mixer, { inputType: StreamType.Raw });
             this.player.play(resource);
 
+            // StreamType.Raw makes @discordjs/voice insert a prism Opus encoder
+            // into the pipeline and expose it as resource.encoder. Hold it so we
+            // can tune the bitrate now and on later SetAudioQuality pushes.
+            this.encoder = resource.encoder;
+            if (!this.encoder) log.warn('joinChannel: resource has no Opus encoder; bitrate control unavailable');
+            this._applyBitrate();
+
             return { ok: true, error: '' };
         } catch (e) {
             log.error('joinChannel failed', e);
@@ -301,6 +337,7 @@ export class DiscordHost implements Host {
         this._stopPingLog();
         this.mixer?.clear();
         this.mixer = null;
+        this.encoder = undefined;
         try { this.player?.stop(true); } catch { /* ignore */ }
         this.player = null;
         try {

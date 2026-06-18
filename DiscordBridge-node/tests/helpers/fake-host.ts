@@ -89,6 +89,10 @@ export class FakeHost implements Host {
         this.calls.push({ method: 'setNormalization', args: [enabled, targetDb] });
     }
 
+    setAudioQuality(bitrate: number): void {
+        this.calls.push({ method: 'setAudioQuality', args: [bitrate] });
+    }
+
     nextInit(r: OpResult): void { this._nextInit = r; }
     nextJoinChannel(r: OpResult): void { this._nextJoinChannel = r; }
     nextSpeakPcm(r: OpResult): void { this._nextSpeakPcm = r; }

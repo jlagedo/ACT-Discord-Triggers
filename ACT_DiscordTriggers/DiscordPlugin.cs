@@ -67,6 +67,9 @@ namespace ACT_DiscordTriggers {
       this.chkNormalize = new System.Windows.Forms.CheckBox();
       this.lblNormalizeTarget = new System.Windows.Forms.Label();
       this.sliderNormalizeTarget = new System.Windows.Forms.TrackBar();
+      this.lblAudioQuality = new System.Windows.Forms.Label();
+      this.cmbAudioQuality = new System.Windows.Forms.ComboBox();
+      this.lblAudioQualityWarn = new System.Windows.Forms.Label();
       // --- New layout containers ---
       this.lstNav = new System.Windows.Forms.ListBox();
       this.pnlContent = new System.Windows.Forms.Panel();
@@ -402,6 +405,41 @@ namespace ACT_DiscordTriggers {
       this.sliderNormalizeTarget.Value = 20;
       this.sliderNormalizeTarget.Scroll += new System.EventHandler(this.normalizeSettings_Changed);
       //
+      // lblAudioQuality
+      //
+      this.lblAudioQuality.AutoSize = true;
+      this.lblAudioQuality.Location = new System.Drawing.Point(15, 235);
+      this.lblAudioQuality.Name = "lblAudioQuality";
+      this.lblAudioQuality.Size = new System.Drawing.Size(110, 20);
+      this.lblAudioQuality.TabIndex = 6;
+      this.lblAudioQuality.Text = "Audio Quality";
+      //
+      // cmbAudioQuality
+      //
+      this.cmbAudioQuality.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+      this.cmbAudioQuality.FormattingEnabled = true;
+      this.cmbAudioQuality.Items.AddRange(new object[] {
+        "Low (48 kbps)",
+        "Medium (96 kbps)",
+        "High (128 kbps)"});
+      this.cmbAudioQuality.Location = new System.Drawing.Point(18, 258);
+      this.cmbAudioQuality.Name = "cmbAudioQuality";
+      this.cmbAudioQuality.Size = new System.Drawing.Size(200, 28);
+      this.cmbAudioQuality.TabIndex = 7;
+      this.cmbAudioQuality.SelectedIndex = 1;
+      this.cmbAudioQuality.SelectedIndexChanged += new System.EventHandler(this.audioQualitySettings_Changed);
+      //
+      // lblAudioQualityWarn
+      //
+      this.lblAudioQualityWarn.AutoSize = true;
+      this.lblAudioQualityWarn.ForeColor = System.Drawing.Color.Firebrick;
+      this.lblAudioQualityWarn.Location = new System.Drawing.Point(18, 290);
+      this.lblAudioQualityWarn.Name = "lblAudioQualityWarn";
+      this.lblAudioQualityWarn.Size = new System.Drawing.Size(400, 20);
+      this.lblAudioQualityWarn.TabIndex = 8;
+      this.lblAudioQualityWarn.Text = "High needs a Discord channel that supports 128 kbps (boosted server).";
+      this.lblAudioQualityWarn.Visible = false;
+      //
       // grpFx
       //
       this.grpFx.Controls.Add(this.chkRandomFx);
@@ -410,9 +448,12 @@ namespace ACT_DiscordTriggers {
       this.grpFx.Controls.Add(this.chkNormalize);
       this.grpFx.Controls.Add(this.lblNormalizeTarget);
       this.grpFx.Controls.Add(this.sliderNormalizeTarget);
+      this.grpFx.Controls.Add(this.lblAudioQuality);
+      this.grpFx.Controls.Add(this.cmbAudioQuality);
+      this.grpFx.Controls.Add(this.lblAudioQualityWarn);
       this.grpFx.Location = new System.Drawing.Point(10, 260);
       this.grpFx.Name = "grpFx";
-      this.grpFx.Size = new System.Drawing.Size(560, 240);
+      this.grpFx.Size = new System.Drawing.Size(560, 330);
       this.grpFx.TabIndex = 1;
       this.grpFx.TabStop = false;
       this.grpFx.Text = "Effects && Leveling";
@@ -576,6 +617,9 @@ namespace ACT_DiscordTriggers {
     private CheckBox chkNormalize;
     private Label lblNormalizeTarget;
     private TrackBar sliderNormalizeTarget;
+    private Label lblAudioQuality;
+    private ComboBox cmbAudioQuality;
+    private Label lblAudioQualityWarn;
     private Label lblBotTok;
     // Layout containers for the categorized (nav + paged) settings UI.
     private ListBox lstNav;
@@ -643,6 +687,7 @@ namespace ACT_DiscordTriggers {
       LoadSettings();
       ApplyFxSettings();
       ApplyNormalizationSettings();
+      ApplyAudioQualitySettings();
 
       //Locate the out-of-process Discord bridge so DiscordClient knows where to spawn it
       string bridgeDir = FindBridgeDir();
@@ -904,6 +949,25 @@ namespace ACT_DiscordTriggers {
       DiscordClient.NormalizeTargetDb = -sliderNormalizeTarget.Value;
       lblNormalizeTarget.Text = "Auto-level Target: -" + sliderNormalizeTarget.Value + " dBFS";
     }
+
+    // Audio-quality tier (Opus bitrate). Maps the dropdown to a bitrate, mirrors
+    // it into DiscordClient, then pushes a SetAudioQuality op (a no-op while
+    // disconnected — connect re-pushes the current value). The High tier may
+    // exceed an unboosted channel's 96 kbps cap, so we show an inline warning;
+    // the overshoot is harmless (Discord relays it), just channel-dependent.
+    private static readonly int[] AudioQualityBitrates = { 48000, 96000, 128000 };
+
+    private void audioQualitySettings_Changed(object sender, EventArgs e) {
+      ApplyAudioQualitySettings();
+      _ = DiscordClient.SetAudioQualityAsync();
+    }
+
+    private void ApplyAudioQualitySettings() {
+      int idx = cmbAudioQuality.SelectedIndex;
+      if (idx < 0 || idx >= AudioQualityBitrates.Length) idx = 1; // default Medium
+      DiscordClient.AudioQualityBitrate = AudioQualityBitrates[idx];
+      lblAudioQualityWarn.Visible = (idx == 2); // High
+    }
     #endregion
 
     #region Information page
@@ -1111,6 +1175,7 @@ namespace ACT_DiscordTriggers {
       xmlSettings.AddControlSetting(sliderFxChance.Name, sliderFxChance);
       xmlSettings.AddControlSetting(chkNormalize.Name, chkNormalize);
       xmlSettings.AddControlSetting(sliderNormalizeTarget.Name, sliderNormalizeTarget);
+      xmlSettings.AddControlSetting(cmbAudioQuality.Name, cmbAudioQuality);
       if (File.Exists(settingsFile)) {
         try {
           using (var fs = new FileStream(settingsFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))

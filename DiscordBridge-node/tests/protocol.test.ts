@@ -11,6 +11,10 @@ test('PROTOCOL_VERSION is a positive integer', () => {
     assert.ok(PROTOCOL_VERSION > 0);
 });
 
+test('PROTOCOL_VERSION matches the C# side (bump both together)', () => {
+    assert.equal(PROTOCOL_VERSION, 4);
+});
+
 test('binary SpeakPcm header is 12 bytes with a flags byte (matches C# PipeClient)', () => {
     assert.equal(BINARY_SPEAK_PCM_HEADER_BYTES, 12);
     assert.equal(SPEAK_FLAG_RANDOM_EFFECT, 0x01);
@@ -31,7 +35,7 @@ test('every request op has a paired Result op (Shutdown excluded)', () => {
     const requestOps = [
         'Hello', 'Init', 'Deinit', 'IsConnected',
         'GetServers', 'GetChannels', 'SetGame',
-        'JoinChannel', 'LeaveChannel', 'SetNormalization',
+        'JoinChannel', 'LeaveChannel', 'SetNormalization', 'SetAudioQuality',
     ] as const;
     const opValues = new Set<string>(Object.values(Op));
     for (const req of requestOps) {
