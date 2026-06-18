@@ -65,6 +65,17 @@ Legend — **Effort**: S (days) · M (1–2 weeks) · L (multi-week / architectu
 - **Float internally is justified by the effects requirement.** With a real DSP
   chain + multi-source mixing, float32 throughout (one dithered quantization at
   the end) is correct, not gold-plating — it removes losses that exist today.
+- **Internal processing is float32 at 48 kHz — NOT a higher internal rate.** We
+  move the bus to float32 (Phase 3a) but keep the sample rate at 48 kHz; we do
+  **not** run DSP at 96 kHz and downsample. Oversampling only helps *nonlinear*
+  DSP (it tames harmonics that would alias), and of our eight effects only
+  `distortion` (a `tanh` waveshaper) meaningfully qualifies — `pitch` is an
+  anti-aliasing problem fixed by the resampler, and the other six are linear /
+  low-frequency-modulated. Combined with band-limited sources (≤22 kHz) and a
+  lossy 48 kHz Opus sink, a global 2× rate (extra SRC pass + 2× CPU/memory, paid
+  per clip on first fire) isn't justified. **Global 96 kHz is parked as a
+  future-maybe** (see Open questions); the cheaper alternative, if ever wanted,
+  is *local* oversampling around the nonlinear effect, not a global rate change.
 - **Effects are paid per-fire, never per-chunk.** `applyRandomEffect` randomizes
   the effect *and* its parameters each firing, so the result is uncacheable. The
   axis that matters is **per-fire (enqueue) vs per-chunk (real-time `_read`)**:
@@ -219,14 +230,27 @@ quantization before Opus. Split into two shippable sub-phases.
   `pcm-mixer` tests (the int32-sum / hard-clamp contract changes); add limiter +
   dither tests.
 
-**3b — High-quality resampler**
+**3b — High-quality resampler** — **library decided: `@alexanderolsen/libsamplerate-js`**
 
-- Replace linear-interp `resampleStereo16` with a windowed-sinc / polyphase SRC
-  (soxr or libsamplerate via WASM). **This is half the "pro" —** float
-  everywhere with a linear resampler still has an audible weak stage. Another
-  externals/packaging round (same checklist as Phase 1).
-- Resample the dry clip once, cached (deterministic); only the random effect
-  runs live per fire.
+- Replace linear-interp `resampleStereo16` with **`@alexanderolsen/libsamplerate-js`**
+  (`ConverterType.SRC_SINC_BEST_QUALITY`), operating on interleaved float32.
+  **This is half the "pro" —** float everywhere with a linear resampler still
+  leaves an audible weak stage, and 44.1k→48k (the common MP3 case) is linear
+  interp's worst ratio.
+- **Packaging is the easy path here, unlike Phase 1.** The lib inlines its WASM
+  as a single base64 blob (no separate `.wasm`, no `fs`/`fetch`/`__dirname`/
+  `locateFile`), so esbuild folds it into `bundle.js` with **no externals/
+  staging** (Branch A, same as `audio-decode`). Cost: ~+2 MB bundle. See the
+  resolved Open question for the full review (Node-version fit, licensing).
+- Resample is paid **once per file, on its first fire**, then cached (keyed by
+  path+mtime) — at enqueue, off the realtime `_read` loop, so it adds first-fire
+  latency for that one clip but never glitches already-playing audio. Reuse one
+  `SRC` instance for the common 44.1k→48k config; `create()` is async (await at
+  init / warm alongside the decoder). For an unusually long clip, the
+  `worker_thread` relief valve still applies.
+- **Also fix `effects.ts` `pitch` here.** Its naive linear-interp resample has no
+  anti-alias filter, so pitching up aliases / down images — route it through the
+  same sinc resampler instead of raising the global rate.
 
 **Why last:** biggest blast radius, zero external surface, and it depends on the
 format work (Phase 1) being in place to be worth it.
@@ -237,7 +261,7 @@ format work (Phase 1) being in place to be worth it.
 
 | Risk | Phase | Mitigation |
 |------|-------|------------|
-| WASM externals break the bundle / self-test | 1, 3b | Sync both externals lists; keep `BRIDGE_READY` assert; import only needed codecs |
+| WASM externals break the bundle / self-test | 1 | Sync both externals lists; keep `BRIDGE_READY` assert; import only needed codecs. (3b's `libsamplerate-js` inlines its WASM — no externals, exempt.) |
 | Linear resampler audible on 44.1k MP3 | 1 | QA on 44.1k; pull 3b forward if needed |
 | ~~Opus signal/complexity CTL not reachable via prism~~ (materialized) | 2 | ✅ Resolved: not reachable via prism's public API; shipped **bitrate-only** as planned |
 | Heavy per-fire DSP blocks the single thread → mixer underrun | 3 | Keep render fast; `worker_thread` offload as relief valve |
@@ -250,8 +274,26 @@ format work (Phase 1) being in place to be worth it.
   **complexity** (not just bitrate).~~ **Resolved (Phase 2):** prism exposes only
   `setBitrate` publicly; signal/complexity would require reaching into opusscript
   internals, so they're out of scope and Phase 2 shipped bitrate-only.
-- Resampler library choice for 3b (soxr vs libsamplerate WASM): quality vs
-  bundle size vs maintenance.
+- ~~Resampler library choice for 3b (soxr vs libsamplerate WASM): quality vs
+  bundle size vs maintenance.~~ **Resolved: `@alexanderolsen/libsamplerate-js`
+  (`SINC_BEST_QUALITY`).** Reviewed v2.1.2: MIT (libsamplerate itself BSD-2 —
+  add the notice), **no `engines` constraint**, env-detects Node via
+  `process.versions.node` (no version gate) → clean on our Node 24; no native
+  build (prebuilt WASM, no node-gyp). **WASM is inlined** (single base64 blob,
+  no `fs`/`fetch`/`__dirname`) → esbuild bundles with **zero externals/staging**
+  (Branch A); ships `.d.ts`; ~+2 MB bundle. API: `await create(2, inRate, 48000,
+  {converterType})` → `src.simple(interleavedF32)`. *Rejected:* `node-soxr`
+  (native + LGPL, breaks the no-native/single-`node.exe` rules), `wasm-audio-
+  resampler` (soxr, dormant since 2020), brand-new single-author/low-adoption
+  libs (`@eliware/resampler`). *Caveat:* the npm `resampler` keyword space is
+  polluted with typosquat spam copying libsamplerate-js's description — pin the
+  scoped name `@alexanderolsen/libsamplerate-js`.
+- **(Future-maybe ⚪) Global oversampling.** Run internal DSP at 2× (96 kHz) and
+  downsample to 48k. Parked, not planned: only `distortion` (tanh) clearly
+  benefits, sources are ≤22 kHz band-limited, and the sink is lossy 48 kHz Opus.
+  If ever revisited, prefer **local** oversampling around the nonlinear effect
+  (upsample → `tanh` → ½-band downsample) over a global rate change. (See the
+  locked decision "Internal processing is float32 at 48 kHz".)
 - WAV unification perf: confirm routing the common WAV case through WASM decode
   doesn't regress first-trigger latency (warm-start should cover it).
 
