@@ -1,95 +1,89 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Build & test
 
-Top-level release build (produces `release/ACT_DiscordTriggers/` with everything
-an end user drops into ACT's plugins directory):
+Release build (produces `release/ACT_DiscordTriggers/`, the folder users drop into ACT's plugins dir):
 ```
 cd DiscordBridge-node && npm ci && cd ..
 pwsh ./build.ps1            # add -Zip to also emit ACT_DiscordTriggers.zip at the repo root
 ```
-`./build.ps1` (root) runs `dotnet build` on the plugin (net48 — ACT only loads net48 assemblies; Costura.Fody weaves under the SDK's MSBuild and produces a single merged DLL, so no separate Visual Studio install is needed), then `tsc --noEmit` as a type-check gate, then bundles TS via esbuild, copies `node.exe` from the current PATH, stages externals into `DiscordBridge-node/dist/node_modules/`, spawns `node.exe bundle.js <pipe>` and asserts `BRIDGE_READY` appears on stdout, then assembles `release/ACT_DiscordTriggers/` from the plugin DLL + bridge dist (plus `README.md`/`LICENSE`). The self-test catches packaging regressions; **do not skip or weaken it**. With `-Zip` it then compresses the wrapper folder to `ACT_DiscordTriggers.zip` so the archive's top-level entry is `ACT_DiscordTriggers\` — extracting into `Plugins\` yields a self-contained `Plugins\ACT_DiscordTriggers\` subfolder rather than loose files in ACT's plugin root.
+`build.ps1` does `dotnet build` (net48 — ACT only loads net48) → `tsc --noEmit` → esbuild bundle → stages `node.exe` + externals → spawns the bridge and asserts `BRIDGE_READY` on stdout → assembles the release folder. That self-test catches packaging regressions; **do not skip or weaken it**.
 
-For bridge-only iteration use the npm scripts in `DiscordBridge-node/`:
+Bridge-only iteration (in `DiscordBridge-node/`):
 - `npm run typecheck` — `tsc --noEmit`
-- `npm run bundle` — esbuild only (no node.exe staging or self-test)
-- `npm test` — JS test suite (covers protocol invariants, frame parsing, op dispatch against a `FakeHost`/`FakeSocket`, and a Windows-only lifecycle suite that spawns `tsx src/bridge.ts` and exercises the real handshake/Shutdown/peer-disconnect paths). Independent of the build — does not need `dist/`. Lifecycle tests no-op (skip) on non-Windows because the bridge uses Windows named pipes.
+- `npm run bundle` — esbuild only (no staging/self-test)
+- `npm test` — JS suite (protocol, framing, op dispatch; plus a Windows-only lifecycle suite that spawns the real bridge). Independent of `dist/`. Lifecycle tests skip on non-Windows (Windows named pipes).
 
-C# tests (net48, xUnit):
+C# tests (net48, xUnit — pinned to the 2.x line; 3.x dropped net48 support):
 ```
 dotnet test Tests/Tests.csproj
 ```
-The Tests project targets net48 to match the runtime the plugin ships on. Pinned to xUnit 2.9.x + xunit.runner.visualstudio 2.8.x because the 3.x line dropped Framework support; `Tests/xunit.runner.json` disables shadow-copy so `Assembly.Location` reflects the original output dir (the test assembly's `FindBridgeDir()` walks up from there). A small `TaskExtensions.cs` polyfills `Task.WaitAsync(TimeSpan)` since that overload is net6+.
+- `BridgeIntegrationTests` spawns the real bridge from `dist/` — run `build.ps1` first or it fails with a "build the bridge first" message.
+- Single test: `dotnet test --filter "FullyQualifiedName~<name>"`.
 
-Integration tests in `Tests/BridgeIntegrationTests.cs` spawn the real bridge from `dist/`. They fail with a clear "build the bridge first" message if `node.exe` / `bundle.js` aren't there — run `build.ps1` before `dotnet test`. Run a single test with `dotnet test --filter "FullyQualifiedName~Bridge_handshake_succeeds_against_real_exe"`.
-
-CI (`.github/workflows/ci.yml`) downloads ACT binaries to `packages/` so the plugin's `Advanced Combat Tracker.exe` reference resolves; reproduce locally by either installing ACT to `C:\Program Files (x86)\Advanced Combat Tracker\` (the csproj falls back to that path) or by copying `Advanced Combat Tracker.exe` to `packages/`. CI runs entirely on `msbuild` + `node` — no .NET SDK setup step is needed beyond what `windows-latest` ships.
+CI:
+- Needs `Advanced Combat Tracker.exe` to resolve the plugin reference — install ACT to `C:\Program Files (x86)\Advanced Combat Tracker\` (csproj fallback path) or copy the exe to `packages/`.
+- Runs `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
 
 ## Architecture: two processes
 
-Discord enforced DAVE E2EE on voice in March 2026. Discord.Net 3.19 added DAVE but dropped net48; ACT only loads net48 plugins. The fix is to push voice out of the plugin process entirely:
+The plugin must not open a Discord connection itself — Discord voice now requires DAVE E2EE, which net48 (all ACT loads) can't do. Voice lives in a separate node process:
 
 ```
-ACT (net48) ─loads─▶ ACT_DiscordTriggers.dll (net48)
-                              │ spawns
-                              ▼
-                       node.exe + bundle.js (discord.js + @snazzah/davey)
-                              ▲
-                              │ Windows named pipe, length-prefixed JSON
-                              ▼
-                       ACT_DiscordTriggers.dll IPC client
+ACT (net48) --loads--> ACT_DiscordTriggers.dll (net48)
+DLL --spawns "node.exe bundle.js <pipe>"--> node bridge (discord.js + @snazzah/davey)
+DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 ```
 
-Three projects, three jobs:
+- **`ACT_DiscordTriggers/`** (net48): UI, settings, hooks `PlayTtsMethod`/`PlaySoundMethod`. TTS is synthesized in-process via `System.Speech` and sent to the bridge as 48k/16/stereo PCM; sound files are sent by path — the bridge decodes + resamples them.
+- **`DiscordAPI/`** (net48): IPC client. `DiscordClient` is the static facade. `BridgeProcess.StartAndConnectAsync` spawns node, scans stdout for `BRIDGE_READY`, then connects the pipe.
+- **`DiscordBridge-node/src/`**: the bridge (TS, esbuild→`dist/bundle.js`). `bridge.ts` owns lifecycle + pipe server. `pipe-server.ts` does framing/dispatch. `discord-host.ts` wraps discord.js + `@discordjs/voice` (`StreamType.Raw`). `protocol.ts` mirrors `Protocol.cs`.
+- **`Tests/`** (net48, xUnit): protocol/IPC/lifecycle unit tests + `BridgeIntegrationTests` (real bridge).
 
-- **`ACT_DiscordTriggers/`** (net48): UI, settings, hooks `ActGlobals.oFormActMain.PlayTtsMethod` / `PlaySoundMethod`. TTS is synthesized in-process via `System.Speech` to 48 kHz/16-bit/stereo PCM, then shipped to the bridge as base64. Audio file playback is resampled with NAudio to the same format. The plugin **never** opens a Discord WebSocket itself — that's what broke under DAVE.
-- **`DiscordAPI/`** (net48): in-process IPC client (`DiscordClient`, `BridgeProcess`, `PipeClient`, `Protocol`). `DiscordClient` is the static facade the plugin calls. `BridgeProcess.StartAndConnectAsync` takes the bridge directory, spawns `node.exe bundle.js <pipe>`, scans stdout for a line starting with `BRIDGE_READY`, then connects to the named pipe.
-- **`DiscordBridge-node/src/`**: the actual bridge, written in TypeScript (esbuild bundles to `dist/bundle.js`; `tsc --noEmit` is the type-check gate). `bridge.ts` owns process lifecycle and the named-pipe server (one client, then `server.close()`). `pipe-server.ts` handles the framing + dispatch. `discord-host.ts` wraps discord.js + `@discordjs/voice` and feeds raw 48 kHz/16-bit/stereo PCM via `StreamType.Raw`. `protocol.ts` holds the wire-protocol types as a discriminated union — the JS-side mirror of `DiscordAPI/Protocol.cs`.
-- **`Tests/`** (net48, xUnit): protocol round-tripping (`ProtocolTests`), pipe IPC against a mock server (`PipeIpcTests`), and `BridgeProcess` lifecycle (`BridgeProcessTests`) — all run without the real bridge. `BridgeIntegrationTests` spawns the actual built bridge.
-
-### Lifecycle: no launcher, no Job Object
-
-Earlier iterations of this code used a tiny C# launcher (`DiscordBridge.exe`) that spawned node and assigned it to a Win32 Job Object with `KILL_ON_JOB_CLOSE`, so a hard-killed launcher would also kill node. That guarantee only mattered because there were two child processes; with the plugin spawning `node.exe` directly there's a single process to coordinate:
-
-- Plugin calls `process.Kill()` → `TerminateProcess` on node directly.
-- Plugin process dies (clean exit, ACT crash, Task Manager) → OS closes the pipe client handle → `bridge.ts` `socket.close` handler runs `host.deinit()` then `process.exit(0)`.
-
-Don't reintroduce a launcher unless you can show that **both** of those paths fail.
+Lifecycle — no launcher / Job Object:
+- Plugin shutdown: `process.Kill()`s node directly.
+- Plugin dies (crash, Task Manager): OS closes the pipe → `bridge.ts` `socket.close` handler runs `host.deinit()` + `process.exit(0)`.
+- Don't reintroduce a launcher unless you can show both paths fail.
 
 ## Wire protocol — keep both sides in sync
 
-The protocol is defined **twice**: once in `DiscordAPI/Protocol.cs` (C# DTOs + `Op` constants) and once in `DiscordBridge-node/src/protocol.ts` (TS discriminated union + `Op` table); `pipe-server.ts` consumes the latter for handler dispatch. Both sides also hold their own copy of `PROTOCOL_VERSION` (currently 1). When you add/change an op:
+Defined twice: `DiscordAPI/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS union + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match. When you add/change an op:
+1. Update `Protocol.cs`, `protocol.ts`, and dispatch in `pipe-server.ts`.
+2. On an incompatible wire change, bump the version in both. The Hello handshake fails fast on mismatch.
+3. Extend both `ProtocolTests.cs` and `tests/protocol.test.ts`.
 
-1. Update both `Protocol.cs` and `protocol.ts` (and the dispatch in `pipe-server.ts`).
-2. If the wire shape changes incompatibly, bump `ProtocolConstants.Version` in `Protocol.cs` and `PROTOCOL_VERSION` in `protocol.ts`. The Hello handshake fails fast if the two disagree, which is what catches a stale bridge living next to a new plugin (or vice versa).
-3. Add/extend both `ProtocolTests.cs` (C# side) and `tests/protocol.test.ts` (JS side).
+Framing:
+- Frame = little-endian uint32 length prefix + UTF-8 JSON, max 64 MiB.
+- Requests carry `reqId`; responses echo it.
+- `Log`/`BotReady`/`Disconnected` are server-pushed notifications (no `reqId`).
 
-Framing: little-endian uint32 length prefix, then UTF-8 JSON. Max frame is 64 MiB on both sides. Each request carries a `reqId`; the response echoes it. Notifications (`Log`, `BotReady`, `Disconnected`) have no `reqId` and are server-pushed.
+Two non-obvious bits to preserve on refactor:
+- `PipeClient.DispatchFrame` runs notification handlers on a thread-pool task, not the read loop — `BotReady` calls back into `SendAsync`, whose response only arrives once the read loop is back at `ReadFrameAsync`. Synchronous dispatch deadlocks.
+- `PipeClient.SendFrameAsync` does **not** `FlushAsync` — on named pipes that's `FlushFileBuffers`, which blocks until the peer drains. `WriteAsync` already buffers into the OS pipe.
 
-`PipeClient.DispatchFrame` deliberately runs notification handlers on a thread-pool task, **not** on the read loop. `BotReady` calls back into `SendAsync` (to fetch servers/channels), and that response can only arrive once the read loop is back at `ReadFrameAsync`. Synchronous invocation here deadlocks. There's a comment marking this; preserve it if you refactor.
+## Bridge runtime: bundling & externals
 
-`PipeClient.SendFrameAsync` deliberately does **not** call `FlushAsync` — on Windows named pipes that's `FlushFileBuffers`, which blocks until the peer drains. `WriteAsync` already pushes into the OS pipe buffer.
+Ship plain `node.exe bundle.js` (not Node SEA).
 
-## Bridge runtime: bundling, externals
-
-Why plain `node.exe bundle.js` and not Node SEA: SEA's `embedderRequire` only resolves built-in modules and the bundled main script — external requires like `@snazzah/davey` (native `.node`), `opusscript` (uses `__dirname`), and `libsodium-wrappers` (loads its own WASM) cannot be resolved from a sibling `node_modules/`. Plain `node.exe bundle.js` walks `node_modules` normally, so we ship that pattern as-is.
-
-`esbuild.config.mjs` `external:` list and `build.ps1` `$externals` list **must agree**. Anything marked external in esbuild has to be staged into `dist/node_modules/`, and anything staged has to be marked external (otherwise it's bundled and the staged copy is dead weight). The banner in `esbuild.config.mjs` injects the `dist/node_modules/` path into `NODE_PATH` so Node's CJS resolver finds the externals next to `node.exe`. If a bump breaks startup with `Cannot find module '<x>'`, audit both lists — npm hoists transitive deps and the externals list silently misses them.
-
-esbuild is configured with `conditions: ['node', 'require']` so conditional-exports packages (`@discordjs/voice` is the one that bites) resolve via their CJS path. Without this, esbuild bundles the `.mjs` flavour, which contains `createRequire(import.meta.url)` — but `import.meta` becomes `{}` in CJS output and `createRequire(undefined)` throws on startup. Don't drop that condition.
-
-Stdout discipline: `BRIDGE_READY pipe=<name>` is the **only** line the bridge writes to stdout that's expected. The plugin's `BridgeProcess.StartAndConnectAsync` reads stdout linewise with a 15 s deadline and treats anything else as a stderr-style log line. If you add stdout writes in node code, the handshake will hang until those happen to flush. Use `log.info`/`log.error` (writes to `DiscordBridge.log`) or stderr.
+- Native / WASM / `__dirname` deps can't be statically bundled, so they're `external` in `esbuild.config.mjs`; the ones actually loaded at runtime are staged into `dist/node_modules/` by `$externals` in `build.ps1` (the esbuild banner puts that dir on `NODE_PATH`). The two lists aren't identical — esbuild also externalizes optional discord.js/prism-media deps we never load, which aren't staged. `Cannot find module '<x>'` at startup = a runtime-required external didn't get staged (npm hoists transitive deps, so `$externals` can silently miss one).
+- esbuild uses `conditions: ['node', 'require']` so CJS exports resolve (`@discordjs/voice`'s `.mjs` flavour uses `createRequire(import.meta.url)`, which throws in CJS output). Don't drop it.
+- Stdout discipline: `BRIDGE_READY pipe=<name>` is the **only** expected stdout line; the handshake reads stdout linewise with a 15 s deadline. Use `log.info`/`log.error` (→ `DiscordBridge.log`) or stderr for everything else.
 
 ## Audio format constraint
 
-Discord voice in this project is hard-wired to 48 kHz / 16-bit signed / stereo PCM end-to-end. `DiscordClient.formatInfo`, the NAudio resampler in `SpeakFile`, the `SpeakPcmRequest` defaults, and `discord-host.ts` `StreamType.Raw` all assume this. If you need to support another sample rate, change all four — don't add a conversion step in the bridge.
+Discord voice is hard-wired to 48 kHz / 16-bit signed / stereo PCM end-to-end. It's pinned in several places — change all of them, don't add a one-off conversion step:
+- `DiscordClient.formatInfo` — C# TTS synthesis format.
+- the `48000/16/2` hard-coded in `DiscordClient`'s PCM sends, and the matching check in `pipe-server.ts`.
+- `discord-host.ts` — `TARGET_SAMPLE_RATE` + `resampleStereo16` (file decode/resample) and `StreamType.Raw`.
+- `effects.ts` `SR`.
 
-## Plugin packaging
+## Packaging & releases
 
-The release archive shipped to users contains a single top-level `ACT_DiscordTriggers/` folder holding: `ACT_DiscordTriggers.dll`, `node.exe`, `bundle.js`, `node_modules/`, plus `README.md`/`LICENSE`. `DiscordPlugin.FindBridgeDir()` looks for `node.exe` + `bundle.js` next to the plugin DLL first, then falls back to ACT's `AppData\Plugins\Discord\`. Users extract the zip into ACT's `Plugins\` directory, yielding `Plugins\ACT_DiscordTriggers\`, then Browse to the DLL inside it (ACT supports plugin subfolders; loose DLLs in ACT's root are discouraged).
+Packaging:
+- Release archive is one top-level `ACT_DiscordTriggers/` folder: DLL + `node.exe` + `bundle.js` + `node_modules/` + `README.md`/`LICENSE`.
+- `FindBridgeDir()` resolves the bridge next to the plugin DLL first, then ACT's `AppData\Plugins\Discord\`.
+- Costura.Fody merges net48 managed deps into the DLL — keep new managed deps Costura-merged so the plugin stays single-file.
 
-Releases are automated: `.github/workflows/release.yml` fires on a pushed `v*` tag, runs the full build/test, calls `build.ps1 -Zip`, renames the archive to `ACT_DiscordTriggers-<tag>.zip`, and publishes a GitHub Release (via `softprops/action-gh-release`) with install instructions + auto-generated notes. Tags containing `-` (e.g. `v2.0.0-pre.9`) are flagged as pre-releases. To cut a release: bump `AssemblyVersion`/`FileVersion`/`Version` in `ACT_DiscordTriggers.csproj` to match, then `git tag vX.Y.Z && git push origin vX.Y.Z`. `ci.yml` (on every push) runs the same build via `build.ps1 -Zip` and uploads the zip as a CI artifact for validation.
-
-The plugin uses Costura.Fody to merge net48 dependencies into the DLL — stick to it if you add managed deps to `ACT_DiscordTriggers/` so the plugin remains a single file.
+Releases:
+- Push a `v*` tag → `release.yml` runs the full build + `build.ps1 -Zip` and publishes a GitHub Release. Tags containing `-` → pre-release.
+- To cut one: bump `AssemblyVersion`/`FileVersion`/`Version` in `ACT_DiscordTriggers.csproj`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.

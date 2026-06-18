@@ -139,8 +139,9 @@ removes a constant low-grade annoyance. Applies regardless of TTS provider.
 ## Architecture notes (carry forward when implementing)
 
 - Audio is hard-wired to **48 kHz / 16-bit signed / stereo PCM** end-to-end
-  (`DiscordClient.formatInfo`, the NAudio resampler in `SpeakFile`,
-  `SpeakPcmRequest` defaults, `discord-host.ts` `StreamType.Raw`). New audio
+  (`DiscordClient.formatInfo`; the `48000/16/2` in `DiscordClient`'s PCM sends +
+  the `pipe-server.ts` check; `discord-host.ts` `TARGET_SAMPLE_RATE` /
+  `resampleStereo16` / `StreamType.Raw`; `effects.ts` `SR`). New audio
   sources must conform; don't add a conversion step in the bridge.
 - The wire protocol lives in **two places** — `DiscordAPI/Protocol.cs` and
   `DiscordBridge-node/src/protocol.ts` (+ dispatch in `pipe-server.ts`). Any new

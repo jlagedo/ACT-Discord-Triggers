@@ -139,7 +139,6 @@ Integration tests require the bridge to be built first (they spawn
 
 - [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework) (plugin + tests)
 - [Node.js 22+](https://nodejs.org/) (bridge runtime)
-- [NAudio](https://github.com/naudio/NAudio) (PCM resampling in plugin)
 - [discord.js](https://github.com/discordjs/discord.js) + [@discordjs/voice](https://github.com/discordjs/voice) (bridge)
 - [@snazzah/davey](https://github.com/snazzah/davey) (DAVE E2EE)
 
