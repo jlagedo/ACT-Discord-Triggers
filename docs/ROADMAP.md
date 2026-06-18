@@ -69,11 +69,18 @@ Requested on the ACT forums ("audio trigger rate limit"); ZDPS ships the pattern
 - Decide placement: queue on the plugin side (before base64) keeps the bridge
   simple and lets us drop work before synthesis.
 
-### 4. Extra audio formats (MP3 / OGG / etc.) 🔵 — Effort: S
+### 4. Extra audio formats (MP3 / OGG / etc.) 🔵 — Effort: S–M
 **Play more than `.wav`.**
 
-Open issue #67. We already resample WAV with NAudio; route other formats through
-`MediaFoundationReader` into the same resample-to-48k path. No bridge changes.
+Open issue #67. Decided approach is **bridge-side**: unify all formats —
+including WAV — on the `audio-decode` (audiojs) decoder, replacing the WAV-only
+`wav` path in `discord-host.ts`. This is Phase 1 of a larger audio rework that
+also tunes the Opus encoder and moves the internal pipeline to float32
+end-to-end. Full design + phased plan: **[docs/AUDIO-PIPELINE.md](AUDIO-PIPELINE.md)**.
+
+> Note: an earlier sketch routed formats plugin-side via NAudio
+> `MediaFoundationReader`. Superseded — the bridge already owns file decode, so
+> one decoder there covers every format and feeds the same 48k pipeline.
 
 ### 5. Selective routing — personal (local) vs raid-wide (Discord) 🔵 — Effort: M
 **Tag which triggers go to Discord vs stay on local speakers.**
