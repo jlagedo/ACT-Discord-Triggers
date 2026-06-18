@@ -48,12 +48,17 @@ Legend — **Effort**: S (days) · M (1–2 weeks) · L (multi-week / architectu
   `wav`-package path with `audio-decode` (audiojs) for all files. One code path,
   less bespoke code, consistent float output. Trade-off accepted: the common
   WAV case now goes through WASM instead of the lightweight `wav` reader.
-- **`audio-decode` (audiojs) is the decoder.** Most active (MIT, released within
-  days as of 2026-06; ~490k weekly downloads), pure JS/WASM — no native
-  bindings, no `ffmpeg.exe` to ship — and modular per-codec, so we pull only the
-  codecs we need. Fits the `node.exe bundle.js` + staged-externals packaging
-  model. (Runner-up: the `eshaz/wasm-audio-decoders` family, same lineage/
-  license, if bundle size ever forces cherry-picking.)
+- **`audio-decode` (audiojs) umbrella is the decoder.** Most active (MIT,
+  ~490k weekly downloads), pure JS/WASM — no native bindings, no `ffmpeg.exe`.
+  We call the umbrella `decode(buf)` directly: it auto-detects the container via
+  `audio-type` and dispatches to the right codec, so the bridge owns **no** sniff
+  /dispatch logic of its own. esbuild folds the package's static
+  `() => import('@audio/decode-*')` thunks into the bundle (WASM inlined), so it
+  bundles with **no externals/staging** (Branch A) — cost is bundle size (~3.6 →
+  9.0 MB, all ~13 codecs inlined). We gain mp3/ogg/flac/wav **plus** opus/m4a/
+  aac/webm/etc. for free. (Earlier draft used the four per-codec subpackages +
+  a hand-rolled `sniffCodec`; dropped in favor of letting the package own it.
+  Runner-up library: `eshaz/wasm-audio-decoders`, same lineage/license.)
 - **Final stage stays int16.** `StreamType.Raw` = `s16le`; Opus input is int16
   by definition. Float work is purely *internal*; we quantize **once** at the
   master-bus output.
@@ -92,20 +97,28 @@ single main thread and starves `_read`.
 
 ---
 
-## Phase 1 — Unified decode via `audio-decode` 🔵 — Effort: S–M
+## Phase 1 — Unified decode via `audio-decode` 🟡 — Effort: S–M
+
+> Implemented on `feature/audio-p1-formats`: `speakFile` calls the `audio-decode`
+> umbrella `decode(buf)` directly — it auto-detects the format (wav/mp3/ogg/flac
+> + opus/m4a/aac/…), so the bridge keeps no sniff/dispatch code. WASM is inlined,
+> so esbuild bundles it with **no** externals/staging (Branch A; bundle ~9 MB).
+> Warm-up (wav/mp3/oga/flac, concurrent) runs before `BRIDGE_READY`, so the build
+> self-test gates the codec WASM. Remaining: live-channel smoke test.
 
 **Goal:** accept MP3/OGG/FLAC/WAV/etc.; ship. Bridge-only.
 
 **Design**
 
-- Replace the `wav`-package decode in `speakFile` with `audio-decode`. Dispatch
-  all formats (including `.wav`) through it. Prefer content sniffing over
-  extension where practical (Triggernometry "All files" picks can be mislabeled).
-- `audio-decode` returns float32 planar at the file's native rate. Phase 1 adds a
-  **temporary float32 → int16 shim** so the existing int16 tail
-  (`upmixMonoToStereo16` → `resampleStereo16` → mixer) is reused unchanged. This
-  shim is explicitly throwaway — deleted in Phase 3.
-- **Downmix** >2 channels to stereo (current code only handles mono/stereo).
+- Replace the `wav`-package decode in `speakFile` with the `audio-decode`
+  umbrella `decode(buf)`. It owns format detection (`audio-type`) and dispatch,
+  so all formats — including `.wav` — flow through one call with no bridge-side
+  sniffing.
+- `decode()` returns float32 planar at the file's native rate. Phase 1 adds a
+  **temporary float32 → int16 shim** (which also downmixes mono/>2ch → stereo)
+  so the existing int16 tail (`shim → resampleStereo16 → mixer`) is reused
+  unchanged. The shim is explicitly throwaway — deleted in Phase 3 (the old
+  `upmixMonoToStereo16` helper was removed; the shim subsumes it).
 - Keep the graceful `{ok:false,error}` contract; extend messages
   ("unsupported / corrupt audio"). Warm the WASM decoder at init so the first
   trigger doesn't eat module-load latency.

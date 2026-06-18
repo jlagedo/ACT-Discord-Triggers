@@ -397,12 +397,12 @@ test('SpeakPcm: flags bit0 sets meta.fx on the host call', async () => {
 
 test('SpeakFile: host error echoed via SpeakResult', async () => {
     const { sock, host } = makeHarness();
-    host.nextSpeakFile({ ok: false, error: 'WAV must be 48 kHz / 16-bit / stereo PCM' });
-    sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 141, path: 'bad.wav' }));
+    host.nextSpeakFile({ ok: false, error: 'Unsupported or unrecognized audio format' });
+    sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 141, path: 'bad.dat' }));
     const [frame] = await waitForFrames(sock, 1);
     assert.equal(frame!['op'], Op.SpeakResult);
     assert.equal(frame!['ok'], false);
-    assert.match(String(frame!['error']), /48 kHz/);
+    assert.match(String(frame!['error']), /Unsupported or unrecognized audio format/);
 });
 
 test('SetNormalization: forwards enabled + targetDb to host; result ok=true', async () => {

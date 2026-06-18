@@ -1,7 +1,5 @@
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import type { ReadStream } from 'node:fs';
 import {
     Client,
     GatewayIntentBits,
@@ -20,9 +18,9 @@ import {
     type VoiceConnection,
     type AudioPlayer,
 } from '@discordjs/voice';
-import { Reader as WavReader, type WavFormat } from 'wav';
-
 import * as log from './file-log.js';
+import decode from 'audio-decode';
+import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
 import { applyRandomEffect } from './effects.js';
 import { normalizePcm16, DEFAULT_NORMALIZE_ENABLED, DEFAULT_NORMALIZE_TARGET_DB } from './normalize.js';
 import { PcmMixer } from './pcm-mixer.js';
@@ -32,20 +30,10 @@ import { WavCache } from './wav-cache.js';
 
 const TARGET_SAMPLE_RATE = 48000;
 const TARGET_BITS = 16;
-const WAV_FORMAT_PCM = 1;
 
-// Mono → stereo by sample duplication (L = R = source). 16-bit signed LE.
-// Exported for unit tests; not part of the public Host interface.
-export function upmixMonoToStereo16(monoPcm: Buffer): Buffer {
-    const sampleCount = monoPcm.length >>> 1;
-    const out = Buffer.alloc(sampleCount * 4);
-    for (let i = 0; i < sampleCount; i++) {
-        const s = monoPcm.readInt16LE(i * 2);
-        out.writeInt16LE(s, i * 4);
-        out.writeInt16LE(s, i * 4 + 2);
-    }
-    return out;
-}
+// Bound peak memory before decode: a compressed file expands roughly ~10x once
+// turned into float PCM, so reject pathological input sizes up front.
+const MAX_DECODE_INPUT_BYTES = 64 * 1024 * 1024;
 
 // Linear-interpolation sample rate conversion for 16-bit signed LE stereo.
 // Quality is fine for short trigger sounds going through Opus at 48k; do not
@@ -71,6 +59,53 @@ export function resampleStereo16(pcm: Buffer, srcRate: number, dstRate: number):
         out.writeInt16LE(Math.round(r1 + (r2 - r1) * frac), i * 4 + 2);
     }
     return out;
+}
+
+// Read + decode a complete audio file (wav/mp3/ogg/flac) to the bridge's
+// 48k / 16-bit / stereo interleaved PCM. Throws with a user-facing message on
+// unreadable / unrecognized / undecodable input. Factored out of speakFile so
+// fixture tests can exercise decode without a Discord connection, and so Phase
+// 3 (float32 end-to-end) has a single clean swap point.
+export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
+    let input: Buffer;
+    try {
+        input = await readFile(path);
+    } catch (e) {
+        throw new Error(`Cannot read file: ${log.errMsg(e)}`);
+    }
+
+    // Self-enforce the memory bound here, not just in speakFile: this function is
+    // exported (fixture tests, the Phase 3 swap point) and decode expands input
+    // ~10x into float PCM, so any caller must be protected from a pathological
+    // file. speakFile additionally checks the stat size to fail before reading.
+    if (input.length > MAX_DECODE_INPUT_BYTES) {
+        throw new Error(`Audio file too large: ${input.length} bytes (max ${MAX_DECODE_INPUT_BYTES})`);
+    }
+
+    // audio-decode auto-detects the container and decodes to planar Float32;
+    // it throws on an unknown/unsupported format or a corrupt stream.
+    let channelData: Float32Array[];
+    let sampleRate: number;
+    try {
+        ({ channelData, sampleRate } = await decode(input));
+    } catch (e) {
+        throw new Error(`Failed to decode audio: ${log.errMsg(e)}`);
+    }
+
+    // A corrupt/truncated-but-detected stream comes back empty (audio-decode
+    // returns channelData:[] , sampleRate:0) rather than throwing — treat that
+    // as an empty decode before validating the rate.
+    const stereoSrc = planarFloatToInterleavedInt16Stereo_PHASE1_SHIM(channelData);
+    if (stereoSrc.length === 0) {
+        throw new Error('Decoded audio is empty');
+    }
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
+        throw new Error(`Decoded audio has an invalid sample rate (${sampleRate} Hz)`);
+    }
+
+    const finalPcm = resampleStereo16(stereoSrc, sampleRate, TARGET_SAMPLE_RATE);
+    log.info(`SpeakFile decoded: srcRate=${sampleRate} ch=${channelData.length} outBytes=${finalPcm.length}`);
+    return finalPcm;
 }
 
 export class DiscordHost implements Host {
@@ -360,9 +395,11 @@ export class DiscordHost implements Host {
         // stat first so we can short-circuit on a cache hit and let mtime
         // invalidate stale entries when the user edits the file in place.
         let mtimeMs: number;
+        let size: number;
         try {
             const st = await stat(path);
             mtimeMs = st.mtimeMs;
+            size = st.size;
         } catch (e) {
             return { ok: false, error: `Cannot read file: ${log.errMsg(e)}` };
         }
@@ -373,60 +410,19 @@ export class DiscordHost implements Host {
             return this._enqueue('SpeakFile', cachedPcm, meta);
         }
 
-        let fileStream: ReadStream;
-        try {
-            fileStream = createReadStream(path);
-        } catch (e) {
-            return { ok: false, error: `Cannot open file: ${log.errMsg(e)}` };
+        if (size > MAX_DECODE_INPUT_BYTES) {
+            return { ok: false, error: `Audio file too large: ${size} bytes (max ${MAX_DECODE_INPUT_BYTES})` };
         }
 
-        const reader = new WavReader();
-
+        let finalPcm: Buffer;
         try {
-            const decoded = await new Promise<{ format: WavFormat; pcm: Buffer }>((resolve, reject) => {
-                const chunks: Buffer[] = [];
-                let captured: WavFormat | null = null;
-                reader.once('format', (fmt) => { captured = fmt; });
-                reader.on('data', (c: Buffer) => { chunks.push(c); });
-                reader.once('end', () => {
-                    if (!captured) reject(new Error('WAV ended before fmt header was parsed'));
-                    else resolve({ format: captured, pcm: Buffer.concat(chunks) });
-                });
-                reader.once('error', reject);
-                fileStream.once('error', reject);
-                fileStream.pipe(reader);
-            });
-
-            const { format, pcm } = decoded;
-
-            // Hard rejects: things we can't convert without a heavier toolchain.
-            // 16-bit signed PCM, mono or stereo, covers ~all real-world trigger WAVs
-            // (CD audio, Audacity defaults, in-game effect exports). For 24/32-bit or
-            // compressed WAV the user can re-export once.
-            if (format.audioFormat !== WAV_FORMAT_PCM) {
-                return { ok: false, error: `WAV must be uncompressed PCM (audioFormat=${format.audioFormat})` };
-            }
-            if (format.bitDepth !== TARGET_BITS) {
-                return { ok: false, error: `WAV must be 16-bit (got ${format.bitDepth}-bit). Re-export from Audacity as "16-bit PCM".` };
-            }
-            if (format.channels !== 1 && format.channels !== 2) {
-                return { ok: false, error: `WAV must be mono or stereo (got ${format.channels} channels)` };
-            }
-            if (!Number.isFinite(format.sampleRate) || format.sampleRate <= 0 || format.sampleRate > 192000) {
-                return { ok: false, error: `WAV sample rate ${format.sampleRate} is out of supported range (1-192000 Hz)` };
-            }
-
-            // Channel + sample-rate conversion to the format the bridge feeds Discord.
-            const stereoPcm = format.channels === 1 ? upmixMonoToStereo16(pcm) : pcm;
-            const finalPcm = resampleStereo16(stereoPcm, format.sampleRate, TARGET_SAMPLE_RATE);
-
-            this.wavCache.set(path, mtimeMs, finalPcm);
-            return this._enqueue('SpeakFile', finalPcm, meta);
+            finalPcm = await decodeFileToFinalPcm(path);
         } catch (e) {
-            try { fileStream.destroy(); } catch { /* ignore */ }
-            try { reader.destroy(); } catch { /* ignore */ }
-            return { ok: false, error: `Failed to read WAV: ${log.errMsg(e)}` };
+            return { ok: false, error: log.errMsg(e) };
         }
+
+        this.wavCache.set(path, mtimeMs, finalPcm);
+        return this._enqueue('SpeakFile', finalPcm, meta);
     }
 
     private _startPingLog(): void {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
-import { upmixMonoToStereo16, resampleStereo16 } from '../src/discord-host.js';
+import { resampleStereo16 } from '../src/discord-host.js';
 
 function int16Buf(samples: number[]): Buffer {
     const b = Buffer.alloc(samples.length * 2);
@@ -16,16 +16,6 @@ function readStereo(b: Buffer): Array<[number, number]> {
     }
     return out;
 }
-
-test('upmixMonoToStereo16: each mono sample becomes (s, s) stereo pair', () => {
-    const mono = int16Buf([100, -200, 30000, -30000]);
-    const stereo = upmixMonoToStereo16(mono);
-    assert.deepEqual(readStereo(stereo), [[100, 100], [-200, -200], [30000, 30000], [-30000, -30000]]);
-});
-
-test('upmixMonoToStereo16: empty input → empty output', () => {
-    assert.equal(upmixMonoToStereo16(Buffer.alloc(0)).length, 0);
-});
 
 test('resampleStereo16: srcRate == dstRate returns input verbatim', () => {
     const pcm = int16Buf([1, 2, 3, 4, 5, 6, 7, 8]); // 4 stereo frames

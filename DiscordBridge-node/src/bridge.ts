@@ -2,6 +2,7 @@ import * as net from 'node:net';
 import * as log from './file-log.js';
 import { DiscordHost } from './discord-host.js';
 import { PipeServer } from './pipe-server.js';
+import { warmupDecoders } from './audio-decode.js';
 
 async function main(): Promise<void> {
     log.init();
@@ -56,6 +57,13 @@ async function main(): Promise<void> {
             resolve();
         });
     });
+
+    // Instantiate the audio decoders' WASM before announcing readiness. This
+    // moves codec compile cost off the first trigger's hot path, and — because
+    // it runs before BRIDGE_READY — makes the build self-test a real packaging
+    // gate: an unresolvable codec WASM throws here, so no BRIDGE_READY is
+    // printed and build.ps1 fails loudly instead of shipping a broken bundle.
+    await warmupDecoders();
 
     // Plugin's BridgeProcess.cs scans stdout for line starting with "BRIDGE_READY".
     process.stdout.write(`BRIDGE_READY pipe=${pipeName}\n`);
