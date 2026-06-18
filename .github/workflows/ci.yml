@@ -16,7 +16,7 @@ jobs:
       shell: powershell
       run: |
         New-Item -ItemType Directory packages
-        Invoke-WebRequest https://advancedcombattracker.com/includes/page-download.php?id=57 -OutFile packages/act.zip
+        Invoke-WebRequest https://github.com/EQAditu/AdvancedCombatTracker/releases/latest/download/ACTv3.zip -OutFile packages/act.zip
         Expand-Archive -Path packages/act.zip -DestinationPath packages
     - name: Install bridge npm deps
       working-directory: DiscordBridge-node
