@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace DiscordBridge.Protocol {
 
     public static class ProtocolConstants {
-        public const int Version = 3;
+        public const int Version = 4;
     }
 
     public static class Op {
@@ -30,6 +30,8 @@ namespace DiscordBridge.Protocol {
         public const string SpeakResult = "SpeakResult";
         public const string SetNormalization = "SetNormalization";
         public const string SetNormalizationResult = "SetNormalizationResult";
+        public const string SetAudioQuality = "SetAudioQuality";
+        public const string SetAudioQualityResult = "SetAudioQualityResult";
         public const string Shutdown = "Shutdown";
 
         public const string BotReady = "BotReady";
@@ -153,6 +155,15 @@ namespace DiscordBridge.Protocol {
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("enabled")] public bool Enabled { get; set; }
         [JsonPropertyName("targetDb")] public int TargetDb { get; set; }
+    }
+
+    // Opus encoder bitrate config. Global, not per-trigger: the bridge stores it
+    // and applies it to the live encoder. Bitrate is bits/sec; prism's setBitrate
+    // clamps to [16000, 128000]. UI tiers: Low 48000 / Medium 96000 / High 128000.
+    public class SetAudioQualityRequest : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetAudioQuality;
+        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
+        [JsonPropertyName("bitrate")] public int Bitrate { get; set; }
     }
 
     public class OkResponse {

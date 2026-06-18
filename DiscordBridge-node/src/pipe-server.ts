@@ -16,6 +16,7 @@ import {
     type ReqId,
 } from './protocol.js';
 import { DEFAULT_NORMALIZE_TARGET_DB } from './normalize.js';
+import { DEFAULT_AUDIO_BITRATE } from './audio-quality.js';
 import pkg from '../package.json' with { type: 'json' };
 
 const BRIDGE_VERSION: string = pkg.version;
@@ -47,6 +48,7 @@ export interface Host {
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult;
     speakFile(path: string, meta?: SpeakMeta): Promise<OpResult>;
     setNormalization(enabled: boolean, targetDb: number): void;
+    setAudioQuality(bitrate: number): void;
 }
 
 interface IncomingMessage {
@@ -248,6 +250,12 @@ export class PipeServer {
                     const targetDb = asNumber(parsed['targetDb']) ?? DEFAULT_NORMALIZE_TARGET_DB;
                     this.host.setNormalization(enabled, targetDb);
                     await this._sendFrame({ op: Op.SetNormalizationResult, reqId, ok: true, error: '' });
+                    break;
+                }
+                case Op.SetAudioQuality: {
+                    const bitrate = asNumber(parsed['bitrate']) ?? DEFAULT_AUDIO_BITRATE;
+                    this.host.setAudioQuality(bitrate);
+                    await this._sendFrame({ op: Op.SetAudioQualityResult, reqId, ok: true, error: '' });
                     break;
                 }
                 case Op.Shutdown: {

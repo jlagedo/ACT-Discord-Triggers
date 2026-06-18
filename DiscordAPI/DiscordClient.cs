@@ -43,6 +43,17 @@ namespace DiscordAPI {
             set { normalizeTargetDb = value < -60 ? -60 : (value > 0 ? 0 : value); }
         }
 
+        // Opus encoder bitrate (bits/sec), pushed to the bridge like the
+        // normalization config. The UI maps its Low/Medium/High tiers to a
+        // bitrate; the bridge applies it via setBitrate. prism clamps to
+        // [16000, 128000] — mirror that here. Default 96000 matches the bridge's
+        // DEFAULT_AUDIO_BITRATE so behavior is consistent before the first push.
+        private static int audioQualityBitrate = 96000;
+        public static int AudioQualityBitrate {
+            get { return audioQualityBitrate; }
+            set { audioQualityBitrate = value < 16000 ? 16000 : (value > 128000 ? 128000 : value); }
+        }
+
         private static bool RollEffect() {
             if (!RandomEffectsEnabled) return false;
             int chance = randomEffectChance;
@@ -142,6 +153,8 @@ namespace DiscordAPI {
 
                 // Push current auto-leveling config so a fresh bridge matches the UI.
                 await PushNormalizationAsync(localClient);
+                // Same for the Opus bitrate tier.
+                await PushAudioQualityAsync(localClient);
             } catch (Exception ex) {
                 Log?.Invoke("Init error: " + ex.Message);
             } finally {
@@ -246,6 +259,24 @@ namespace DiscordAPI {
                     TimeSpan.FromSeconds(5));
             } catch (Exception ex) {
                 Log?.Invoke("SetNormalization failed: " + ex.Message);
+            }
+        }
+
+        // Push Opus bitrate to the bridge. Called on connect (fresh client) and
+        // from the UI when the user changes the audio-quality tier. No-op when
+        // not connected — connect re-pushes the current value anyway.
+        public static Task SetAudioQualityAsync() {
+            return PushAudioQualityAsync(pipeClient);
+        }
+
+        private static async Task PushAudioQualityAsync(PipeClient pc) {
+            if (pc == null) return;
+            try {
+                await pc.SendAsync<OkResponse>(
+                    new SetAudioQualityRequest { Bitrate = AudioQualityBitrate },
+                    TimeSpan.FromSeconds(5));
+            } catch (Exception ex) {
+                Log?.Invoke("SetAudioQuality failed: " + ex.Message);
             }
         }
 
