@@ -49,7 +49,7 @@ jobs:
         run: Rename-Item ACT_DiscordTriggers.zip "ACT_DiscordTriggers-${{ github.ref_name }}.zip"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ACT_DiscordTriggers-*.zip
           generate_release_notes: true
