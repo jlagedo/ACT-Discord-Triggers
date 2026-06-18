@@ -30,7 +30,7 @@ jobs:
     - name: Run C# tests (net48)
       run: dotnet test Tests/Tests.csproj -c Release --nologo
     - name: Upload Artifact
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: ACT_DiscordTriggers-Prerelease
         path: ACT_DiscordTriggers.zip
