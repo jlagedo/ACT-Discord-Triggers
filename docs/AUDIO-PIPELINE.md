@@ -97,14 +97,16 @@ single main thread and starves `_read`.
 
 ---
 
-## Phase 1 — Unified decode via `audio-decode` 🟡 — Effort: S–M
+## Phase 1 — Unified decode via `audio-decode` 🟢 — Effort: S–M
 
-> Implemented on `feature/audio-p1-formats`: `speakFile` calls the `audio-decode`
-> umbrella `decode(buf)` directly — it auto-detects the format (wav/mp3/ogg/flac
-> + opus/m4a/aac/…), so the bridge keeps no sniff/dispatch code. WASM is inlined,
-> so esbuild bundles it with **no** externals/staging (Branch A; bundle ~9 MB).
-> Warm-up (wav/mp3/oga/flac, concurrent) runs before `BRIDGE_READY`, so the build
-> self-test gates the codec WASM. Remaining: live-channel smoke test.
+> **Done** — shipped on `feature/audio-p1-formats` (merged to `master`).
+> `speakFile` calls the `audio-decode` umbrella `decode(buf)` directly — it
+> auto-detects the format (wav/mp3/ogg/flac + opus/m4a/aac/…), so the bridge
+> keeps no sniff/dispatch code. WASM is inlined, so esbuild bundles it with
+> **no** externals/staging (Branch A; bundle ~9 MB). Warm-up (wav/mp3/oga/flac,
+> concurrent) runs before `BRIDGE_READY`, so the build self-test gates the codec
+> WASM. A temporary float32 → int16 shim (also downmixing to stereo) feeds the
+> existing int16 tail; it's removed in Phase 3.
 
 **Goal:** accept MP3/OGG/FLAC/WAV/etc.; ship. Bridge-only.
 
