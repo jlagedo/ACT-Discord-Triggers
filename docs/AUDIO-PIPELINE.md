@@ -88,7 +88,7 @@ audio-decode → Float32 (native rate, N channels)
    → sum voices in Float32 (headroom ~-6 dBFS)
    → master bus: soft/true-peak limiter
    → TPDF dither → quantize s16le      ← the ONLY quantization in the chain
-   → Opus (tuned: bitrate / signal=music / complexity)
+   → Opus (tuned: bitrate — signal/complexity not reachable via prism, see Phase 2)
 ```
 
 Heavy decode/DSP has a documented relief valve: offload to a `worker_thread`
@@ -146,7 +146,29 @@ single main thread and starves `_read`.
 
 ---
 
-## Phase 2 — Opus quality config 🔵 — Effort: S–M
+## Phase 2 — Opus quality config 🟢 — Effort: S–M
+
+> **Done** — shipped on `feature/audio-quality-bitrate` (merged to `master`,
+> released as `v2.1.0-pre.1`). The spike confirmed prism exposes **only**
+> `resource.encoder.setBitrate` through a supported public API; Opus **signal
+> type and complexity are not reachable** without reaching into opusscript
+> internals, so we shipped **bitrate-only** (the design's documented degrade
+> path) and put the others out of scope (see `src/audio-quality.ts`).
+> What shipped:
+> - New `SetAudioQuality` op (bitrate, bits/sec) in `Protocol.cs` + `protocol.ts`
+>   + `pipe-server` dispatch; **`PROTOCOL_VERSION` bumped 3 → 4**; both test
+>     suites extended (`ProtocolTests.cs`, `protocol.test.ts`, `pipe-server.test.ts`).
+> - Config pushed C# → bridge exactly like `SetNormalization`: on (re)join after
+>   `createAudioResource` (holding `resource.encoder`) and re-applied on change.
+> - UI dropdown **Low / Medium / High → 48k / 96k / 128k**, default Medium; an
+>   inline warning on High (may exceed an unboosted channel's cap). Bitrate is
+>   clamped to prism's `[16000, 128000]` on both sides; default `96000` matches
+>   between C# and the bridge.
+>
+> Deviation from the original sketch: presets are bitrate-only and named
+> Low/Medium/High (not Voice/Balanced/High with signal=music), and the clamp is
+> prism's `[16000, 128000]` rather than Discord's per-channel 64–384 kbps cap
+> (Discord still enforces its own channel cap on top).
 
 **Goal:** expose an audio-quality setting in the plugin UI; ship. Highest
 audible ROI per effort — but mostly *plumbing*, not audio.
@@ -215,15 +237,17 @@ format work (Phase 1) being in place to be worth it.
 |------|-------|------------|
 | WASM externals break the bundle / self-test | 1, 3b | Sync both externals lists; keep `BRIDGE_READY` assert; import only needed codecs |
 | Linear resampler audible on 44.1k MP3 | 1 | QA on 44.1k; pull 3b forward if needed |
-| Opus signal/complexity CTL not reachable via prism | 2 | Spike before UI; degrade to bitrate-only if blocked |
+| ~~Opus signal/complexity CTL not reachable via prism~~ (materialized) | 2 | ✅ Resolved: not reachable via prism's public API; shipped **bitrate-only** as planned |
 | Heavy per-fire DSP blocks the single thread → mixer underrun | 3 | Keep render fast; `worker_thread` offload as relief valve |
 | Float voices 2× memory vs int16 | 3 | Recompute `MAX_QUEUED_BYTES`; clips are short |
 | Protocol drift (C# vs TS) | 2 | Update both sides + version bump + tests, per CLAUDE.md |
 
 ## Open questions
 
-- Exact `@discordjs/voice` / prism-media API to set Opus **signal type** and
-  **complexity** (not just bitrate). Resolve in the Phase 2 spike.
+- ~~Exact `@discordjs/voice` / prism-media API to set Opus **signal type** and
+  **complexity** (not just bitrate).~~ **Resolved (Phase 2):** prism exposes only
+  `setBitrate` publicly; signal/complexity would require reaching into opusscript
+  internals, so they're out of scope and Phase 2 shipped bitrate-only.
 - Resampler library choice for 3b (soxr vs libsamplerate WASM): quality vs
   bundle size vs maintenance.
 - WAV unification perf: confirm routing the common WAV case through WASM decode
