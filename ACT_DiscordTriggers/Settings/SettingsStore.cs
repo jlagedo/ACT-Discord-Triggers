@@ -61,7 +61,7 @@ namespace ACT_DiscordTriggers.Settings {
           if (bak != null && LegacyConfigImporter.IsLegacy(bak)) {
             Log("Primary config unreadable; recovering from " + Path.GetFileName(LegacyBackupPath));
             var recovered = LegacyConfigImporter.Import(bak);
-            Save(recovered);
+            TrySave(recovered); // rewrite is best-effort; the in-memory result is still good
             return recovered;
           }
         }
@@ -74,7 +74,7 @@ namespace ACT_DiscordTriggers.Settings {
             + " and migrating to schema v" + PluginSettings.CurrentSchemaVersion + ".");
         BackupLegacyOnce();
         var imported = LegacyConfigImporter.Import(doc);
-        Save(imported); // rewrite in the new format, in place
+        TrySave(imported); // rewrite in the new format, in place (best-effort; retries on next save)
         Log("Legacy settings migrated successfully (schema v" + imported.SchemaVersion + ").");
         return imported;
       }
@@ -82,6 +82,13 @@ namespace ACT_DiscordTriggers.Settings {
       if (IsNewFormat(doc)) {
         try {
           int fromVersion = SettingsMigrator.ReadSchemaVersion(doc.Root);
+          if (fromVersion > PluginSettings.CurrentSchemaVersion) {
+            // Newer file than this build understands (the user downgraded the plugin).
+            // We read what we can, but the NEXT Save rewrites at v{Current}, dropping any
+            // field this build doesn't know about. Read-only here, so nothing is lost yet.
+            Log("Config is schema v" + fromVersion + " but this build is v" + PluginSettings.CurrentSchemaVersion
+                + "; newer-only settings will be dropped on the next save.");
+          }
           bool changed = migrator.MigrateInPlace(doc);
           var settings = Deserialize(doc);
           if (settings == null) return new PluginSettings();
@@ -127,6 +134,15 @@ namespace ACT_DiscordTriggers.Settings {
         File.Replace(tmp, configPath, null);
       else
         File.Move(tmp, configPath);
+    }
+
+    // Best-effort rewrite used on the load path. Load() must never throw (callers run it
+    // unguarded during plugin init), but Save() does real IO that can fail (locked file,
+    // read-only Config dir). Swallow the failure: the in-memory settings are already good
+    // and the next interactive Save will retry.
+    private void TrySave(PluginSettings settings) {
+      try { Save(settings); }
+      catch (Exception ex) { Log("Could not rewrite config (will retry on next save): " + ex.Message); }
     }
 
     private void BackupLegacyOnce() {

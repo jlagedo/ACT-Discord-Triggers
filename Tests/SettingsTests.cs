@@ -178,6 +178,25 @@ namespace ActDiscordTriggers.Tests {
       }
     }
 
+    [Fact]
+    public void Load_LegacyFile_WhenRewriteFails_DoesNotThrow_AndReturnsImported() {
+      using (var t = new TempDir()) {
+        var path = t.File("ACT_DiscordTriggers.config.xml");
+        File.WriteAllText(path, LegacyXml, new UTF8Encoding(false));
+
+        // Force Save() to fail: occupy the temp path Save writes to with a DIRECTORY,
+        // so creating the temp FILE throws. Load must swallow it and still return the
+        // imported settings (callers run Load unguarded during plugin init).
+        Directory.CreateDirectory(path + ".tmp");
+
+        var s = StoreAt(path).Load();
+
+        Assert.Equal("SECRET-TOKEN-123", s.BotToken);   // imported despite the failed rewrite
+        Assert.Equal(2, s.AudioQualityIndex);
+        Assert.True(File.Exists(path + ".legacy-v0.bak")); // backup still taken
+      }
+    }
+
     // ---- Migration framework ---------------------------------------------
 
     private sealed class FakeV1ToV2 : ISettingsMigration {
