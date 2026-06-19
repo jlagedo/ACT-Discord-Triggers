@@ -1,0 +1,79 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Xml.Linq;
+
+namespace ACT_DiscordTriggers.Settings.Migrations {
+  /// <summary>
+  /// Upgrades a new-format settings document (root <c>&lt;DiscordTriggersSettings&gt;</c>)
+  /// from whatever <c>SchemaVersion</c> it carries up to
+  /// <see cref="PluginSettings.CurrentSchemaVersion"/>, by applying a chain of
+  /// <see cref="ISettingsMigration"/> steps in order.
+  ///
+  /// The registry is currently EMPTY because v1 is the baseline POCO format — there
+  /// is nothing to upgrade yet. The framework exists so future schema changes are
+  /// trivial:
+  ///   1. Bump <see cref="PluginSettings.CurrentSchemaVersion"/> to 2.
+  ///   2. Add a class implementing <see cref="ISettingsMigration"/> with
+  ///      <c>FromVersion = 1</c> that mutates the XML DOM.
+  ///   3. Add it to <see cref="DefaultMigrations"/>.
+  ///
+  /// NOTE: the legacy ACT control-keyed format (root <c>&lt;Config&gt;</c>) is NOT a
+  /// step in this chain — it is a different file structure entirely and is converted
+  /// once by <see cref="LegacyConfigImporter"/> as a bootstrap into v1. This chain
+  /// only handles new-format v1 → v2 → ... upgrades.
+  /// </summary>
+  public class SettingsMigrator {
+    private readonly List<ISettingsMigration> migrations;
+    private readonly Action<string> log;
+
+    /// <summary>The shipping set of migrations (empty at v1).</summary>
+    public static IReadOnlyList<ISettingsMigration> DefaultMigrations { get; } =
+      new List<ISettingsMigration>();
+
+    public SettingsMigrator() : this(DefaultMigrations, null) { }
+
+    /// <summary>Test seam: supply a custom migration set.</summary>
+    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations) : this(migrations, null) { }
+
+    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations, Action<string> log) {
+      this.migrations = migrations?.OrderBy(m => m.FromVersion).ToList()
+                        ?? new List<ISettingsMigration>();
+      this.log = log;
+    }
+
+    /// <summary>
+    /// Apply migrations in place until the document reaches <paramref name="targetVersion"/>
+    /// (defaults to the current schema version). Returns true if anything changed
+    /// (so the caller can re-save). Throws if a version gap has no registered step.
+    /// </summary>
+    public bool MigrateInPlace(XDocument doc, int targetVersion = PluginSettings.CurrentSchemaVersion) {
+      var root = doc?.Root;
+      if (root == null) return false;
+
+      bool changed = false;
+      int version = ReadVersion(root);
+
+      while (version < targetVersion) {
+        var step = migrations.FirstOrDefault(m => m.FromVersion == version);
+        if (step == null) {
+          throw new SettingsMigrationException(
+            $"No migration registered from schema version {version} to {version + 1}.");
+        }
+        log?.Invoke($"Applying settings migration v{version} -> v{version + 1}.");
+        step.Apply(root);
+        version++;
+        root.SetAttributeValue("SchemaVersion", version);
+        changed = true;
+      }
+
+      return changed;
+    }
+
+    private static int ReadVersion(XElement root) {
+      var attr = root.Attribute("SchemaVersion");
+      // A new-format file with no/garbled version attribute is treated as v1.
+      return attr != null && int.TryParse(attr.Value, out var v) ? v : 1;
+    }
+  }
+}

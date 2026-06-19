@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows.Threading;
 using System.Drawing;
 using System.Diagnostics;
+using ACT_DiscordTriggers.Settings;
 
 namespace ACT_DiscordTriggers {
   public class DiscordPlugin : UserControl, IActPluginV1 {
@@ -588,8 +589,8 @@ namespace ACT_DiscordTriggers {
     FormActMain.PlayTtsDelegate oldTTS;
     FormActMain.PlaySoundDelegate oldSound;
     Label lblStatus;
-    string settingsFile;
-    SettingsSerializer xmlSettings;
+    PluginSettings settings;
+    SettingsStore settingsStore;
     private CheckBox chkAutoConnect;
     private Button discordConnectbtn;
     private TrackBar sliderTTSSpeed;
@@ -681,24 +682,26 @@ namespace ACT_DiscordTriggers {
           configName = pluginName;
       } catch (Exception) { }
 
-      //Load Settings file
-      settingsFile = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, $"Config\\{configName}.config.xml");
-      xmlSettings = new SettingsSerializer(this);
-      LoadSettings();
-      ApplyFxSettings();
-      ApplyNormalizationSettings();
-      ApplyAudioQualitySettings();
-
       //Locate the out-of-process Discord bridge so DiscordClient knows where to spawn it
       string bridgeDir = FindBridgeDir();
       DiscordClient.SetBridgePath(bridgeDir);
 
       //Always-on diagnostics: capture both plugin- and bridge-side logs into one
-      //unified file the user can simply email. Encapsulated — no UI, no toggle.
+      //unified file the user can simply email. Initialised BEFORE loading settings so
+      //the one-time config migration is captured in the diagnostics file (the log
+      //sink drops anything written before Init).
       try {
         DiagnosticsLog.Init(ActGlobals.oFormActMain.AppDataFolder.FullName, bridgeDir, PluginVersion());
         Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath);
       } catch { }
+
+      //Load Settings (own POCO + XML store; migrates the legacy ACT format on first run)
+      string configDir = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Config");
+      settingsStore = new SettingsStore(configDir, $"{configName}.config.xml", Log);
+      LoadSettings();
+      ApplyFxSettings();
+      ApplyNormalizationSettings();
+      ApplyAudioQualitySettings();
 
       //Discord Bot Stuff
       DiscordClient.BotReady += BotReady;
@@ -1166,51 +1169,65 @@ namespace ACT_DiscordTriggers {
     }
 
     public void LoadSettings() {
-      xmlSettings.AddControlSetting(txtToken.Name, txtToken);
-      xmlSettings.AddControlSetting(sliderTTSVol.Name, sliderTTSVol);
-      xmlSettings.AddControlSetting(sliderTTSSpeed.Name, sliderTTSSpeed);
-      xmlSettings.AddControlSetting(chkAutoConnect.Name, chkAutoConnect);
-      xmlSettings.AddControlSetting(txtBotStatus.Name, txtBotStatus);
-      xmlSettings.AddControlSetting(chkRandomFx.Name, chkRandomFx);
-      xmlSettings.AddControlSetting(sliderFxChance.Name, sliderFxChance);
-      xmlSettings.AddControlSetting(chkNormalize.Name, chkNormalize);
-      xmlSettings.AddControlSetting(sliderNormalizeTarget.Name, sliderNormalizeTarget);
-      xmlSettings.AddControlSetting(cmbAudioQuality.Name, cmbAudioQuality);
-      if (File.Exists(settingsFile)) {
-        try {
-          using (var fs = new FileStream(settingsFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-          using (var xReader = new XmlTextReader(fs)) {
-            while (xReader.Read())
-              if (xReader.NodeType == XmlNodeType.Element)
-                if (xReader.LocalName == "SettingsSerializer")
-                  xmlSettings.ImportFromXml(xReader);
-          }
-        } catch (Exception ex) {
-          lblStatus.Text = "Error loading settings: " + ex.Message;
-        }
-      }
+      settings = settingsStore.Load();
+      ApplySettingsToControls();
     }
 
     public bool SaveSettings() {
       try {
-        using (var fs = new FileStream(settingsFile, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-        using (var xWriter = new XmlTextWriter(fs, Encoding.UTF8)) {
-          xWriter.Formatting = Formatting.Indented;
-          xWriter.Indentation = 1;
-          xWriter.IndentChar = '\t';
-          xWriter.WriteStartDocument(true);
-          xWriter.WriteStartElement("Config");
-          xWriter.WriteStartElement("SettingsSerializer");
-          xmlSettings.ExportToXml(xWriter);
-          xWriter.WriteEndElement();
-          xWriter.WriteEndElement();
-          xWriter.WriteEndDocument();
-        }
+        CaptureControlsToSettings();
+        settingsStore.Save(settings);
       } catch (Exception ex) {
         if (lblStatus != null) lblStatus.Text = "Error saving settings: " + ex.Message;
         return false;
       }
       return true;
+    }
+
+    // Copy the loaded settings model onto the WinForms controls. Sliders are clamped
+    // to their configured range; the TTS voice is matched by name with a fall-back to
+    // the first installed voice (the saved voice may not exist on this machine).
+    private void ApplySettingsToControls() {
+      txtToken.Text = settings.BotToken;
+      txtBotStatus.Text = settings.BotStatus;
+      chkAutoConnect.Checked = settings.AutoConnect;
+
+      sliderTTSVol.Value = Clamp(settings.TtsVolume, sliderTTSVol.Minimum, sliderTTSVol.Maximum);
+      sliderTTSSpeed.Value = Clamp(settings.TtsSpeed, sliderTTSSpeed.Minimum, sliderTTSSpeed.Maximum);
+
+      int voiceIdx = cmbTTS.FindStringExact(settings.TtsVoice ?? "");
+      if (voiceIdx >= 0) cmbTTS.SelectedIndex = voiceIdx;
+      else if (cmbTTS.Items.Count > 0) cmbTTS.SelectedIndex = 0;
+
+      chkRandomFx.Checked = settings.RandomFx;
+      sliderFxChance.Value = Clamp(settings.FxChance, sliderFxChance.Minimum, sliderFxChance.Maximum);
+      chkNormalize.Checked = settings.Normalize;
+      sliderNormalizeTarget.Value = Clamp(settings.NormalizeTarget, sliderNormalizeTarget.Minimum, sliderNormalizeTarget.Maximum);
+
+      if (cmbAudioQuality.Items.Count > 0)
+        cmbAudioQuality.SelectedIndex = Clamp(settings.AudioQualityIndex, 0, cmbAudioQuality.Items.Count - 1);
+    }
+
+    // Read the WinForms controls back into the settings model before saving.
+    private void CaptureControlsToSettings() {
+      settings.BotToken = txtToken.Text;
+      settings.BotStatus = txtBotStatus.Text;
+      settings.AutoConnect = chkAutoConnect.Checked;
+
+      settings.TtsVoice = cmbTTS.SelectedItem?.ToString() ?? "";
+      settings.TtsVolume = sliderTTSVol.Value;
+      settings.TtsSpeed = sliderTTSSpeed.Value;
+
+      settings.RandomFx = chkRandomFx.Checked;
+      settings.FxChance = sliderFxChance.Value;
+      settings.Normalize = chkNormalize.Checked;
+      settings.NormalizeTarget = sliderNormalizeTarget.Value;
+      settings.AudioQualityIndex = cmbAudioQuality.SelectedIndex;
+    }
+
+    private static int Clamp(int value, int min, int max) {
+      if (max < min) return min;
+      return value < min ? min : (value > max ? max : value);
     }
     #endregion
   }

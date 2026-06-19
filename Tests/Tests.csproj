@@ -27,5 +27,13 @@
     <Compile Include="..\DiscordAPI\DiagnosticsLog.cs" Link="DiagnosticsLog.cs" />
     <Compile Include="..\DiscordAPI\PipeClient.cs" Link="PipeClient.cs" />
     <Compile Include="..\DiscordAPI\BridgeProcess.cs" Link="BridgeProcess.cs" />
+    <!-- Settings POCO + migration framework: pure C# (no WinForms/ACT), linked in
+         so they can be unit-tested without referencing the plugin assembly. -->
+    <Compile Include="..\ACT_DiscordTriggers\Settings\PluginSettings.cs" Link="Settings\PluginSettings.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Settings\SettingsStore.cs" Link="Settings\SettingsStore.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Settings\LegacyConfigImporter.cs" Link="Settings\LegacyConfigImporter.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\ISettingsMigration.cs" Link="Settings\Migrations\ISettingsMigration.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrator.cs" Link="Settings\Migrations\SettingsMigrator.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrationException.cs" Link="Settings\Migrations\SettingsMigrationException.cs" />
   </ItemGroup>
 </Project>
