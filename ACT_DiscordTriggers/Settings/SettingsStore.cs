@@ -26,6 +26,10 @@ namespace ACT_DiscordTriggers.Settings {
 
     private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
 
+    // XmlSerializer construction generates and compiles an assembly per type — expensive,
+    // so build it once and reuse (it's thread-safe once constructed).
+    private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(PluginSettings));
+
     private readonly string configPath;
     private readonly Action<string> log;
     private readonly SettingsMigrator migrator;
@@ -77,7 +81,7 @@ namespace ACT_DiscordTriggers.Settings {
 
       if (IsNewFormat(doc)) {
         try {
-          int fromVersion = ReadSchemaVersion(doc);
+          int fromVersion = SettingsMigrator.ReadSchemaVersion(doc.Root);
           bool changed = migrator.MigrateInPlace(doc);
           var settings = Deserialize(doc);
           if (settings == null) return new PluginSettings();
@@ -106,7 +110,6 @@ namespace ACT_DiscordTriggers.Settings {
       // Crash-safe: serialize to a temp file, then atomically swap it over the target
       // so an interrupted write can never leave a half-written config behind.
       string tmp = configPath + TempSuffix;
-      var serializer = new XmlSerializer(typeof(PluginSettings));
       var ns = new XmlSerializerNamespaces();
       ns.Add("", ""); // strip xsi/xsd noise
 
@@ -117,7 +120,7 @@ namespace ACT_DiscordTriggers.Settings {
       };
       using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
       using (var writer = XmlWriter.Create(fs, xmlSettings)) {
-        serializer.Serialize(writer, settings, ns);
+        Serializer.Serialize(writer, settings, ns);
       }
 
       if (File.Exists(configPath))
@@ -138,11 +141,6 @@ namespace ACT_DiscordTriggers.Settings {
     private static bool IsNewFormat(XDocument doc)
       => doc?.Root != null && doc.Root.Name.LocalName == "DiscordTriggersSettings";
 
-    private static int ReadSchemaVersion(XDocument doc) {
-      var attr = doc?.Root?.Attribute("SchemaVersion");
-      return attr != null && int.TryParse(attr.Value, out var v) ? v : 1;
-    }
-
     private XDocument TryParse(string path) {
       try {
         using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -153,9 +151,8 @@ namespace ACT_DiscordTriggers.Settings {
     }
 
     private static PluginSettings Deserialize(XDocument doc) {
-      var serializer = new XmlSerializer(typeof(PluginSettings));
       using (var reader = doc.CreateReader())
-        return serializer.Deserialize(reader) as PluginSettings;
+        return Serializer.Deserialize(reader) as PluginSettings;
     }
 
     private void Log(string message) {

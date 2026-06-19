@@ -31,12 +31,10 @@ namespace ACT_DiscordTriggers.Settings.Migrations {
     public static IReadOnlyList<ISettingsMigration> DefaultMigrations { get; } =
       new List<ISettingsMigration>();
 
-    public SettingsMigrator() : this(DefaultMigrations, null) { }
+    public SettingsMigrator() : this(DefaultMigrations) { }
 
-    /// <summary>Test seam: supply a custom migration set.</summary>
-    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations) : this(migrations, null) { }
-
-    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations, Action<string> log) {
+    /// <summary>Test seam: supply a custom migration set (and optional log sink).</summary>
+    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations, Action<string> log = null) {
       this.migrations = migrations?.OrderBy(m => m.FromVersion).ToList()
                         ?? new List<ISettingsMigration>();
       this.log = log;
@@ -52,7 +50,7 @@ namespace ACT_DiscordTriggers.Settings.Migrations {
       if (root == null) return false;
 
       bool changed = false;
-      int version = ReadVersion(root);
+      int version = ReadSchemaVersion(root);
 
       while (version < targetVersion) {
         var step = migrations.FirstOrDefault(m => m.FromVersion == version);
@@ -70,9 +68,13 @@ namespace ACT_DiscordTriggers.Settings.Migrations {
       return changed;
     }
 
-    private static int ReadVersion(XElement root) {
-      var attr = root.Attribute("SchemaVersion");
-      // A new-format file with no/garbled version attribute is treated as v1.
+    /// <summary>
+    /// Read the <c>SchemaVersion</c> attribute off a new-format document root.
+    /// A root with no/garbled version attribute is treated as v1. Shared so
+    /// <see cref="SettingsStore"/> reports the same "from" version it migrates from.
+    /// </summary>
+    public static int ReadSchemaVersion(XElement root) {
+      var attr = root?.Attribute("SchemaVersion");
       return attr != null && int.TryParse(attr.Value, out var v) ? v : 1;
     }
   }
