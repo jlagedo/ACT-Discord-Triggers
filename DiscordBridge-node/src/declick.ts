@@ -26,11 +26,7 @@ export const FADE_OUT_FRAMES = 240; // 5 ms at 48 kHz
 // interleaved s16le stereo buffer. Returns a NEW buffer; never mutates the input
 // (callers pass WavCache-shared buffers, so in-place editing would corrupt the
 // cache). Only the ramp regions are rewritten — the middle is copied verbatim.
-export function declick(
-    pcm: Buffer,
-    fadeInFrames = FADE_IN_FRAMES,
-    fadeOutFrames = FADE_OUT_FRAMES,
-): Buffer {
+export function declick(pcm: Buffer): Buffer {
     // Align to whole stereo frames; a stray trailing byte (malformed upstream)
     // would otherwise let the ramp loop read one byte past the end. Matches the
     // mixer's odd-byte tolerance.
@@ -41,8 +37,8 @@ export function declick(
 
     // Clamp each ramp to the clip length so a sub-fade-length blip still ramps
     // (over its whole self) instead of indexing past the buffer.
-    const fadeInLen = Math.min(fadeInFrames, totalFrames);
-    const fadeOutLen = Math.min(fadeOutFrames, totalFrames);
+    const fadeInLen = Math.min(FADE_IN_FRAMES, totalFrames);
+    const fadeOutLen = Math.min(FADE_OUT_FRAMES, totalFrames);
     const fadeOutStart = totalFrames - fadeOutLen;
 
     for (let f = 0; f < totalFrames; f++) {
