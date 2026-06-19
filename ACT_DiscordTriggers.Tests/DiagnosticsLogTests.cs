@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using ACT_DiscordTriggers.Ipc;
+using ACT_DiscordTriggers.Core.Ipc;
 using Xunit;
 
 namespace ACT_DiscordTriggers.Tests {

@@ -1,8 +1,8 @@
 using System;
 using System.Threading.Tasks;
-using ACT_DiscordTriggers.Settings;
+using ACT_DiscordTriggers.Core.Settings;
 
-namespace ACT_DiscordTriggers.Ipc {
+namespace ACT_DiscordTriggers.Core.Ipc {
   // The slice of the Discord/bridge facade the ViewModel uses. Exists so the VM
   // depends on an interface (not the static DiscordClient): the production adapter
   // DiscordClientService forwards to DiscordClient, while tests inject a fake.

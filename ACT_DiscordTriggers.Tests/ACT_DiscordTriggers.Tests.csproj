@@ -14,31 +14,13 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <!-- The plugin references System.Text.Json 10.0.9 on net48 already; match
-         it here so the linked source files use the same JSON types. -->
-    <PackageReference Include="System.Text.Json" Version="10.0.9" />
-    <!-- The linked ViewModel uses CommunityToolkit.Mvvm; the source generators must
-         run over it here too. Match the plugin's version. -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
   <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="..\ACT_DiscordTriggers\Protocol\Protocol.cs" Link="Protocol.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Ipc\DiagnosticsLog.cs" Link="DiagnosticsLog.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Ipc\PipeClient.cs" Link="PipeClient.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Ipc\BridgeProcess.cs" Link="BridgeProcess.cs" />
-    <!-- Settings POCO + migration framework: pure C# (no WinForms/ACT), linked in
-         so they can be unit-tested without referencing the plugin assembly. -->
-    <Compile Include="..\ACT_DiscordTriggers\Settings\PluginSettings.cs" Link="Settings\PluginSettings.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Settings\SettingsStore.cs" Link="Settings\SettingsStore.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Settings\LegacyConfigImporter.cs" Link="Settings\LegacyConfigImporter.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\ISettingsMigration.cs" Link="Settings\Migrations\ISettingsMigration.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrator.cs" Link="Settings\Migrations\SettingsMigrator.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrationException.cs" Link="Settings\Migrations\SettingsMigrationException.cs" />
-    <!-- ViewModel layer: UI-agnostic (no WinForms/ACT), linked in so it can be
-         unit-tested with a fake IDiscordService. -->
-    <Compile Include="..\ACT_DiscordTriggers\Ipc\IDiscordService.cs" Link="Ipc\IDiscordService.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\ViewModels\LogEntry.cs" Link="ViewModels\LogEntry.cs" />
-    <Compile Include="..\ACT_DiscordTriggers\ViewModels\DiscordTriggersViewModel.cs" Link="ViewModels\DiscordTriggersViewModel.cs" />
+    <!-- The production code under test (Protocol/Settings/Ipc/ViewModels) lives in Core,
+         which flows its System.Text.Json + CommunityToolkit.Mvvm deps through transitively.
+         Core's InternalsVisibleTo grants access to the internal members the tests use
+         (DiagnosticsLog.MergeInterleave, the internal PipeClient/BridgeProcess types). -->
+    <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ACT_DiscordTriggers.Protocol {
+namespace ACT_DiscordTriggers.Core.Protocol {
 
     public static class ProtocolConstants {
         public const int Version = 5;

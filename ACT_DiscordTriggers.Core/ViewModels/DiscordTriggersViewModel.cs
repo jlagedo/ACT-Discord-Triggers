@@ -4,10 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using ACT_DiscordTriggers.Ipc;
-using ACT_DiscordTriggers.Settings;
+using ACT_DiscordTriggers.Core.Ipc;
+using ACT_DiscordTriggers.Core.Settings;
 
-namespace ACT_DiscordTriggers.ViewModels {
+namespace ACT_DiscordTriggers.Core.ViewModels {
   // UI-agnostic ViewModel: no WinForms, no ACT. Holds the settings-backed state,
   // commands, and Discord wiring the WinForms view used to own; the eventual WPF
   // view binds to the same instance. Constructed on the UI thread so it can capture

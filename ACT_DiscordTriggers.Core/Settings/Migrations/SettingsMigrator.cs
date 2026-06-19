@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace ACT_DiscordTriggers.Settings.Migrations {
+namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// <summary>
   /// Upgrades a new-format settings document (root <c>&lt;DiscordTriggersSettings&gt;</c>)
   /// from whatever <c>SchemaVersion</c> it carries up to

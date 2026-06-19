@@ -1,4 +1,4 @@
-using ACT_DiscordTriggers.Protocol;
+using ACT_DiscordTriggers.Core.Protocol;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -9,7 +9,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ACT_DiscordTriggers.Ipc {
+namespace ACT_DiscordTriggers.Core.Ipc {
     internal class PipeClient : IDisposable {
         private readonly NamedPipeClientStream pipe;
         private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> pending

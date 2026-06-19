@@ -4,9 +4,9 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Serialization;
-using ACT_DiscordTriggers.Settings.Migrations;
+using ACT_DiscordTriggers.Core.Settings.Migrations;
 
-namespace ACT_DiscordTriggers.Settings {
+namespace ACT_DiscordTriggers.Core.Settings {
   /// <summary>
   /// Loads and saves <see cref="PluginSettings"/> as XML, owning format detection,
   /// legacy migration, schema upgrades, and crash-safe writes.

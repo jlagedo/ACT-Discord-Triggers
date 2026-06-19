@@ -1,5 +1,5 @@
-using ACT_DiscordTriggers.Settings;
-using ACT_DiscordTriggers.Protocol;
+using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Protocol;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;

@@ -14,11 +14,13 @@
   <ItemGroup>
     <PackageReference Include="Costura.Fody" Version="6.2.0" PrivateAssets="all" />
     <PackageReference Include="Fody" Version="6.9.3" PrivateAssets="all" />
-    <!-- Costura merges these (and their transitive net48 deps) into the plugin DLL. -->
-    <PackageReference Include="System.Text.Json" Version="10.0.9" />
-    <!-- MVVM base (ObservableObject + source-generated [ObservableProperty]/[RelayCommand])
-         for the ViewModel layer. Zero-dep, netstandard2.0 -> net48; Costura-merged. -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- UI-agnostic code (Protocol/Settings/Ipc/ViewModels). Costura merges Core.dll and
+         its transitive deps (CommunityToolkit.Mvvm, System.Text.Json closure) into the
+         single plugin DLL, so no type that derives from a merged dependency is defined in
+         the assembly ACT reflection-scans. -->
+    <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Advanced Combat Tracker">

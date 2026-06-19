@@ -1,9 +1,10 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 using Advanced_Combat_Tracker;
-using ACT_DiscordTriggers.Ipc;
+using ACT_DiscordTriggers.Core.Ipc;
 
 namespace ACT_DiscordTriggers {
   // The IActPluginV1 that ACT loads. Owns plugin-identity and lifecycle concerns
@@ -14,12 +15,20 @@ namespace ACT_DiscordTriggers {
     private DiscordTriggersView view;
     private Label lblStatus;
 
+    // NoInlining across the lifecycle methods keeps the JIT from hoisting a body that
+    // touches a Costura-merged Core type into anything that could run before the resolver
+    // is attached. The constructor below is what actually guarantees ordering; this is the
+    // belt-and-suspenders that mirrors the Hojoring entry-plugin pattern.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public DiscordTriggersPlugin() {
-      // Register as early as possible so sibling-DLL resolution is in place before
-      // the view (and its dependencies) load.
+      // Force Costura's resolver to attach now (its module initializer runs on first
+      // managed execution; calling this makes it deterministic) and register our own
+      // sibling-DLL fallback, both before the view and its Core dependencies load.
+      CosturaUtility.Initialize();
       AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText) {
       lblStatus = pluginStatusText;
 
@@ -54,6 +63,7 @@ namespace ACT_DiscordTriggers {
       lblStatus.Text = "Plugin Started";
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public async void DeInitPlugin() {
       if (view != null)
         await view.OnPluginDeInitAsync();

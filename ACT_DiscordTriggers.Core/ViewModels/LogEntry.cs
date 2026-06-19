@@ -1,6 +1,6 @@
 using System;
 
-namespace ACT_DiscordTriggers.ViewModels {
+namespace ACT_DiscordTriggers.Core.ViewModels {
   // One line in the diagnostics/UI log. Immutable; rendered by the view (and later
   // a WPF ItemsControl) from the timestamp + message.
   public sealed class LogEntry {

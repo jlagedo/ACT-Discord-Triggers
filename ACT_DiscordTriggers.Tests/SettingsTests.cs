@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Xml.Linq;
-using ACT_DiscordTriggers.Settings;
-using ACT_DiscordTriggers.Settings.Migrations;
+using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Settings.Migrations;
 using Xunit;
 
 namespace ACT_DiscordTriggers.Tests {

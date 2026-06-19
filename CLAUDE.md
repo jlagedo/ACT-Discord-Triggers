@@ -35,13 +35,17 @@ DLL --spawns "node.exe bundle.js <pipe>"--> node bridge (discord.js + @snazzah/d
 DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 ```
 
-- **`ACT_DiscordTriggers/`** (net48): the single production project — UI, settings, IPC, protocol all in one assembly. Organized by folder:
-  - root: `DiscordPlugin.cs` — UI, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`. TTS is synthesized in-process via `System.Speech` and sent to the bridge as 48k/16/stereo PCM; sound files are sent by path — the bridge decodes + resamples them.
-  - `Ipc/` (namespace `ACT_DiscordTriggers.Ipc`): IPC client. `DiscordClient` is the static facade. `BridgeProcess.StartAndConnectAsync` spawns node, scans stdout for `BRIDGE_READY`, then connects the pipe. Also `PipeClient`, `DiagnosticsLog`.
-  - `Protocol/` (namespace `ACT_DiscordTriggers.Protocol`): `Protocol.cs` — the C# wire-protocol DTOs + `Op`.
-  - `Settings/` (namespace `ACT_DiscordTriggers.Settings`): `PluginSettings` POCO + versioned migration framework.
+The production code is two net48 assemblies — the thin assembly ACT scans, and a UI-agnostic core that Costura merges into it:
+
+- **`ACT_DiscordTriggers/`** (net48): the entry assembly ACT loads, hosting `Costura.Fody`, WinForms, and the ACT reference. It only *defines* GAC-based types — `DiscordTriggersPlugin : IActPluginV1` (lifecycle, bridge discovery, diagnostics, assembly-resolve fallback), `DiscordTriggersView : UserControl` (UI, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`; TTS synthesized in-process via `System.Speech` → 48k/16/stereo PCM, sound files sent by path), and `ObservableBindingList<T> : BindingList<T>` (one-way `ObservableCollection`→`BindingList` adapter for WinForms combo binding).
+  - **Load-time invariant:** no type *defined in this assembly* may derive from / implement a Costura-merged dependency. ACT loads via `Assembly.LoadFrom` + `GetTypes()`, which resolves every defined type's base/interfaces *before* any managed code of ours runs (so before Costura's module-init resolver attaches). A merged-dep base type here = `GetTypes()` throws = "Invalid Plugin". That's why the MVVM ViewModel lives in Core, not here. `DiscordTriggersPlugin`'s ctor calls `CosturaUtility.Initialize()` and the lifecycle methods carry `[MethodImpl(NoInlining)]` to keep resolver attach deterministic.
+- **`ACT_DiscordTriggers.Core/`** (net48 class lib; no Costura/WinForms/ACT): all UI-agnostic code, referencing `CommunityToolkit.Mvvm` + `System.Text.Json` (PackageReference) and `System.Speech` (GAC). Costura merges Core.dll + those deps into the single plugin DLL (they ride in transitively + copy-local), so the closure stays isolated from other ACT plugins. Organized by folder:
+  - `Ipc/` (`ACT_DiscordTriggers.Core.Ipc`): `DiscordClient` (static facade), `DiscordClientService` (`IDiscordService` impl), `BridgeProcess.StartAndConnectAsync` (spawns node, scans stdout for `BRIDGE_READY`, connects the pipe), `PipeClient`, `DiagnosticsLog`.
+  - `Protocol/` (`ACT_DiscordTriggers.Core.Protocol`): `Protocol.cs` — the C# wire-protocol DTOs + `Op`.
+  - `Settings/` (`ACT_DiscordTriggers.Core.Settings`): `PluginSettings` POCO + versioned migration framework.
+  - `ViewModels/` (`ACT_DiscordTriggers.Core.ViewModels`): `DiscordTriggersViewModel : ObservableObject` (the sole CommunityToolkit-derived type), `LogEntry`.
 - **`DiscordBridge-node/src/`**: the bridge (TS, esbuild→`dist/bundle.js`). `bridge.ts` owns lifecycle + pipe server. `pipe-server.ts` does framing/dispatch. `discord-host.ts` wraps discord.js + `@discordjs/voice` (`StreamType.Raw`). `protocol.ts` mirrors `Protocol/Protocol.cs`.
-- **`ACT_DiscordTriggers.Tests/`** (net48, xUnit; namespace `ACT_DiscordTriggers.Tests`): protocol/IPC/lifecycle unit tests + `BridgeIntegrationTests` (real bridge). Links the plugin's pure-C# sources (`Protocol/`, `Ipc/`, `Settings/`) via `<Compile Include>` rather than a `ProjectReference` (which would pull in the ACT exe + WinForms + Costura); moving those files means updating the linked paths in `ACT_DiscordTriggers.Tests.csproj`.
+- **`ACT_DiscordTriggers.Tests/`** (net48, xUnit; namespace `ACT_DiscordTriggers.Tests`): protocol/IPC/lifecycle unit tests + `BridgeIntegrationTests` (real bridge). `<ProjectReference>`s `ACT_DiscordTriggers.Core` directly (Core has no WinForms/ACT/Costura, so the reference is clean); Core's `<InternalsVisibleTo Include="ACT_DiscordTriggers.Tests" />` grants the internal-member access the tests need (`DiagnosticsLog.MergeInterleave`, the internal `PipeClient`/`BridgeProcess` types).
 
 Lifecycle — no launcher / Job Object:
 - Plugin shutdown: `process.Kill()`s node directly.
@@ -50,7 +54,7 @@ Lifecycle — no launcher / Job Object:
 
 ## Wire protocol — keep both sides in sync
 
-Defined twice: `ACT_DiscordTriggers/Protocol/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS types + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match.
+Defined twice: `ACT_DiscordTriggers.Core/Protocol/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS types + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match.
 
 Three message kinds:
 - **Commands** — .NET→bridge request/response. The reply is always the single `Result` envelope `{ op:"Result", reqId, ok, error, data? }`; C# correlates by `reqId` alone (no per-op `*Result` ops). Query payloads ride in `data` (`BridgeResponse<TData>` on the C# side).

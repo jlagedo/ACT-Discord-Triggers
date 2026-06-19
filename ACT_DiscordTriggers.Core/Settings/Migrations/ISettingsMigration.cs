@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace ACT_DiscordTriggers.Settings.Migrations {
+namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// <summary>
   /// One step that upgrades a new-format settings document from
   /// <see cref="FromVersion"/> to <c>FromVersion + 1</c>.

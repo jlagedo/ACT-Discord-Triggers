@@ -1,6 +1,6 @@
-using ACT_DiscordTriggers.Settings;
-using ACT_DiscordTriggers.Ipc;
-using ACT_DiscordTriggers.Protocol;
+using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Ipc;
+using ACT_DiscordTriggers.Core.Protocol;
 using System;
 using System.IO;
 using System.Threading.Tasks;

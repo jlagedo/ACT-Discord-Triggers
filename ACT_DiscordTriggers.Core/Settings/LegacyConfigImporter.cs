@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace ACT_DiscordTriggers.Settings {
+namespace ACT_DiscordTriggers.Core.Settings {
   /// <summary>
   /// One-time bootstrap that converts the legacy ACT <c>SettingsSerializer</c> format
   /// (the pre-schema "v0") into a <see cref="PluginSettings"/> (schema v1).

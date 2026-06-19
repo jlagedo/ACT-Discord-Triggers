@@ -5,12 +5,12 @@ using System.Windows.Forms;
 using Advanced_Combat_Tracker;
 using System.IO;
 using System.Reflection;
-using ACT_DiscordTriggers.Ipc;
-using ACT_DiscordTriggers.ViewModels;
+using ACT_DiscordTriggers.Core.Ipc;
+using ACT_DiscordTriggers.Core.ViewModels;
 using System.Threading.Tasks;
 using System.Drawing;
 using System.Diagnostics;
-using ACT_DiscordTriggers.Settings;
+using ACT_DiscordTriggers.Core.Settings;
 
 namespace ACT_DiscordTriggers {
   public class DiscordTriggersView : UserControl {
@@ -698,12 +698,12 @@ namespace ACT_DiscordTriggers {
       txtToken.DataBindings.Add("Text", vm, nameof(vm.BotToken), false, DataSourceUpdateMode.OnPropertyChanged);
       txtBotStatus.DataBindings.Add("Text", vm, nameof(vm.BotStatus), false, DataSourceUpdateMode.OnPropertyChanged);
       chkAutoConnect.DataBindings.Add("Checked", vm, nameof(vm.AutoConnect), false, DataSourceUpdateMode.OnPropertyChanged);
-      sliderTTSVol.DataBindings.Add("Value", vm, nameof(vm.TtsVolume), false, DataSourceUpdateMode.OnPropertyChanged);
-      sliderTTSSpeed.DataBindings.Add("Value", vm, nameof(vm.TtsSpeed), false, DataSourceUpdateMode.OnPropertyChanged);
+      BindSliderValue(sliderTTSVol, nameof(vm.TtsVolume));
+      BindSliderValue(sliderTTSSpeed, nameof(vm.TtsSpeed));
       chkRandomFx.DataBindings.Add("Checked", vm, nameof(vm.RandomFx), false, DataSourceUpdateMode.OnPropertyChanged);
-      sliderFxChance.DataBindings.Add("Value", vm, nameof(vm.FxChance), false, DataSourceUpdateMode.OnPropertyChanged);
+      BindSliderValue(sliderFxChance, nameof(vm.FxChance));
       chkNormalize.DataBindings.Add("Checked", vm, nameof(vm.Normalize), false, DataSourceUpdateMode.OnPropertyChanged);
-      sliderNormalizeTarget.DataBindings.Add("Value", vm, nameof(vm.NormalizeTarget), false, DataSourceUpdateMode.OnPropertyChanged);
+      BindSliderValue(sliderNormalizeTarget, nameof(vm.NormalizeTarget));
       cmbAudioQuality.DataBindings.Add("SelectedIndex", vm, nameof(vm.AudioQualityIndex), false, DataSourceUpdateMode.OnPropertyChanged);
 
       lblFxChance.DataBindings.Add("Text", vm, nameof(vm.FxChanceLabel), false, DataSourceUpdateMode.Never);
@@ -721,6 +721,21 @@ namespace ACT_DiscordTriggers {
       channelsBinding = new ObservableBindingList<string>(vm.Channels);
       cmbChan.DataSource = channelsBinding;
       cmbChan.DataBindings.Add("SelectedItem", vm, nameof(vm.SelectedChannel), true, DataSourceUpdateMode.OnPropertyChanged);
+    }
+
+    // WinForms' PropertyManager re-pushes EVERY binding on the VM whenever ANY of its
+    // properties raises PropertyChanged (e.g. CanJoin flipping on BotReady). A TrackBar
+    // throws ArgumentOutOfRangeException if a pushed value falls outside [Minimum, Maximum]
+    // (sliderNormalizeTarget floors at 12), so bind through the modern formatting pipeline
+    // (formattingEnabled: true) and coerce the value into the slider's range in Format — the
+    // cascade then can't crash a constrained slider on a transient/out-of-range push.
+    private void BindSliderValue(TrackBar slider, string propertyName) {
+      var binding = new Binding("Value", vm, propertyName, true, DataSourceUpdateMode.OnPropertyChanged);
+      binding.Format += (s, e) => {
+        if (e.Value is int v)
+          e.Value = Math.Max(slider.Minimum, Math.Min(slider.Maximum, v));
+      };
+      slider.DataBindings.Add(binding);
     }
 
     private void OnJoinedChannel() {

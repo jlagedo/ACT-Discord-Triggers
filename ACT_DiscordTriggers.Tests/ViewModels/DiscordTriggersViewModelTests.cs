@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using ACT_DiscordTriggers.Ipc;
-using ACT_DiscordTriggers.Settings;
-using ACT_DiscordTriggers.ViewModels;
+using ACT_DiscordTriggers.Core.Ipc;
+using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.ViewModels;
 using Xunit;
 
 namespace ACT_DiscordTriggers.Tests {

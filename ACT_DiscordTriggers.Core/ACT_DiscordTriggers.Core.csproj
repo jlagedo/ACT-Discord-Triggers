@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <DebugType>portable</DebugType>
+    <AssemblyVersion>2.0.2.0</AssemblyVersion>
+    <FileVersion>2.0.2.0</FileVersion>
+    <Version>2.0.2</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="10.0.9" />
+    <!-- MVVM base (ObservableObject + source-generated [ObservableProperty]/[RelayCommand])
+         for the ViewModel layer. Zero-dep, netstandard2.0 -> net48. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- DiscordClient synthesizes TTS via System.Speech (a GAC framework assembly). -->
+    <Reference Include="System.Speech" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The test project exercises internal members (DiagnosticsLog.MergeInterleave,
+         the internal PipeClient/BridgeProcess types) it previously reached by
+         source-linking these files. -->
+    <InternalsVisibleTo Include="ACT_DiscordTriggers.Tests" />
+  </ItemGroup>
+</Project>

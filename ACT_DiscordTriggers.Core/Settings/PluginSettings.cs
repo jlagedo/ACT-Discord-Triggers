@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
-namespace ACT_DiscordTriggers.Settings {
+namespace ACT_DiscordTriggers.Core.Settings {
   /// <summary>
   /// The plugin's settings model — the single source of truth for everything that
   /// used to live directly on the WinForms controls (persisted via ACT's

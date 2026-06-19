@@ -1,4 +1,4 @@
-using ACT_DiscordTriggers.Ipc;
+using ACT_DiscordTriggers.Core.Ipc;
 using System;
 using System.IO;
 using System.Threading.Tasks;

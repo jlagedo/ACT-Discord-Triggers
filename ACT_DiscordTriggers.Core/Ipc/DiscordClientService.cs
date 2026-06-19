@@ -2,9 +2,9 @@ using System;
 using System.Linq;
 using System.Speech.Synthesis;
 using System.Threading.Tasks;
-using ACT_DiscordTriggers.Settings;
+using ACT_DiscordTriggers.Core.Settings;
 
-namespace ACT_DiscordTriggers.Ipc {
+namespace ACT_DiscordTriggers.Core.Ipc {
   // Production IDiscordService: forwards to the static DiscordClient facade and
   // bridges its static BotReady/Log events to instance events. Not source-linked
   // into tests (it pulls in DiscordClient + System.Speech).
