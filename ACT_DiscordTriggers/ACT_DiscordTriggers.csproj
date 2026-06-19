@@ -32,13 +32,13 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Update="DiscordPlugin.cs">
+    <Compile Update="DiscordTriggersView.cs">
       <SubType>UserControl</SubType>
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Update="DiscordPlugin.resx">
-      <DependentUpon>DiscordPlugin.cs</DependentUpon>
+    <EmbeddedResource Update="DiscordTriggersView.resx">
+      <DependentUpon>DiscordTriggersView.cs</DependentUpon>
     </EmbeddedResource>
     <!-- Mascot shown on the Information tab. LogicalName pins the manifest
          resource name so GetManifestResourceStream lookup is path-independent. -->

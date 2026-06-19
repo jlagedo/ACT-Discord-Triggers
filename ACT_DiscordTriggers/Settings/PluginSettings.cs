@@ -8,7 +8,7 @@ namespace ACT_DiscordTriggers.Settings {
   /// <c>SettingsSerializer</c>). It is a plain POCO with no WinForms / ACT
   /// dependency so it can be unit-tested and, later, bound from a WPF UI.
   ///
-  /// Defaults below MUST match the control defaults in <c>DiscordPlugin.InitializeComponent</c>
+  /// Defaults below MUST match the control defaults in <c>DiscordTriggersView.InitializeComponent</c>
   /// so a fresh install behaves exactly as it did before this refactor.
   /// </summary>
   [XmlRoot("DiscordTriggersSettings")]

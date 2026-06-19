@@ -14,7 +14,7 @@ using System.Diagnostics;
 using ACT_DiscordTriggers.Settings;
 
 namespace ACT_DiscordTriggers {
-  public class DiscordPlugin : UserControl, IActPluginV1 {
+  public class DiscordTriggersView : UserControl {
     #region Designer Created Code (Avoid editing)
     /// <summary>
     /// Required designer variable.
@@ -547,7 +547,7 @@ namespace ACT_DiscordTriggers {
       this.pnlLog.Size = new System.Drawing.Size(759, 210);
       this.pnlLog.TabIndex = 2;
       //
-      // DiscordPlugin
+      // DiscordTriggersView
       //
       this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
       this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
@@ -557,7 +557,7 @@ namespace ACT_DiscordTriggers {
       this.Controls.Add(this.lstNav);
       this.Controls.Add(this.pnlLog);
       this.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-      this.Name = "DiscordPlugin";
+      this.Name = "DiscordTriggersView";
       this.Size = new System.Drawing.Size(759, 730);
       ((System.ComponentModel.ISupportInitialize)(this.sliderTTSSpeed)).EndInit();
       ((System.ComponentModel.ISupportInitialize)(this.sliderTTSVol)).EndInit();
@@ -588,7 +588,6 @@ namespace ACT_DiscordTriggers {
     #region Init Variables
     FormActMain.PlayTtsDelegate oldTTS;
     FormActMain.PlaySoundDelegate oldSound;
-    Label lblStatus;
     PluginSettings settings;
     SettingsStore settingsStore;
     private CheckBox chkAutoConnect;
@@ -642,9 +641,8 @@ namespace ACT_DiscordTriggers {
     private readonly DispatcherTimer configDebounceTimer = new DispatcherTimer();
     #endregion
 
-    public DiscordPlugin() {
+    public DiscordTriggersView() {
       //Load UI Components and Assemblies
-      AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
       InitializeComponent();
       InitializeDebounceTimer();
       PopulateInfoPage();
@@ -678,37 +676,17 @@ namespace ACT_DiscordTriggers {
       PushConfigNow();
     }
 
-    #region IActPluginV1 Members
-    public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText) {
+    #region Plugin lifecycle (driven by the DiscordTriggersPlugin host)
+    // Called by the host after it has set the bridge path and initialised the
+    // diagnostics log. View-level init only: ACT delegates, settings, bot wiring.
+    public void OnPluginInit(string configName) {
       //ACT Stuff
       oldTTS = ActGlobals.oFormActMain.PlayTtsMethod;
       oldSound = ActGlobals.oFormActMain.PlaySoundMethod;
-      lblStatus = pluginStatusText;
-      pluginScreenSpace.Controls.Add(this);
-      pluginScreenSpace.Text = "Discord Triggers";
-      Dock = DockStyle.Fill;
 
-      //Get plugin name
-      string configName = "ACT_DiscordTriggers";
-      try {
-        string pluginName = ActGlobals.oFormActMain.PluginGetSelfData(this).pluginFile.FullName;
-        pluginName = Path.GetFileNameWithoutExtension(pluginName).Trim();
-        if (pluginName.Length > 0)
-          configName = pluginName;
-      } catch (Exception) { }
-
-      //Locate the out-of-process Discord bridge so DiscordClient knows where to spawn it
-      string bridgeDir = FindBridgeDir();
-      DiscordClient.SetBridgePath(bridgeDir);
-
-      //Always-on diagnostics: capture both plugin- and bridge-side logs into one
-      //unified file the user can simply email. Initialised BEFORE loading settings so
-      //the one-time config migration is captured in the diagnostics file (the log
-      //sink drops anything written before Init).
-      try {
-        DiagnosticsLog.Init(ActGlobals.oFormActMain.AppDataFolder.FullName, bridgeDir, PluginVersion());
-        Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath);
-      } catch { }
+      // Diagnostics is initialised by the host (BEFORE us, so the one-time config
+      // migration below lands in the file); just surface its path in the UI log.
+      try { Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath); } catch { }
 
       //Load Settings (own POCO + XML store; migrates the legacy ACT format on first run)
       string configDir = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Config");
@@ -724,11 +702,9 @@ namespace ACT_DiscordTriggers {
 
       if (chkAutoConnect.Checked)
         discordConnectbtn_Click(null, EventArgs.Empty);
-
-      lblStatus.Text = "Plugin Started";
     }
 
-    public async void DeInitPlugin() {
+    public async Task OnPluginDeInitAsync() {
       ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
       ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
       // Unhook static event subscriptions so the next init doesn't pile up
@@ -741,49 +717,6 @@ namespace ACT_DiscordTriggers {
       } catch (Exception ex) {
         ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with DeInit of Discord Plugin.");
       }
-      // Flush + regenerate the unified diagnostics file one last time so it reflects
-      // this whole session before ACT tears the plugin down.
-      try { DiagnosticsLog.Shutdown(); } catch { }
-      lblStatus.Text = "Plugin Exited";
-    }
-
-    private string FindBridgeDir() {
-      // The bridge ships as node.exe + bundle.js + node_modules/ next to the
-      // plugin DLL. We return the directory; BridgeProcess derives the two
-      // file paths from it.
-      try {
-        var plugin = ActGlobals.oFormActMain.PluginGetSelfData(this);
-        if (plugin != null) {
-          string dir = plugin.pluginFile.DirectoryName;
-          if (File.Exists(Path.Combine(dir, "node.exe")) && File.Exists(Path.Combine(dir, "bundle.js"))) {
-            return dir;
-          }
-        }
-      } catch { }
-      return Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Plugins\\Discord");
-    }
-
-    private Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args) {
-      try {
-        var asm = new AssemblyName(args.Name);
-        var plugin = ActGlobals.oFormActMain.PluginGetSelfData(this);
-        string file;
-        if (plugin != null) {
-          file = plugin.pluginFile.DirectoryName;
-          file = Path.Combine(file, asm.Name + ".dll");
-          if (File.Exists(file)) {
-            return Assembly.LoadFile(file);
-          }
-        }
-        file = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Plugins\\Discord");
-        file = Path.Combine(file, asm.Name + ".dll");
-        if (File.Exists(file)) {
-          return Assembly.LoadFrom(file);
-        }
-      } catch (Exception ex) {
-        ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with loading an assembly for Discord Plugin.");
-      }
-      return null;
     }
     #endregion
 
@@ -1035,7 +968,7 @@ namespace ACT_DiscordTriggers {
       };
 
       var version = new Label {
-        Text = "v" + PluginVersion(),
+        Text = "v" + DiscordTriggersPlugin.PluginVersion(),
         Font = new Font("Segoe UI", 9f),
         ForeColor = SystemColors.GrayText,
         AutoSize = true,
@@ -1165,10 +1098,6 @@ namespace ACT_DiscordTriggers {
       } catch { return null; }
     }
 
-    private static string PluginVersion() {
-      try { return Assembly.GetExecutingAssembly().GetName().Version.ToString(); }
-      catch { return "?"; }
-    }
     #endregion
 
     #region Settings
@@ -1199,7 +1128,7 @@ namespace ACT_DiscordTriggers {
         CaptureControlsToSettings();
         settingsStore.Save(settings);
       } catch (Exception ex) {
-        if (lblStatus != null) lblStatus.Text = "Error saving settings: " + ex.Message;
+        Log("Error saving settings: " + ex.Message);
         return false;
       }
       return true;
