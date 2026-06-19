@@ -11,6 +11,7 @@ pwsh ./build.ps1            # add -Zip to also emit ACT_DiscordTriggers.zip at t
 
 Bridge-only iteration (in `DiscordBridge-node/`):
 - `npm run typecheck` — `tsc --noEmit`
+- `npm run lint` — ESLint flat config (`eslint.config.mjs`), type-aware (`typescript-eslint` `recommendedTypeChecked`) over `src/` + `tests/`. Run in CI, not in `build.ps1` (lint is a code-quality gate, not a packaging prerequisite).
 - `npm run bundle` — esbuild only (no staging/self-test)
 - `npm test` — JS suite (protocol, framing, op dispatch; plus a Windows-only lifecycle suite that spawns the real bridge). Independent of `dist/`. Lifecycle tests skip on non-Windows (Windows named pipes).
 
@@ -23,7 +24,7 @@ dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
 
 CI:
 - Needs `Advanced Combat Tracker.exe` to resolve the plugin reference — install ACT to `C:\Program Files (x86)\Advanced Combat Tracker\` (csproj fallback path) or copy the exe to `packages/`.
-- Runs `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
+- Runs `npm run lint` + `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
 
 ## Architecture: two processes
 
