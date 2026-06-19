@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Text;
+using System.Collections.Specialized;
 using System.Windows.Forms;
 using Advanced_Combat_Tracker;
 using System.IO;
-using System.Xml;
-using System.Speech.Synthesis;
 using System.Reflection;
 using ACT_DiscordTriggers.Ipc;
+using ACT_DiscordTriggers.ViewModels;
 using System.Threading.Tasks;
-using System.Windows.Threading;
 using System.Drawing;
 using System.Diagnostics;
 using ACT_DiscordTriggers.Settings;
@@ -154,7 +153,6 @@ namespace ACT_DiscordTriggers {
       this.txtBotStatus.Size = new System.Drawing.Size(320, 26);
       this.txtBotStatus.TabIndex = 5;
       this.txtBotStatus.Text = "Playing with ACT Triggers";
-      this.txtBotStatus.TextChanged += new System.EventHandler(this.txtBotStatus_TextChanged);
       //
       // grpConnection
       //
@@ -190,7 +188,6 @@ namespace ACT_DiscordTriggers {
       this.cmbServer.Name = "cmbServer";
       this.cmbServer.Size = new System.Drawing.Size(320, 28);
       this.cmbServer.TabIndex = 1;
-      this.cmbServer.SelectedValueChanged += new System.EventHandler(this.cmbServer_SelectedIndexChanged);
       //
       // lblChan
       //
@@ -348,7 +345,6 @@ namespace ACT_DiscordTriggers {
       this.chkRandomFx.TabIndex = 0;
       this.chkRandomFx.Text = "Random Sound FX";
       this.chkRandomFx.UseVisualStyleBackColor = true;
-      this.chkRandomFx.CheckedChanged += new System.EventHandler(this.fxSettings_Changed);
       //
       // lblFxChance
       //
@@ -369,7 +365,6 @@ namespace ACT_DiscordTriggers {
       this.sliderFxChance.TabIndex = 2;
       this.sliderFxChance.TickStyle = System.Windows.Forms.TickStyle.None;
       this.sliderFxChance.Value = 25;
-      this.sliderFxChance.Scroll += new System.EventHandler(this.fxSettings_Changed);
       //
       // chkNormalize
       //
@@ -382,7 +377,6 @@ namespace ACT_DiscordTriggers {
       this.chkNormalize.TabIndex = 3;
       this.chkNormalize.Text = "Auto-level Volume";
       this.chkNormalize.UseVisualStyleBackColor = true;
-      this.chkNormalize.CheckedChanged += new System.EventHandler(this.normalizeSettings_Changed);
       //
       // lblNormalizeTarget
       //
@@ -404,7 +398,6 @@ namespace ACT_DiscordTriggers {
       this.sliderNormalizeTarget.TabIndex = 5;
       this.sliderNormalizeTarget.TickStyle = System.Windows.Forms.TickStyle.None;
       this.sliderNormalizeTarget.Value = 20;
-      this.sliderNormalizeTarget.Scroll += new System.EventHandler(this.normalizeSettings_Changed);
       //
       // lblAudioQuality
       //
@@ -428,7 +421,6 @@ namespace ACT_DiscordTriggers {
       this.cmbAudioQuality.Size = new System.Drawing.Size(200, 28);
       this.cmbAudioQuality.TabIndex = 7;
       this.cmbAudioQuality.SelectedIndex = 1;
-      this.cmbAudioQuality.SelectedIndexChanged += new System.EventHandler(this.audioQualitySettings_Changed);
       //
       // lblAudioQualityWarn
       //
@@ -588,8 +580,8 @@ namespace ACT_DiscordTriggers {
     #region Init Variables
     FormActMain.PlayTtsDelegate oldTTS;
     FormActMain.PlaySoundDelegate oldSound;
-    PluginSettings settings;
-    SettingsStore settingsStore;
+    private DiscordTriggersViewModel vm;
+    private DiscordClientService discordService;
     private CheckBox chkAutoConnect;
     private Button discordConnectbtn;
     private TrackBar sliderTTSSpeed;
@@ -632,157 +624,125 @@ namespace ACT_DiscordTriggers {
     private GroupBox grpChannel;
     private GroupBox grpTTS;
     private GroupBox grpFx;
-    private readonly DispatcherTimer statusDebounceTimer = new DispatcherTimer();
-    // FX/normalization/audio-quality changes can arrive in bursts: TrackBar.Scroll
-    // fires once per value while a slider is dragged. Coalesce them into a single
-    // SetConfig push rather than one pipe frame per tick. Shorter than the status
-    // debounce — a slider drag finishes in ~1s, so a small window collapses it
-    // without feeling laggy.
-    private readonly DispatcherTimer configDebounceTimer = new DispatcherTimer();
+    // Mirror the VM's ObservableCollections into BindingLists the combos can observe
+    // (WinForms binding ignores INotifyCollectionChanged); disposed on deinit.
+    private ObservableBindingList<string> voicesBinding;
+    private ObservableBindingList<string> serversBinding;
+    private ObservableBindingList<string> channelsBinding;
     #endregion
 
     public DiscordTriggersView() {
       //Load UI Components and Assemblies
       InitializeComponent();
-      InitializeDebounceTimer();
       PopulateInfoPage();
-
-      //Add installed voices to dropdown
-      var tts = new SpeechSynthesizer();
-      foreach (InstalledVoice v in tts.GetInstalledVoices())
-        cmbTTS.Items.Add(v.VoiceInfo.Name);
-      cmbTTS.SelectedIndex = 0;
 
       //Show the first page (also makes the nav selection visible).
       lstNav.SelectedIndex = 0;
-    }
-
-    private void InitializeDebounceTimer() {
-      statusDebounceTimer.Interval = TimeSpan.FromMilliseconds(10000);
-      statusDebounceTimer.Tick += DebounceTimer_Tick;
-      configDebounceTimer.Interval = TimeSpan.FromMilliseconds(400);
-      configDebounceTimer.Tick += ConfigDebounceTimer_Tick;
-    }
-
-    // Bot status is part of the config object; push the whole thing. The textbox
-    // fires TextChanged per keystroke, hence the long debounce.
-    private void DebounceTimer_Tick(object sender, EventArgs e) {
-      statusDebounceTimer.Stop();
-      PushConfigNow();
-    }
-
-    private void ConfigDebounceTimer_Tick(object sender, EventArgs e) {
-      configDebounceTimer.Stop();
-      PushConfigNow();
     }
 
     #region Plugin lifecycle (driven by the DiscordTriggersPlugin host)
     // Called by the host after it has set the bridge path and initialised the
     // diagnostics log. View-level init only: ACT delegates, settings, bot wiring.
     public void OnPluginInit(string configName) {
-      //ACT Stuff
+      //ACT delegates (restored on leave / deinit); save before any hook swap.
       oldTTS = ActGlobals.oFormActMain.PlayTtsMethod;
       oldSound = ActGlobals.oFormActMain.PlaySoundMethod;
 
+      // Build the ViewModel over the production Discord adapter + settings store.
       // Diagnostics is initialised by the host (BEFORE us, so the one-time config
-      // migration below lands in the file); just surface its path in the UI log.
-      try { Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath); } catch { }
-
-      //Load Settings (own POCO + XML store; migrates the legacy ACT format on first run)
+      // migration in Load lands in the file). The store's log sink forwards to the
+      // VM so migration messages still surface in the UI log.
+      discordService = new DiscordClientService();
       string configDir = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Config");
-      settingsStore = new SettingsStore(configDir, $"{configName}.config.xml", Log);
-      LoadSettings();
-      ApplyFxSettings();
-      ApplyNormalizationSettings();
-      ApplyAudioQualitySettings();
+      var store = new SettingsStore(configDir, $"{configName}.config.xml", msg => vm?.Log(msg));
+      vm = new DiscordTriggersViewModel(discordService, store);
 
-      //Discord Bot Stuff
-      DiscordClient.BotReady += BotReady;
-      DiscordClient.Log += Log;
+      BindControls();
 
-      if (chkAutoConnect.Checked)
-        discordConnectbtn_Click(null, EventArgs.Empty);
+      // The VM stays ACT-free: it raises these so the view swaps ACT's TTS/sound
+      // delegates to route through Discord while joined.
+      vm.JoinedChannel += OnJoinedChannel;
+      vm.LeftChannel += OnLeftChannel;
+      vm.LogEntries.CollectionChanged += OnLogEntriesChanged;
+
+      vm.Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath);
+      vm.Initialize();
     }
 
     public async Task OnPluginDeInitAsync() {
       ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
       ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
-      // Unhook static event subscriptions so the next init doesn't pile up
-      // duplicate callbacks against a disposed UserControl.
-      DiscordClient.BotReady -= BotReady;
-      DiscordClient.Log -= Log;
-      SaveSettings();
-      try {
-        await DiscordClient.DeinitAsync();
-      } catch (Exception ex) {
-        ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with DeInit of Discord Plugin.");
+      if (vm != null) {
+        vm.JoinedChannel -= OnJoinedChannel;
+        vm.LeftChannel -= OnLeftChannel;
+        vm.LogEntries.CollectionChanged -= OnLogEntriesChanged;
+        vm.Save();
+        try {
+          await vm.ShutdownAsync();
+        } catch (Exception ex) {
+          ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with DeInit of Discord Plugin.");
+        }
       }
+      discordService?.Dispose();
+      voicesBinding?.Dispose();
+      serversBinding?.Dispose();
+      channelsBinding?.Dispose();
     }
     #endregion
 
-    #region Discord Methods
-    private void speak(string text) {
-      Log("Playing TTS for text: " + text);
-      try {
-        DiscordClient.Speak(text, cmbTTS.SelectedItem.ToString(), sliderTTSVol.Value, sliderTTSSpeed.Value);
-      } catch (Exception ex) {
-        Log("Error playing TTS");
-        Log(ex.Message);
-      }
+    #region View <-> ViewModel wiring
+    // Two-way DataBindings (OnPropertyChanged) for scalar controls; one-way for
+    // labels/enabled state; an ObservableBindingList mirror for the VM's
+    // ObservableCollections so the combos refresh as the VM repopulates them.
+    private void BindControls() {
+      txtToken.DataBindings.Add("Text", vm, nameof(vm.BotToken), false, DataSourceUpdateMode.OnPropertyChanged);
+      txtBotStatus.DataBindings.Add("Text", vm, nameof(vm.BotStatus), false, DataSourceUpdateMode.OnPropertyChanged);
+      chkAutoConnect.DataBindings.Add("Checked", vm, nameof(vm.AutoConnect), false, DataSourceUpdateMode.OnPropertyChanged);
+      sliderTTSVol.DataBindings.Add("Value", vm, nameof(vm.TtsVolume), false, DataSourceUpdateMode.OnPropertyChanged);
+      sliderTTSSpeed.DataBindings.Add("Value", vm, nameof(vm.TtsSpeed), false, DataSourceUpdateMode.OnPropertyChanged);
+      chkRandomFx.DataBindings.Add("Checked", vm, nameof(vm.RandomFx), false, DataSourceUpdateMode.OnPropertyChanged);
+      sliderFxChance.DataBindings.Add("Value", vm, nameof(vm.FxChance), false, DataSourceUpdateMode.OnPropertyChanged);
+      chkNormalize.DataBindings.Add("Checked", vm, nameof(vm.Normalize), false, DataSourceUpdateMode.OnPropertyChanged);
+      sliderNormalizeTarget.DataBindings.Add("Value", vm, nameof(vm.NormalizeTarget), false, DataSourceUpdateMode.OnPropertyChanged);
+      cmbAudioQuality.DataBindings.Add("SelectedIndex", vm, nameof(vm.AudioQualityIndex), false, DataSourceUpdateMode.OnPropertyChanged);
+
+      lblFxChance.DataBindings.Add("Text", vm, nameof(vm.FxChanceLabel), false, DataSourceUpdateMode.Never);
+      lblNormalizeTarget.DataBindings.Add("Text", vm, nameof(vm.NormalizeTargetLabel), false, DataSourceUpdateMode.Never);
+      lblAudioQualityWarn.DataBindings.Add("Visible", vm, nameof(vm.ShowHighQualityWarning), false, DataSourceUpdateMode.Never);
+      btnJoin.DataBindings.Add("Enabled", vm, nameof(vm.CanJoin), false, DataSourceUpdateMode.Never);
+      btnLeave.DataBindings.Add("Enabled", vm, nameof(vm.CanLeave), false, DataSourceUpdateMode.Never);
+
+      voicesBinding = new ObservableBindingList<string>(vm.Voices);
+      cmbTTS.DataSource = voicesBinding;
+      cmbTTS.DataBindings.Add("SelectedItem", vm, nameof(vm.TtsVoice), true, DataSourceUpdateMode.OnPropertyChanged);
+      serversBinding = new ObservableBindingList<string>(vm.Servers);
+      cmbServer.DataSource = serversBinding;
+      cmbServer.DataBindings.Add("SelectedItem", vm, nameof(vm.SelectedServer), true, DataSourceUpdateMode.OnPropertyChanged);
+      channelsBinding = new ObservableBindingList<string>(vm.Channels);
+      cmbChan.DataSource = channelsBinding;
+      cmbChan.DataBindings.Add("SelectedItem", vm, nameof(vm.SelectedChannel), true, DataSourceUpdateMode.OnPropertyChanged);
     }
 
-    private void speakFile(string path, int volume) {
-      Log("Playing Audio file: " + path);
-      try {
-        DiscordClient.SpeakFile(path);
-      } catch (Exception ex) {
-        Log("Error playing File");
-        Log(ex.Message);
-      }
+    private void OnJoinedChannel() {
+      ActGlobals.oFormActMain.PlayTtsMethod = vm.SpeakText;
+      ActGlobals.oFormActMain.PlaySoundMethod = vm.SpeakSoundFile;
     }
 
-    private void BotReady() {
-      // PipeClient delivers notifications on a thread-pool thread (see PipeClient.DispatchFrame).
-      // Marshal back to the UI thread before touching controls.
-      if (InvokeRequired) { BeginInvoke(new Action(BotReady)); return; }
-      btnJoin.Enabled = true;
-      _ = populateServers();
+    private void OnLeftChannel() {
+      ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
+      ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
     }
 
-
-    private async Task populateServers() {
-      try {
-        string[] servers = await DiscordClient.GetServersAsync();
-        Log("Found " + servers.Length + " discord server(s).");
-
-        cmbServer.Items.Clear();
-        cmbChan.Items.Clear();
-
-        foreach (string server in servers)
-          cmbServer.Items.Add(server);
-
-        if (cmbServer.Items.Count > 0)
-          cmbServer.SelectedIndex = 0;
-      } catch (Exception ex) {
-        Log("Error populating servers.");
-        Log(ex.Message);
-      }
-    }
-
-    private async Task populateChannels(string server) {
-      try {
-        cmbChan.Items.Clear();
-        string[] channels = await DiscordClient.GetChannelsAsync(server);
-        cmbChan.Items.AddRange(channels);
-        if (cmbChan.Items.Count > 0) {
-          cmbChan.SelectedIndex = 0;
-          Log("Found " + cmbChan.Items.Count + " available voice channel(s) for " + server);
-        } else {
-          Log("Error: Could not find any available voice channels for " + server);
-        }
-      } catch (Exception ex) {
-        Log("Error populating channels.");
-        Log(ex.Message);
+    // The VM marshals collection mutations to the captured UI context, so this fires
+    // on the UI thread; the InvokeRequired guard is belt-and-suspenders.
+    private void OnLogEntriesChanged(object sender, NotifyCollectionChangedEventArgs e) {
+      if (e.Action != NotifyCollectionChangedAction.Add || e.NewItems == null) return;
+      if (InvokeRequired) { BeginInvoke(new Action(() => OnLogEntriesChanged(sender, e))); return; }
+      foreach (LogEntry entry in e.NewItems) {
+        logList.Items.Add(new ListViewItem(new[] {
+          entry.Timestamp.ToShortDateString() + " " + entry.Timestamp.ToLongTimeString(),
+          entry.Message
+        }));
       }
     }
     #endregion
@@ -801,59 +761,11 @@ namespace ACT_DiscordTriggers {
       pagInfo.Visible = index == 2;
     }
 
-    private async void btnJoin_Click(object sender, EventArgs e) {
-      btnJoin.Enabled = false;
-      if (await DiscordClient.JoinChannel(cmbServer.SelectedItem.ToString(), cmbChan.SelectedItem.ToString())) {
-        btnLeave.Enabled = true;
-        ActGlobals.oFormActMain.PlayTtsMethod = speak;
-        ActGlobals.oFormActMain.PlaySoundMethod = speakFile;
-      } else {
-        Log("Unable to join channel. Does your bot have permission to join this channel?");
-        btnJoin.Enabled = true;
-        await populateServers();
-      }
-    }
-
-    private async void btnLeave_Click(object sender, EventArgs e) {
-      btnLeave.Enabled = false;
-      try {
-        await DiscordClient.LeaveChannelAsync();
-        btnJoin.Enabled = true;
-        Log("Left channel.");
-        ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
-        ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
-      } catch (Exception ex) {
-        Log("Error leaving channel. Possible connection issue.");
-        btnLeave.Enabled = true;
-        Log(ex.Message);
-      }
-    }
-
-    private async void cmbServer_SelectedIndexChanged(object sender, EventArgs e) {
-      // populateServers() does cmbServer.Items.Clear(), which fires this handler
-      // with SelectedItem == null. Bail before we NRE.
-      if (cmbServer.SelectedItem == null) return;
-      try {
-        await populateChannels(cmbServer.SelectedItem.ToString());
-      } catch (Exception ex) {
-        Log("populateChannels failed: " + ex.Message);
-      }
-    }
-
-    private async void discordConnectbtn_Click(object sender, EventArgs e) {
-      try {
-        if (await DiscordClient.IsConnectedAsync()) {
-          Log("Already connected to Discord.");
-          return;
-        }
-        // The whole settings object (token included) is the config the bridge logs
-        // in with, so capture the live controls before connecting.
-        CaptureControlsToSettings();
-        await DiscordClient.ConnectAsync(settings);
-      } catch (Exception ex) {
-        Log("Connect failed: " + ex.Message);
-      }
-    }
+    // Buttons forward to the VM commands (server/channel selection + state live in
+    // the VM via DataBindings).
+    private void discordConnectbtn_Click(object sender, EventArgs e) => vm.ConnectCommand.Execute(null);
+    private void btnJoin_Click(object sender, EventArgs e) => vm.JoinCommand.Execute(null);
+    private void btnLeave_Click(object sender, EventArgs e) => vm.LeaveCommand.Execute(null);
 
     private void LogList_KeyUp(object sender, KeyEventArgs e) {
       if (sender != logList)
@@ -870,61 +782,6 @@ namespace ACT_DiscordTriggers {
       }
     }
 
-    private void txtBotStatus_TextChanged(object sender, EventArgs e) {
-       statusDebounceTimer.Stop();
-       statusDebounceTimer.Start();
-    }
-
-    // All of FX / normalization / audio-quality are now plain config the bridge
-    // interprets (it rolls the fx dice, negates the normalize target, maps the
-    // quality tier to a bitrate). So a change here just refreshes the UI labels and
-    // schedules a debounced SetConfig push (see PushConfig). The Apply* methods are
-    // label-only and are also called once at startup to initialize the labels.
-    private void fxSettings_Changed(object sender, EventArgs e) {
-      ApplyFxSettings();
-      PushConfig();
-    }
-
-    private void ApplyFxSettings() {
-      lblFxChance.Text = "FX Chance: " + sliderFxChance.Value + "%";
-    }
-
-    private void normalizeSettings_Changed(object sender, EventArgs e) {
-      ApplyNormalizationSettings();
-      PushConfig();
-    }
-
-    private void ApplyNormalizationSettings() {
-      lblNormalizeTarget.Text = "Auto-level Target: -" + sliderNormalizeTarget.Value + " dBFS";
-    }
-
-    // The High tier may exceed an unboosted channel's 96 kbps cap, so we show an
-    // inline warning; the overshoot is harmless (Discord relays it), just
-    // channel-dependent. The tier→bitrate mapping itself lives in the bridge.
-    private void audioQualitySettings_Changed(object sender, EventArgs e) {
-      ApplyAudioQualitySettings();
-      PushConfig();
-    }
-
-    private void ApplyAudioQualitySettings() {
-      lblAudioQualityWarn.Visible = (cmbAudioQuality.SelectedIndex == 2); // High
-    }
-
-    // Coalesce a burst of FX/normalize/quality changes (a slider drag fires
-    // TrackBar.Scroll per tick) into a single SetConfig push by (re)starting the
-    // debounce timer; the actual push happens on its Tick.
-    private void PushConfig() {
-      configDebounceTimer.Stop();
-      configDebounceTimer.Start();
-    }
-
-    // Capture the live control values into the settings model and push the whole
-    // thing to the bridge as the config object. No-op while disconnected —
-    // ConnectAsync re-pushes on connect anyway.
-    private void PushConfigNow() {
-      CaptureControlsToSettings();
-      _ = DiscordClient.SetConfigAsync(settings);
-    }
     #endregion
 
     #region Information page
@@ -1098,87 +955,6 @@ namespace ACT_DiscordTriggers {
       } catch { return null; }
     }
 
-    #endregion
-
-    #region Settings
-    public void Log(string text) {
-      // Capture to the diagnostics file first, off the UI thread, so a busy/frozen
-      // UI never delays or drops a log line (and so we never double-log across the
-      // marshal hop below). UI display is a separate, best-effort concern.
-      DiagnosticsLog.Append(text);
-      UiLog(text);
-    }
-
-    private void UiLog(string text) {
-      // Bridge log/disconnect/exit callbacks all funnel here from a thread-pool thread.
-      if (InvokeRequired) { BeginInvoke(new Action<string>(UiLog), text); return; }
-      string[] row = new string[2];
-      row[0] = DateTime.Now.ToShortDateString() + " " + DateTime.Now.ToLongTimeString();
-      row[1] = text;
-      logList.Items.Add(new ListViewItem(row));
-    }
-
-    public void LoadSettings() {
-      settings = settingsStore.Load();
-      ApplySettingsToControls();
-    }
-
-    public bool SaveSettings() {
-      try {
-        CaptureControlsToSettings();
-        settingsStore.Save(settings);
-      } catch (Exception ex) {
-        Log("Error saving settings: " + ex.Message);
-        return false;
-      }
-      return true;
-    }
-
-    // Copy the loaded settings model onto the WinForms controls. Sliders are clamped
-    // to their configured range; the TTS voice is matched by name with a fall-back to
-    // the first installed voice (the saved voice may not exist on this machine).
-    private void ApplySettingsToControls() {
-      txtToken.Text = settings.BotToken;
-      txtBotStatus.Text = settings.BotStatus;
-      chkAutoConnect.Checked = settings.AutoConnect;
-
-      sliderTTSVol.Value = Clamp(settings.TtsVolume, sliderTTSVol.Minimum, sliderTTSVol.Maximum);
-      sliderTTSSpeed.Value = Clamp(settings.TtsSpeed, sliderTTSSpeed.Minimum, sliderTTSSpeed.Maximum);
-
-      int voiceIdx = cmbTTS.FindStringExact(settings.TtsVoice ?? "");
-      if (voiceIdx >= 0) cmbTTS.SelectedIndex = voiceIdx;
-      else if (cmbTTS.Items.Count > 0) cmbTTS.SelectedIndex = 0;
-
-      chkRandomFx.Checked = settings.RandomFx;
-      sliderFxChance.Value = Clamp(settings.FxChance, sliderFxChance.Minimum, sliderFxChance.Maximum);
-      chkNormalize.Checked = settings.Normalize;
-      sliderNormalizeTarget.Value = Clamp(settings.NormalizeTarget, sliderNormalizeTarget.Minimum, sliderNormalizeTarget.Maximum);
-
-      if (cmbAudioQuality.Items.Count > 0)
-        cmbAudioQuality.SelectedIndex = Clamp(settings.AudioQualityIndex, 0, cmbAudioQuality.Items.Count - 1);
-    }
-
-    // Read the WinForms controls back into the settings model before saving.
-    private void CaptureControlsToSettings() {
-      settings.BotToken = txtToken.Text;
-      settings.BotStatus = txtBotStatus.Text;
-      settings.AutoConnect = chkAutoConnect.Checked;
-
-      settings.TtsVoice = cmbTTS.SelectedItem?.ToString() ?? "";
-      settings.TtsVolume = sliderTTSVol.Value;
-      settings.TtsSpeed = sliderTTSSpeed.Value;
-
-      settings.RandomFx = chkRandomFx.Checked;
-      settings.FxChance = sliderFxChance.Value;
-      settings.Normalize = chkNormalize.Checked;
-      settings.NormalizeTarget = sliderNormalizeTarget.Value;
-      settings.AudioQualityIndex = cmbAudioQuality.SelectedIndex;
-    }
-
-    private static int Clamp(int value, int min, int max) {
-      if (max < min) return min;
-      return value < min ? min : (value > max ? max : value);
-    }
     #endregion
   }
 }

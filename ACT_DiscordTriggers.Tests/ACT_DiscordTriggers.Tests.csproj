@@ -17,6 +17,9 @@
     <!-- The plugin references System.Text.Json 10.0.9 on net48 already; match
          it here so the linked source files use the same JSON types. -->
     <PackageReference Include="System.Text.Json" Version="10.0.9" />
+    <!-- The linked ViewModel uses CommunityToolkit.Mvvm; the source generators must
+         run over it here too. Match the plugin's version. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
   <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
@@ -32,5 +35,10 @@
     <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\ISettingsMigration.cs" Link="Settings\Migrations\ISettingsMigration.cs" />
     <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrator.cs" Link="Settings\Migrations\SettingsMigrator.cs" />
     <Compile Include="..\ACT_DiscordTriggers\Settings\Migrations\SettingsMigrationException.cs" Link="Settings\Migrations\SettingsMigrationException.cs" />
+    <!-- ViewModel layer: UI-agnostic (no WinForms/ACT), linked in so it can be
+         unit-tested with a fake IDiscordService. -->
+    <Compile Include="..\ACT_DiscordTriggers\Ipc\IDiscordService.cs" Link="Ipc\IDiscordService.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\ViewModels\LogEntry.cs" Link="ViewModels\LogEntry.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\ViewModels\DiscordTriggersViewModel.cs" Link="ViewModels\DiscordTriggersViewModel.cs" />
   </ItemGroup>
 </Project>
