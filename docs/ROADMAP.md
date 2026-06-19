@@ -143,7 +143,7 @@ removes a constant low-grade annoyance. Applies regardless of TTS provider.
   the `pipe-server.ts` check; `discord-host.ts` `TARGET_SAMPLE_RATE` /
   `resampleStereo16` / `StreamType.Raw`; `effects.ts` `SR`). New audio
   sources must conform; don't add a conversion step in the bridge.
-- The wire protocol lives in **two places** — `DiscordAPI/Protocol.cs` and
+- The wire protocol lives in **two places** — `ACT_DiscordTriggers/Protocol/Protocol.cs` and
   `DiscordBridge-node/src/protocol.ts` (+ dispatch in `pipe-server.ts`). Any new
   op updates both; bump `PROTOCOL_VERSION` on incompatible shape changes and
   extend both `ProtocolTests.cs` and `tests/protocol.test.ts`.

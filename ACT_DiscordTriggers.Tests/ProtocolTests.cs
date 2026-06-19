@@ -1,11 +1,11 @@
 using ACT_DiscordTriggers.Settings;
-using DiscordBridge.Protocol;
+using ACT_DiscordTriggers.Protocol;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
     public class ProtocolTests {
         private static readonly JsonSerializerOptions opts = new JsonSerializerOptions {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

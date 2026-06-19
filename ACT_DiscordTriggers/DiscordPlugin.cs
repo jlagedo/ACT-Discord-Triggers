@@ -6,7 +6,7 @@ using System.IO;
 using System.Xml;
 using System.Speech.Synthesis;
 using System.Reflection;
-using DiscordAPI;
+using ACT_DiscordTriggers.Ipc;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using System.Drawing;

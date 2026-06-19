@@ -135,7 +135,7 @@ For bridge-only iteration, use the npm scripts in `DiscordBridge-node/`:
 ### Tests
 
 ```
-dotnet test Tests/Tests.csproj            # C# (net48): protocol + IPC + integration
+dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj   # C# (net48): protocol + IPC + integration
 cd DiscordBridge-node && npm test         # JS (tsx + node:test)
 ```
 

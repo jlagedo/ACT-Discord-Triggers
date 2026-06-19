@@ -7,7 +7,7 @@ using ACT_DiscordTriggers.Settings;
 using ACT_DiscordTriggers.Settings.Migrations;
 using Xunit;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
   public class SettingsTests {
     // The exact legacy ACT SettingsSerializer format captured from a live install.
     // Note: cmbAudioQuality stores the display TEXT, FxChance=100, NormalizeTarget=30,

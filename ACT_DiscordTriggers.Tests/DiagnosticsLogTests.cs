@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
-using DiscordAPI;
+using ACT_DiscordTriggers.Ipc;
 using Xunit;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
     // DiagnosticsLog.MergeInterleave is the only piece with real logic worth
     // testing: combining the plugin (PLG) and bridge (BRG) logs into one
     // chronological, source-tagged timeline. The file IO around it is best-effort

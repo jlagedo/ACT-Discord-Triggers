@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
     // Polyfill for Task.WaitAsync(TimeSpan) — net6+ only on the BCL, but the
     // production code targets net48. Keeps test bodies readable.
     internal static class TaskExtensions {

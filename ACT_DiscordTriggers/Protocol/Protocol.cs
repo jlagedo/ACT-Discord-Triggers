@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace DiscordBridge.Protocol {
+namespace ACT_DiscordTriggers.Protocol {
 
     public static class ProtocolConstants {
         public const int Version = 5;
@@ -50,8 +50,8 @@ namespace DiscordBridge.Protocol {
     }
 
     // Config push. Carries the whole plugin settings object; the bridge reads the
-    // fields it needs and ignores the rest. Generic so this lower assembly need not
-    // reference the plugin's PluginSettings type — PipeClient.SendFrameAsync
+    // fields it needs and ignores the rest. Kept generic so the protocol types stay
+    // decoupled from the concrete PluginSettings POCO — PipeClient.SendFrameAsync
     // serializes by runtime type, so the closed generic serializes the full POCO.
     public class SetConfigRequest<TConfig> : IBridgeRequest {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetConfig;

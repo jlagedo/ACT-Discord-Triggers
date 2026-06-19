@@ -1,4 +1,4 @@
-// Wire protocol mirror of DiscordAPI/Protocol.cs. Keep both sides in sync.
+// Wire protocol mirror of ACT_DiscordTriggers/Protocol/Protocol.cs. Keep both sides in sync.
 // PROTOCOL_VERSION here must match ProtocolConstants.Version on the C# side.
 //
 // The contract has three channels:

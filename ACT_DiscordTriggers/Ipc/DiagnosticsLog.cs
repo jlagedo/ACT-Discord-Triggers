@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 
-namespace DiscordAPI {
+namespace ACT_DiscordTriggers.Ipc {
     // Encapsulated, always-on diagnostics the end user never has to think about.
     //
     // Two source logs are written independently — this plugin-side log

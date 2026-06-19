@@ -1,5 +1,5 @@
-using DiscordAPI;
-using DiscordBridge.Protocol;
+using ACT_DiscordTriggers.Ipc;
+using ACT_DiscordTriggers.Protocol;
 using System;
 using System.IO;
 using System.IO.Pipes;
@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
     public class PipeIpcTests : IDisposable {
         private readonly NamedPipeServerStream serverPipe;
         private readonly NamedPipeClientStream clientPipe;

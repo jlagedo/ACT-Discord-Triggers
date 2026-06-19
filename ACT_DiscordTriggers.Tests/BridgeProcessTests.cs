@@ -1,10 +1,10 @@
-using DiscordAPI;
+using ACT_DiscordTriggers.Ipc;
 using System;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace ActDiscordTriggers.Tests {
+namespace ACT_DiscordTriggers.Tests {
     public class BridgeProcessTests {
         private static string FindBridgeDir() {
             string testDir = Path.GetDirectoryName(typeof(BridgeProcessTests).Assembly.Location);

@@ -1,32 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <DebugType>portable</DebugType>
     <AssemblyTitle>ACT_DiscordTriggers</AssemblyTitle>
     <AssemblyVersion>2.0.2.0</AssemblyVersion>
     <FileVersion>2.0.2.0</FileVersion>
-    <Authors>jlagedo</Authors>
     <Version>2.0.2</Version>
-    <RepositoryUrl>https://github.com/jlagedo/ACT-Discord-Triggers</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/jlagedo/ACT-Discord-Triggers</PackageProjectUrl>
+    <Authors>jlagedo</Authors>
     <Description>An ACT plugin for routing audio to discord (via out-of-process bridge for DAVE E2EE support).</Description>
-    <AutoGenerateBindingRedirects>False</AutoGenerateBindingRedirects>
-    <LangVersion>latest</LangVersion>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugType>full</DebugType>
-    <OutputPath>bin\$(Configuration)\</OutputPath>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <OutputPath>bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Costura.Fody" Version="6.2.0">
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Fody" Version="6.9.3">
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
+    <PackageReference Include="Costura.Fody" Version="6.2.0" PrivateAssets="all" />
+    <PackageReference Include="Fody" Version="6.9.3" PrivateAssets="all" />
+    <!-- Costura merges this (and its transitive net48 deps) into the plugin DLL. -->
+    <PackageReference Include="System.Text.Json" Version="10.0.9" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Advanced Combat Tracker">
@@ -56,8 +45,5 @@
     <EmbeddedResource Include="..\docs\logo.png">
       <LogicalName>ACT_DiscordTriggers.logo.png</LogicalName>
     </EmbeddedResource>
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\DiscordAPI\DiscordAPI.csproj" />
   </ItemGroup>
 </Project>

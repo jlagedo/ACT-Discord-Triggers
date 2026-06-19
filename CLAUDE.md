@@ -16,7 +16,7 @@ Bridge-only iteration (in `DiscordBridge-node/`):
 
 C# tests (net48, xUnit — pinned to the 2.x line; 3.x dropped net48 support):
 ```
-dotnet test Tests/Tests.csproj
+dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
 ```
 - `BridgeIntegrationTests` spawns the real bridge from `dist/` — run `build.ps1` first or it fails with a "build the bridge first" message.
 - Single test: `dotnet test --filter "FullyQualifiedName~<name>"`.
@@ -35,10 +35,13 @@ DLL --spawns "node.exe bundle.js <pipe>"--> node bridge (discord.js + @snazzah/d
 DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 ```
 
-- **`ACT_DiscordTriggers/`** (net48): UI, settings, hooks `PlayTtsMethod`/`PlaySoundMethod`. TTS is synthesized in-process via `System.Speech` and sent to the bridge as 48k/16/stereo PCM; sound files are sent by path — the bridge decodes + resamples them.
-- **`DiscordAPI/`** (net48): IPC client. `DiscordClient` is the static facade. `BridgeProcess.StartAndConnectAsync` spawns node, scans stdout for `BRIDGE_READY`, then connects the pipe.
-- **`DiscordBridge-node/src/`**: the bridge (TS, esbuild→`dist/bundle.js`). `bridge.ts` owns lifecycle + pipe server. `pipe-server.ts` does framing/dispatch. `discord-host.ts` wraps discord.js + `@discordjs/voice` (`StreamType.Raw`). `protocol.ts` mirrors `Protocol.cs`.
-- **`Tests/`** (net48, xUnit): protocol/IPC/lifecycle unit tests + `BridgeIntegrationTests` (real bridge).
+- **`ACT_DiscordTriggers/`** (net48): the single production project — UI, settings, IPC, protocol all in one assembly. Organized by folder:
+  - root: `DiscordPlugin.cs` — UI, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`. TTS is synthesized in-process via `System.Speech` and sent to the bridge as 48k/16/stereo PCM; sound files are sent by path — the bridge decodes + resamples them.
+  - `Ipc/` (namespace `ACT_DiscordTriggers.Ipc`): IPC client. `DiscordClient` is the static facade. `BridgeProcess.StartAndConnectAsync` spawns node, scans stdout for `BRIDGE_READY`, then connects the pipe. Also `PipeClient`, `DiagnosticsLog`.
+  - `Protocol/` (namespace `ACT_DiscordTriggers.Protocol`): `Protocol.cs` — the C# wire-protocol DTOs + `Op`.
+  - `Settings/` (namespace `ACT_DiscordTriggers.Settings`): `PluginSettings` POCO + versioned migration framework.
+- **`DiscordBridge-node/src/`**: the bridge (TS, esbuild→`dist/bundle.js`). `bridge.ts` owns lifecycle + pipe server. `pipe-server.ts` does framing/dispatch. `discord-host.ts` wraps discord.js + `@discordjs/voice` (`StreamType.Raw`). `protocol.ts` mirrors `Protocol/Protocol.cs`.
+- **`ACT_DiscordTriggers.Tests/`** (net48, xUnit; namespace `ACT_DiscordTriggers.Tests`): protocol/IPC/lifecycle unit tests + `BridgeIntegrationTests` (real bridge). Links the plugin's pure-C# sources (`Protocol/`, `Ipc/`, `Settings/`) via `<Compile Include>` rather than a `ProjectReference` (which would pull in the ACT exe + WinForms + Costura); moving those files means updating the linked paths in `ACT_DiscordTriggers.Tests.csproj`.
 
 Lifecycle — no launcher / Job Object:
 - Plugin shutdown: `process.Kill()`s node directly.
@@ -47,7 +50,7 @@ Lifecycle — no launcher / Job Object:
 
 ## Wire protocol — keep both sides in sync
 
-Defined twice: `DiscordAPI/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS types + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match.
+Defined twice: `ACT_DiscordTriggers/Protocol/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS types + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match.
 
 Three message kinds:
 - **Commands** — .NET→bridge request/response. The reply is always the single `Result` envelope `{ op:"Result", reqId, ok, error, data? }`; C# correlates by `reqId` alone (no per-op `*Result` ops). Query payloads ride in `data` (`BridgeResponse<TData>` on the C# side).

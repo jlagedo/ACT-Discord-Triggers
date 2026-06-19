@@ -4,29 +4,26 @@
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <RootNamespace>ActDiscordTriggers.Tests</RootNamespace>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- xunit 2.x line: xunit 2.9.x and xunit.runner.visualstudio 2.8.x both ship
          net4x targets. xunit.runner.visualstudio 3.x dropped Framework support. -->
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <!-- DiscordAPI references System.Text.Json 10.0.9 on net48 already; match
+    <!-- The plugin references System.Text.Json 10.0.9 on net48 already; match
          it here so the linked source files use the same JSON types. -->
     <PackageReference Include="System.Text.Json" Version="10.0.9" />
   </ItemGroup>
   <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="..\DiscordAPI\Protocol.cs" Link="Protocol.cs" />
-    <Compile Include="..\DiscordAPI\DiagnosticsLog.cs" Link="DiagnosticsLog.cs" />
-    <Compile Include="..\DiscordAPI\PipeClient.cs" Link="PipeClient.cs" />
-    <Compile Include="..\DiscordAPI\BridgeProcess.cs" Link="BridgeProcess.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Protocol\Protocol.cs" Link="Protocol.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Ipc\DiagnosticsLog.cs" Link="DiagnosticsLog.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Ipc\PipeClient.cs" Link="PipeClient.cs" />
+    <Compile Include="..\ACT_DiscordTriggers\Ipc\BridgeProcess.cs" Link="BridgeProcess.cs" />
     <!-- Settings POCO + migration framework: pure C# (no WinForms/ACT), linked in
          so they can be unit-tested without referencing the plugin assembly. -->
     <Compile Include="..\ACT_DiscordTriggers\Settings\PluginSettings.cs" Link="Settings\PluginSettings.cs" />

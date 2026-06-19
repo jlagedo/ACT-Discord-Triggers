@@ -4,7 +4,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Threading.Tasks;
 
-namespace DiscordAPI {
+namespace ACT_DiscordTriggers.Ipc {
     // Spawns the node bridge directly: node.exe bundle.js <pipe-name>.
     //
     // Lifecycle: when this process dies (clean or hard kill), the OS closes the

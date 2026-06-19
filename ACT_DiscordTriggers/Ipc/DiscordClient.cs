@@ -1,4 +1,4 @@
-using DiscordBridge.Protocol;
+using ACT_DiscordTriggers.Protocol;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -8,7 +8,7 @@ using System.Speech.Synthesis;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace DiscordAPI {
+namespace ACT_DiscordTriggers.Ipc {
     public static class DiscordClient {
         private static PipeClient pipeClient;
         private static BridgeProcess bridge;

@@ -42,7 +42,7 @@ jobs:
         run: ./build.ps1 -Zip
 
       - name: Run C# tests (net48)
-        run: dotnet test Tests/Tests.csproj -c Release --nologo
+        run: dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj -c Release --nologo
 
       - name: Name archive after the tag
         shell: pwsh
