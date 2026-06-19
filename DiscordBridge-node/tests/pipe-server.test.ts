@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import type { Socket } from 'node:net';
 
 import { PipeServer, Op } from '../src/pipe-server.js';
-import { PROTOCOL_VERSION, MAX_FRAME_BYTES } from '../src/protocol.js';
+import { PROTOCOL_VERSION, MAX_FRAME_BYTES, DEFAULT_CONFIG_VIEW } from '../src/protocol.js';
 import pkg from '../package.json' with { type: 'json' };
 import { FakeSocket } from './helpers/fake-socket.js';
 import { FakeHost } from './helpers/fake-host.js';
@@ -21,6 +21,11 @@ function makeHarness(): Harness {
     const ps = new PipeServer(sock as unknown as Socket, host);
     ps.run();
     return { sock, host, ps };
+}
+
+// Pull the `data` payload off a Result frame.
+function data(frame: Record<string, unknown> | undefined): Record<string, unknown> {
+    return (frame?.['data'] ?? {}) as Record<string, unknown>;
 }
 
 // _handleFrame is async fire-and-forget and _sendFrame chains through a write
@@ -54,7 +59,7 @@ test('frame parser: single frame in one chunk dispatches', async () => {
     const { sock } = makeHarness();
     sock.emit('data', encodeFrame({ op: Op.Hello, reqId: 1, protocolVersion: PROTOCOL_VERSION }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.HelloResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 1);
     assert.equal(frame!['ok'], true);
 });
@@ -84,9 +89,9 @@ test('frame parser: two concatenated frames in one chunk dispatch in order', asy
     const b = encodeFrame({ op: Op.IsConnected, reqId: 2 });
     sock.emit('data', Buffer.concat([a, b]));
     const frames = await waitForFrames(sock, 2);
-    assert.equal(frames[0]!['op'], Op.HelloResult);
+    assert.equal(frames[0]!['op'], Op.Result);
     assert.equal(frames[0]!['reqId'], 1);
-    assert.equal(frames[1]!['op'], Op.IsConnectedResult);
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 2);
 });
 
@@ -106,9 +111,6 @@ test('frame parser: length > MAX_FRAME_BYTES destroys the socket', async () => {
 });
 
 test('frame parser: malformed JSON yields Log notification; subsequent frame still dispatches', async () => {
-    // Malformed JSON falls into the catch path (op='?', reqId=null), which
-    // emits a Log notification but no synthesized Result (reqId is null).
-    // The next frame must still dispatch normally.
     const { sock } = makeHarness();
     const garbage = Buffer.from('{not json', 'utf8');
     const len = Buffer.alloc(4);
@@ -120,30 +122,25 @@ test('frame parser: malformed JSON yields Log notification; subsequent frame sti
     assert.equal(frames[0]!['op'], Op.Log);
     assert.equal(frames[0]!['level'], 'Error');
     assert.match(String(frames[0]!['message']), /Handler '\?' threw/);
-    assert.equal(frames[1]!['op'], Op.HelloResult);
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 9);
     assert.equal(sock.destroyed, false, 'malformed JSON should not tear down the pipe');
 });
 
 test('frame parser: object missing "op" field yields Log + synthesized error response for reqId', async () => {
-    // C# correlates responses by reqId only, so a "valid JSON, missing op"
-    // frame still gets an error response keyed on the malformed reqId — this
-    // unblocks the C# call instead of letting it wait for the 60s timeout.
     const { sock } = makeHarness();
     const noOp = encodeFrame({ reqId: 5, foo: 'bar' });
     const good = encodeFrame({ op: Op.Hello, reqId: 6, protocolVersion: PROTOCOL_VERSION });
     sock.emit('data', Buffer.concat([noOp, good]));
     const frames = await waitForFrames(sock, 3);
-    // First two frames belong to the malformed input: a Log notification and
-    // a synthesized error result for reqId=5.
     assert.equal(frames[0]!['op'], Op.Log);
     assert.equal(frames[0]!['level'], 'Error');
     assert.match(String(frames[0]!['message']), /Handler '\?' threw/);
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 5);
     assert.equal(frames[1]!['ok'], false);
     assert.match(String(frames[1]!['error']), /not an object with op:string/);
-    // Third frame is the response to the good Hello that followed.
-    assert.equal(frames[2]!['op'], Op.HelloResult);
+    assert.equal(frames[2]!['op'], Op.Result);
     assert.equal(frames[2]!['reqId'], 6);
 });
 
@@ -170,13 +167,13 @@ test('frame parser: extra unknown fields on a known op are tolerated', async () 
 // Op dispatch
 // ----------------------------------------------------------------------------
 
-test('Hello: matching protocolVersion → ok=true, bridgeVersion = package.json version', async () => {
+test('Hello: matching protocolVersion → ok=true, data.bridgeVersion = package.json version', async () => {
     const { sock } = makeHarness();
     sock.emit('data', encodeFrame({ op: Op.Hello, reqId: 1, protocolVersion: PROTOCOL_VERSION }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.HelloResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['ok'], true);
-    assert.equal(frame!['bridgeVersion'], pkg.version);
+    assert.equal(data(frame)['bridgeVersion'], pkg.version);
     assert.equal(frame!['error'], '');
 });
 
@@ -191,62 +188,79 @@ test('Hello: mismatched protocolVersion → ok=false with informative error', as
     assert.match(err, new RegExp(String(PROTOCOL_VERSION)));
 });
 
-test('Init: forwards token + status to host; result echoes reqId', async () => {
+test('Connect: invokes host.connect; result echoes reqId', async () => {
     const { sock, host } = makeHarness();
-    host.nextInit({ ok: true, error: '' });
-    sock.emit('data', encodeFrame({ op: Op.Init, reqId: 50, token: 'tok-x', status: 'Online' }));
+    host.nextConnect({ ok: true, error: '' });
+    sock.emit('data', encodeFrame({ op: Op.Connect, reqId: 50 }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.InitResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 50);
     assert.equal(frame!['ok'], true);
-    const initCall = host.calls.find((c) => c.method === 'init');
-    assert.ok(initCall);
-    assert.deepEqual(initCall.args, ['tok-x', 'Online']);
+    assert.ok(host.calls.some((c) => c.method === 'connect'));
 });
 
-test('Init: host returns ok=false with error → result echoes verbatim', async () => {
+test('Connect: host returns ok=false with error → result echoes verbatim', async () => {
     const { sock, host } = makeHarness();
-    host.nextInit({ ok: false, error: 'invalid token' });
-    sock.emit('data', encodeFrame({ op: Op.Init, reqId: 51, token: 'bad', status: '' }));
+    host.nextConnect({ ok: false, error: 'invalid token' });
+    sock.emit('data', encodeFrame({ op: Op.Connect, reqId: 51 }));
     const [frame] = await waitForFrames(sock, 1);
     assert.equal(frame!['ok'], false);
     assert.equal(frame!['error'], 'invalid token');
 });
 
-test('Deinit: invokes host.deinit and returns DeinitResult', async () => {
+test('SetConfig: forwards parsed config view to host.setConfig; result ok=true', async () => {
     const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.Deinit, reqId: 60 }));
+    const config = {
+        botToken: 'tok-x', botStatus: 'Online', randomFx: true, fxChance: 50,
+        normalize: false, normalizeTarget: 18, audioQualityIndex: 2,
+        // plugin-only fields the bridge ignores:
+        ttsVoice: 'Zira', ttsVolume: 10, autoConnect: true, schemaVersion: 1,
+    };
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 70, config }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.DeinitResult);
-    assert.equal(frame!['reqId'], 60);
+    assert.equal(frame!['op'], Op.Result);
+    assert.equal(frame!['reqId'], 70);
     assert.equal(frame!['ok'], true);
-    assert.ok(host.calls.some((c) => c.method === 'deinit'));
+    const call = host.calls.find((c) => c.method === 'setConfig');
+    assert.ok(call);
+    assert.deepEqual(call.args[0], {
+        botToken: 'tok-x', botStatus: 'Online', randomFx: true, fxChance: 50,
+        normalize: false, normalizeTarget: 18, audioQualityIndex: 2,
+    });
 });
 
-test('IsConnected: result reflects host.isConnected()', async () => {
+test('SetConfig: missing fields fall back to defaults', async () => {
+    const { sock, host } = makeHarness();
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 71, config: {} }));
+    await waitForFrames(sock, 1);
+    const call = host.calls.find((c) => c.method === 'setConfig');
+    assert.deepEqual(call!.args[0], DEFAULT_CONFIG_VIEW);
+});
+
+test('IsConnected: result data reflects host.isConnected()', async () => {
     const { sock, host } = makeHarness();
     host.nextIsConnected(true);
-    sock.emit('data', encodeFrame({ op: Op.IsConnected, reqId: 70 }));
+    sock.emit('data', encodeFrame({ op: Op.IsConnected, reqId: 80 }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.IsConnectedResult);
-    assert.equal(frame!['connected'], true);
+    assert.equal(frame!['op'], Op.Result);
+    assert.equal(data(frame)['connected'], true);
 });
 
 test('GetServers: passes through host.getServers() array', async () => {
     const { sock, host } = makeHarness();
     host.nextServers(['Guild A', 'Guild B']);
-    sock.emit('data', encodeFrame({ op: Op.GetServers, reqId: 80 }));
+    sock.emit('data', encodeFrame({ op: Op.GetServers, reqId: 81 }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.GetServersResult);
-    assert.deepEqual(frame!['servers'], ['Guild A', 'Guild B']);
+    assert.equal(frame!['op'], Op.Result);
+    assert.deepEqual(data(frame)['servers'], ['Guild A', 'Guild B']);
 });
 
 test('GetServers: empty array serializes as []', async () => {
     const { sock, host } = makeHarness();
     host.nextServers([]);
-    sock.emit('data', encodeFrame({ op: Op.GetServers, reqId: 81 }));
+    sock.emit('data', encodeFrame({ op: Op.GetServers, reqId: 82 }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.deepEqual(frame!['servers'], []);
+    assert.deepEqual(data(frame)['servers'], []);
 });
 
 test('GetChannels: server name passes through to host', async () => {
@@ -254,20 +268,10 @@ test('GetChannels: server name passes through to host', async () => {
     host.nextChannels(['general', 'voice-1']);
     sock.emit('data', encodeFrame({ op: Op.GetChannels, reqId: 90, server: 'My Guild' }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.GetChannelsResult);
-    assert.deepEqual(frame!['channels'], ['general', 'voice-1']);
+    assert.equal(frame!['op'], Op.Result);
+    assert.deepEqual(data(frame)['channels'], ['general', 'voice-1']);
     const call = host.calls.find((c) => c.method === 'getChannels');
     assert.deepEqual(call?.args, ['My Guild']);
-});
-
-test('SetGame: text passes through; SetGameResult ok=true', async () => {
-    const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.SetGame, reqId: 100, text: 'Playing FFXIV' }));
-    const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SetGameResult);
-    assert.equal(frame!['ok'], true);
-    const call = host.calls.find((c) => c.method === 'setGame');
-    assert.deepEqual(call?.args, ['Playing FFXIV']);
 });
 
 test('JoinChannel: server + channel pass through; result echoed', async () => {
@@ -277,7 +281,7 @@ test('JoinChannel: server + channel pass through; result echoed', async () => {
         op: Op.JoinChannel, reqId: 110, server: 'Guild', channel: 'Voice',
     }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.JoinChannelResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['ok'], true);
     const call = host.calls.find((c) => c.method === 'joinChannel');
     assert.deepEqual(call?.args, ['Guild', 'Voice']);
@@ -294,11 +298,11 @@ test('JoinChannel: error from host echoed', async () => {
     assert.equal(frame!['error'], 'channel not found');
 });
 
-test('LeaveChannel: invokes host.leaveChannel; LeaveChannelResult ok=true', async () => {
+test('LeaveChannel: invokes host.leaveChannel; Result ok=true', async () => {
     const { sock, host } = makeHarness();
     sock.emit('data', encodeFrame({ op: Op.LeaveChannel, reqId: 120 }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.LeaveChannelResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['ok'], true);
     assert.ok(host.calls.some((c) => c.method === 'leaveChannel'));
 });
@@ -309,7 +313,7 @@ test('SpeakPcm: binary frame decodes to byte-equal Buffer at host', async () => 
     const pcm = Buffer.from([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02, 0x03]);
     sock.emit('data', encodeBinarySpeakPcmFrame(130, pcm));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SpeakResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 130);
     assert.equal(frame!['ok'], true);
     const call = host.calls.find((c) => c.method === 'speakPcm');
@@ -324,7 +328,7 @@ test('SpeakPcm: mismatched sample rate is rejected without invoking host', async
     const pcm = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
     sock.emit('data', encodeBinarySpeakPcmFrame(140, pcm, 44100, 16, 2));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SpeakResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 140);
     assert.equal(frame!['ok'], false);
     assert.match(String(frame!['error']), /Unsupported PCM format: 44100\/16\/2; expected 48000\/16\/2/);
@@ -354,95 +358,34 @@ test('SpeakPcm: binary frame split byte-by-byte still dispatches correctly', asy
     const wire = encodeBinarySpeakPcmFrame(7, pcm);
     for (const b of wire) sock.emit('data', Buffer.from([b]));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SpeakResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 7);
     const call = host.calls.find((c) => c.method === 'speakPcm');
     assert.ok(call);
     assert.equal(Buffer.compare(call.args[0] as Buffer, pcm), 0);
 });
 
-test('SpeakFile: path passes through to host; SpeakResult ok=true', async () => {
+test('SpeakFile: path passes through to host; Result ok=true', async () => {
     const { sock, host } = makeHarness();
     host.nextSpeakFile({ ok: true, error: '' });
     sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 140, path: 'C:\\sounds\\beep.wav' }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SpeakResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['reqId'], 140);
     assert.equal(frame!['ok'], true);
     const call = host.calls.find((c) => c.method === 'speakFile');
     assert.ok(call);
     assert.equal(call.args[0], 'C:\\sounds\\beep.wav');
-    // No randomEffect field -> meta.fx is false.
-    assert.equal((call.args[1] as { fx?: boolean }).fx, false);
 });
 
-test('SpeakFile: randomEffect:true sets meta.fx on the host call', async () => {
-    const { sock, host } = makeHarness();
-    host.nextSpeakFile({ ok: true, error: '' });
-    sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 145, path: 'beep.wav', randomEffect: true }));
-    await waitForFrames(sock, 1);
-    const call = host.calls.find((c) => c.method === 'speakFile');
-    assert.equal((call!.args[1] as { fx?: boolean }).fx, true);
-});
-
-test('SpeakPcm: flags bit0 sets meta.fx on the host call', async () => {
-    const { sock, host } = makeHarness();
-    host.nextSpeakPcm({ ok: true, error: '' });
-    const pcm = Buffer.from([0x00, 0x01, 0x02, 0x03]);
-    sock.emit('data', encodeBinarySpeakPcmFrame(146, pcm, 48000, 16, 2, 0x01));
-    await waitForFrames(sock, 1);
-    const call = host.calls.find((c) => c.method === 'speakPcm');
-    assert.equal((call!.args[1] as { fx?: boolean }).fx, true);
-});
-
-test('SpeakFile: host error echoed via SpeakResult', async () => {
+test('SpeakFile: host error echoed via Result', async () => {
     const { sock, host } = makeHarness();
     host.nextSpeakFile({ ok: false, error: 'Unsupported or unrecognized audio format' });
     sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 141, path: 'bad.dat' }));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SpeakResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(frame!['ok'], false);
     assert.match(String(frame!['error']), /Unsupported or unrecognized audio format/);
-});
-
-test('SetNormalization: forwards enabled + targetDb to host; result ok=true', async () => {
-    const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.SetNormalization, reqId: 150, enabled: true, targetDb: -18 }));
-    const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SetNormalizationResult);
-    assert.equal(frame!['reqId'], 150);
-    assert.equal(frame!['ok'], true);
-    const call = host.calls.find((c) => c.method === 'setNormalization');
-    assert.ok(call);
-    assert.deepEqual(call.args, [true, -18]);
-});
-
-test('SetNormalization: missing targetDb defaults to -20; enabled defaults false', async () => {
-    const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.SetNormalization, reqId: 151 }));
-    await waitForFrames(sock, 1);
-    const call = host.calls.find((c) => c.method === 'setNormalization');
-    assert.deepEqual(call!.args, [false, -20]);
-});
-
-test('SetAudioQuality: forwards bitrate to host; result ok=true', async () => {
-    const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.SetAudioQuality, reqId: 160, bitrate: 128000 }));
-    const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.SetAudioQualityResult);
-    assert.equal(frame!['reqId'], 160);
-    assert.equal(frame!['ok'], true);
-    const call = host.calls.find((c) => c.method === 'setAudioQuality');
-    assert.ok(call);
-    assert.deepEqual(call.args, [128000]);
-});
-
-test('SetAudioQuality: missing bitrate defaults to 96000', async () => {
-    const { sock, host } = makeHarness();
-    sock.emit('data', encodeFrame({ op: Op.SetAudioQuality, reqId: 161 }));
-    await waitForFrames(sock, 1);
-    const call = host.calls.find((c) => c.method === 'setAudioQuality');
-    assert.deepEqual(call!.args, [96000]);
 });
 
 test('Unknown op: emits Log notification with no reqId, level=Error', async () => {
@@ -452,7 +395,6 @@ test('Unknown op: emits Log notification with no reqId, level=Error', async () =
     assert.equal(frame!['op'], Op.Log);
     assert.equal(frame!['level'], 'Error');
     assert.match(String(frame!['message']), /Unknown op: Bogus/);
-    // Log is a notification — must not carry reqId.
     assert.equal(frame!['reqId'], undefined);
 });
 
@@ -477,46 +419,40 @@ test('reqId correlation: three concurrent requests get correctly tagged response
 // Error path
 // ----------------------------------------------------------------------------
 
-test('Handler throws: emits Log + synthesized {Op}Result with ok=false', async () => {
+test('Handler throws: emits Log + synthesized Result with ok=false', async () => {
     const { sock, host } = makeHarness();
-    host.initThrows(new Error('init blew up'));
-    sock.emit('data', encodeFrame({ op: Op.Init, reqId: 200, token: 't', status: 's' }));
+    host.connectThrows(new Error('connect blew up'));
+    sock.emit('data', encodeFrame({ op: Op.Connect, reqId: 200 }));
     const frames = await waitForFrames(sock, 2);
-    // Order per pipe-server.ts: Log first, then the synthesized result.
     assert.equal(frames[0]!['op'], Op.Log);
     assert.equal(frames[0]!['level'], 'Error');
-    assert.match(String(frames[0]!['message']), /Handler 'Init' threw: init blew up/);
-    assert.equal(frames[1]!['op'], Op.InitResult);
+    assert.match(String(frames[0]!['message']), /Handler 'Connect' threw: connect blew up/);
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 200);
     assert.equal(frames[1]!['ok'], false);
-    assert.equal(frames[1]!['error'], 'init blew up');
+    assert.equal(frames[1]!['error'], 'connect blew up');
 });
 
-test('Handler throws on SpeakPcm binary frame: synthesized error frame uses Op.SpeakResult', async () => {
-    // SpeakPcm responds with SpeakResult (not "SpeakPcmResult") on both success
-    // and error paths. The binary-frame catch must keep that asymmetry so any
-    // op-keyed dispatcher (instead of reqId-keyed) still matches.
+test('Handler throws on SpeakPcm binary frame: synthesized error frame uses Op.Result', async () => {
     const { sock, host } = makeHarness();
     host.speakPcmThrows(new Error('player crashed'));
     sock.emit('data', encodeBinarySpeakPcmFrame(300, Buffer.from('ignored')));
     const frames = await waitForFrames(sock, 2);
     assert.equal(frames[0]!['op'], Op.Log);
     assert.equal(frames[0]!['level'], 'Error');
-    assert.equal(frames[1]!['op'], Op.SpeakResult);
-    assert.notEqual(frames[1]!['op'], 'SpeakPcmResult');
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 300);
     assert.equal(frames[1]!['ok'], false);
     assert.equal(frames[1]!['error'], 'player crashed');
 });
 
-test('Handler throws on SpeakFile: synthesized error frame uses Op.SpeakResult, not SpeakFileResult', async () => {
+test('Handler throws on SpeakFile: synthesized error frame uses Op.Result', async () => {
     const { sock, host } = makeHarness();
     host.speakFileThrows(new Error('disk on fire'));
     sock.emit('data', encodeFrame({ op: Op.SpeakFile, reqId: 301, path: 'whatever.wav' }));
     const frames = await waitForFrames(sock, 2);
     assert.equal(frames[0]!['op'], Op.Log);
-    assert.equal(frames[1]!['op'], Op.SpeakResult);
-    assert.notEqual(frames[1]!['op'], 'SpeakFileResult');
+    assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 301);
     assert.equal(frames[1]!['ok'], false);
     assert.equal(frames[1]!['error'], 'disk on fire');
@@ -524,22 +460,19 @@ test('Handler throws on SpeakFile: synthesized error frame uses Op.SpeakResult, 
 
 test('Frame parser: unknown frame marker is dropped without tearing the pipe down', async () => {
     const { sock, host } = makeHarness();
-    // Length=4, payload starts with 0xFF — neither JSON nor binary SpeakPcm.
     const bad = Buffer.concat([lenPrefix(4), Buffer.from([0xff, 0x00, 0x00, 0x00])]);
     const good = encodeFrame({ op: Op.Hello, reqId: 1, protocolVersion: PROTOCOL_VERSION });
     sock.emit('data', Buffer.concat([bad, good]));
     const [frame] = await waitForFrames(sock, 1);
-    assert.equal(frame!['op'], Op.HelloResult);
+    assert.equal(frame!['op'], Op.Result);
     assert.equal(sock.destroyed, false);
-    // host should NOT have received a speakPcm call from the dropped frame
     assert.equal(host.calls.find((c) => c.method === 'speakPcm'), undefined);
 });
 
 test('Handler throws with reqId=null: only Log frame, no synthesized result', async () => {
     const { sock, host } = makeHarness();
-    host.initThrows(new Error('boom'));
-    sock.emit('data', encodeFrame({ op: Op.Init, reqId: null, token: 't', status: 's' }));
-    // Wait long enough that any second frame would have arrived.
+    host.connectThrows(new Error('boom'));
+    sock.emit('data', encodeFrame({ op: Op.Connect, reqId: null }));
     const frames = await waitForFrames(sock, 1);
     await tick(8);
     const after = decodeFrames(sock.drainedWrites()).frames;
@@ -596,7 +529,7 @@ test('write framing: response is preceded by 4-byte LE length prefix', async () 
     assert.equal(buf.length, 4 + declaredLen);
     const json = buf.subarray(4).toString('utf8');
     const parsed = JSON.parse(json) as Record<string, unknown>;
-    assert.equal(parsed['op'], Op.HelloResult);
+    assert.equal(parsed['op'], Op.Result);
 });
 
 test('write framing: each frame goes out in a single socket.write', async () => {

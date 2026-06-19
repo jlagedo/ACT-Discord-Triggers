@@ -38,8 +38,8 @@ async function main(): Promise<void> {
         // no purpose. Tear down discord.js (closes the gateway WebSocket) and exit.
         // Mirrors the .NET bridge which exits when ReadFrameAsync returns null.
         const onPeerGone = async (): Promise<void> => {
-            log.info('peer gone; deinit + exit');
-            try { await host.deinit(); } catch { /* ignore */ }
+            log.info('peer gone; disconnect + exit');
+            try { await host.disconnect(); } catch { /* ignore */ }
             // Give file-log a tick to flush, then exit.
             setImmediate(() => process.exit(0));
         };
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
 
     const shutdown = async (sig: string): Promise<void> => {
         log.info(`signal ${sig}; shutting down`);
-        try { await host.deinit(); } catch { /* ignore */ }
+        try { await host.disconnect(); } catch { /* ignore */ }
         try { server.close(); } catch { /* ignore */ }
         process.exit(0);
     };

@@ -32,12 +32,6 @@ const MIN_RMS = 1 / FULL_SCALE; // one LSB
 // worth allocating a new buffer for.
 const UNITY_EPSILON = 0.01; // ≈ 0.086 dB
 
-// Config defaults applied until the plugin pushes its own via SetNormalization.
-// The C# DiscordClient mirrors these (see its NormalizeEnabled/NormalizeTargetDb);
-// keep the two sides in step.
-export const DEFAULT_NORMALIZE_ENABLED = true;
-export const DEFAULT_NORMALIZE_TARGET_DB = -20;
-
 export interface NormalizeResult {
     pcm: Buffer;
     gain: number;     // linear gain actually applied (1 when not applied)

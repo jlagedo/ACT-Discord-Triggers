@@ -3,37 +3,33 @@ using System.Text.Json.Serialization;
 namespace DiscordBridge.Protocol {
 
     public static class ProtocolConstants {
-        public const int Version = 4;
+        public const int Version = 5;
     }
 
+    // Three channels share one op set:
+    //   Commands  (.NET -> bridge, request/response; reply is always Result)
+    //   Config    (.NET -> bridge, the single SetConfig op carrying the whole
+    //              settings POCO; adding a config field is additive and does NOT
+    //              bump Version)
+    //   Notifications (bridge -> .NET push: BotReady / Log / Disconnected)
     public static class Op {
         public const string Hello = "Hello";
-        public const string HelloResult = "HelloResult";
-        public const string Init = "Init";
-        public const string InitResult = "InitResult";
-        public const string Deinit = "Deinit";
-        public const string DeinitResult = "DeinitResult";
-        public const string IsConnected = "IsConnected";
-        public const string IsConnectedResult = "IsConnectedResult";
-        public const string GetServers = "GetServers";
-        public const string GetServersResult = "GetServersResult";
-        public const string GetChannels = "GetChannels";
-        public const string GetChannelsResult = "GetChannelsResult";
-        public const string SetGame = "SetGame";
-        public const string SetGameResult = "SetGameResult";
-        public const string JoinChannel = "JoinChannel";
-        public const string JoinChannelResult = "JoinChannelResult";
-        public const string LeaveChannel = "LeaveChannel";
-        public const string LeaveChannelResult = "LeaveChannelResult";
-        public const string SpeakPcm = "SpeakPcm";
-        public const string SpeakFile = "SpeakFile";
-        public const string SpeakResult = "SpeakResult";
-        public const string SetNormalization = "SetNormalization";
-        public const string SetNormalizationResult = "SetNormalizationResult";
-        public const string SetAudioQuality = "SetAudioQuality";
-        public const string SetAudioQualityResult = "SetAudioQualityResult";
+        public const string SetConfig = "SetConfig";
+        public const string Connect = "Connect";
         public const string Shutdown = "Shutdown";
+        public const string IsConnected = "IsConnected";
+        public const string GetServers = "GetServers";
+        public const string GetChannels = "GetChannels";
+        public const string JoinChannel = "JoinChannel";
+        public const string LeaveChannel = "LeaveChannel";
+        public const string SpeakFile = "SpeakFile";
+        public const string SpeakPcm = "SpeakPcm";
 
+        // The single response envelope op. Every command/config reply is "Result",
+        // correlated by reqId (PipeClient matches on reqId, ignoring the op).
+        public const string Result = "Result";
+
+        // Notifications (server-pushed; no reqId).
         public const string BotReady = "BotReady";
         public const string Log = "Log";
         public const string Disconnected = "Disconnected";
@@ -45,14 +41,31 @@ namespace DiscordBridge.Protocol {
         int? ReqId { get; set; }
     }
 
+    // ---- Requests ----
+
     public class HelloRequest : IBridgeRequest {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Hello;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("protocolVersion")] public int ProtocolVersion { get; set; }
     }
 
-    public class DeinitRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Deinit;
+    // Config push. Carries the whole plugin settings object; the bridge reads the
+    // fields it needs and ignores the rest. Generic so this lower assembly need not
+    // reference the plugin's PluginSettings type — PipeClient.SendFrameAsync
+    // serializes by runtime type, so the closed generic serializes the full POCO.
+    public class SetConfigRequest<TConfig> : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetConfig;
+        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
+        [JsonPropertyName("config")] public TConfig Config { get; set; }
+    }
+
+    public class ConnectRequest : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Connect;
+        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
+    }
+
+    public class ShutdownRequest : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Shutdown;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
     }
 
@@ -66,59 +79,10 @@ namespace DiscordBridge.Protocol {
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
     }
 
-    public class LeaveChannelRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.LeaveChannel;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-    }
-
-    public class ShutdownRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Shutdown;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-    }
-
-    public class HelloResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.HelloResult;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("ok")] public bool Ok { get; set; }
-        [JsonPropertyName("bridgeVersion")] public string BridgeVersion { get; set; } = "";
-        [JsonPropertyName("error")] public string Error { get; set; } = "";
-    }
-
-    public class InitRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Init;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("token")] public string Token { get; set; } = "";
-        [JsonPropertyName("status")] public string Status { get; set; } = "";
-    }
-
     public class GetChannelsRequest : IBridgeRequest {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.GetChannels;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("server")] public string Server { get; set; } = "";
-    }
-
-    public class GetChannelsResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.GetChannelsResult;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("channels")] public string[] Channels { get; set; } = new string[0];
-    }
-
-    public class GetServersResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.GetServersResult;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("servers")] public string[] Servers { get; set; } = new string[0];
-    }
-
-    public class IsConnectedResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.IsConnectedResult;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("connected")] public bool Connected { get; set; }
-    }
-
-    public class SetGameRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetGame;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("text")] public string Text { get; set; } = "";
     }
 
     public class JoinChannelRequest : IBridgeRequest {
@@ -128,50 +92,56 @@ namespace DiscordBridge.Protocol {
         [JsonPropertyName("channel")] public string Channel { get; set; } = "";
     }
 
-    public class JoinChannelResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.JoinChannelResult;
+    public class LeaveChannelRequest : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.LeaveChannel;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("ok")] public bool Ok { get; set; }
-        [JsonPropertyName("error")] public string Error { get; set; } = "";
     }
-
-    // SpeakPcm is sent as a length-prefixed BINARY frame, not JSON.
-    // See PipeClient.SendSpeakPcmAsync / pipe-server.ts _handleBinarySpeakPcm.
-    // Layout (after the outer 4-byte LE length): [0x01][reqId u32 LE][sampleRate u32 LE][bits u8][channels u8][flags u8][raw PCM...]
-    // flags bit0 = apply a random sound effect. Response stays JSON: { op:"SpeakResult", reqId, ok, error }.
 
     public class SpeakFileRequest : IBridgeRequest {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SpeakFile;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("path")] public string Path { get; set; } = "";
-        // Mirrors the binary SpeakPcm flags bit0: apply a random sound effect to this trigger.
-        [JsonPropertyName("randomEffect")] public bool RandomEffect { get; set; }
     }
 
-    // Auto-leveling config. Global, not per-trigger: the bridge stores it and
-    // applies it to every clip. TargetDb is a negative dBFS RMS target (e.g. -20).
-    public class SetNormalizationRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetNormalization;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("enabled")] public bool Enabled { get; set; }
-        [JsonPropertyName("targetDb")] public int TargetDb { get; set; }
-    }
+    // SpeakPcm is sent as a length-prefixed BINARY frame, not JSON.
+    // See PipeClient.SendSpeakPcmAsync / pipe-server.ts _handleBinarySpeakPcm.
+    // Layout (after the outer 4-byte LE length): [0x01][reqId u32 LE][sampleRate u32 LE][bits u8][channels u8][raw PCM...]
+    // Header is 11 bytes. Whether a random effect is applied is decided by the
+    // bridge from the current config, not per clip. Response is the JSON Result
+    // envelope: { op:"Result", reqId, ok, error }.
 
-    // Opus encoder bitrate config. Global, not per-trigger: the bridge stores it
-    // and applies it to the live encoder. Bitrate is bits/sec; prism's setBitrate
-    // clamps to [16000, 128000]. UI tiers: Low 48000 / Medium 96000 / High 128000.
-    public class SetAudioQualityRequest : IBridgeRequest {
-        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetAudioQuality;
-        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
-        [JsonPropertyName("bitrate")] public int Bitrate { get; set; }
-    }
+    // ---- Response envelope ----
 
-    public class OkResponse {
-        [JsonPropertyName("op")] public string Op { get; set; } = "";
+    // Every command/config reply. C# correlates by reqId, so the op is always
+    // "Result". Queries that return data use BridgeResponse<TData> below.
+    public class BridgeResponse {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Result;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("ok")] public bool Ok { get; set; }
         [JsonPropertyName("error")] public string Error { get; set; } = "";
     }
+
+    public class BridgeResponse<TData> : BridgeResponse {
+        [JsonPropertyName("data")] public TData Data { get; set; }
+    }
+
+    public class HelloData {
+        [JsonPropertyName("bridgeVersion")] public string BridgeVersion { get; set; } = "";
+    }
+
+    public class ConnectedData {
+        [JsonPropertyName("connected")] public bool Connected { get; set; }
+    }
+
+    public class ServersData {
+        [JsonPropertyName("servers")] public string[] Servers { get; set; } = new string[0];
+    }
+
+    public class ChannelsData {
+        [JsonPropertyName("channels")] public string[] Channels { get; set; } = new string[0];
+    }
+
+    // ---- Notifications ----
 
     public class LogNotification {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.Log;

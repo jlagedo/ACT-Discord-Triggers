@@ -176,9 +176,9 @@ test('lifecycle: Hello handshake with matching version succeeds', skipOpts, asyn
     try {
         const client = await TestPipeClient.connect(bridge.pipePath);
         const resp = await client.send(Op.Hello, { protocolVersion: PROTOCOL_VERSION });
-        assert.equal(resp['op'], Op.HelloResult);
+        assert.equal(resp['op'], Op.Result);
         assert.equal(resp['ok'], true);
-        assert.equal(typeof resp['bridgeVersion'], 'string');
+        assert.equal(typeof (resp['data'] as Record<string, unknown>)['bridgeVersion'], 'string');
         assert.equal(resp['error'], '');
         client.close();
     } finally {
@@ -195,8 +195,8 @@ test('lifecycle: Hello with wrong version returns ok=false; bridge stays respons
         assert.match(String(bad['error']), /Protocol version mismatch/);
         // Same connection: subsequent ops still work.
         const conn = await client.send(Op.IsConnected);
-        assert.equal(conn['op'], Op.IsConnectedResult);
-        assert.equal(conn['connected'], false);
+        assert.equal(conn['op'], Op.Result);
+        assert.equal((conn['data'] as Record<string, unknown>)['connected'], false);
         client.close();
     } finally {
         await killIfAlive(bridge);
@@ -242,14 +242,14 @@ test('lifecycle: peer disconnect (without Shutdown) causes bridge to exit', skip
     }
 });
 
-test('lifecycle: GetServers before Init returns empty array', skipOpts, async () => {
+test('lifecycle: GetServers before Connect returns empty array', skipOpts, async () => {
     const bridge = await spawnBridge('getservers');
     try {
         const client = await TestPipeClient.connect(bridge.pipePath);
         await client.send(Op.Hello, { protocolVersion: PROTOCOL_VERSION });
         const resp = await client.send(Op.GetServers);
-        assert.equal(resp['op'], Op.GetServersResult);
-        assert.deepEqual(resp['servers'], []);
+        assert.equal(resp['op'], Op.Result);
+        assert.deepEqual((resp['data'] as Record<string, unknown>)['servers'], []);
         client.close();
     } finally {
         await killIfAlive(bridge);

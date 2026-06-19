@@ -634,6 +634,12 @@ namespace ACT_DiscordTriggers {
     private GroupBox grpTTS;
     private GroupBox grpFx;
     private readonly DispatcherTimer statusDebounceTimer = new DispatcherTimer();
+    // FX/normalization/audio-quality changes can arrive in bursts: TrackBar.Scroll
+    // fires once per value while a slider is dragged. Coalesce them into a single
+    // SetConfig push rather than one pipe frame per tick. Shorter than the status
+    // debounce — a slider drag finishes in ~1s, so a small window collapses it
+    // without feeling laggy.
+    private readonly DispatcherTimer configDebounceTimer = new DispatcherTimer();
     #endregion
 
     public DiscordPlugin() {
@@ -656,11 +662,20 @@ namespace ACT_DiscordTriggers {
     private void InitializeDebounceTimer() {
       statusDebounceTimer.Interval = TimeSpan.FromMilliseconds(10000);
       statusDebounceTimer.Tick += DebounceTimer_Tick;
+      configDebounceTimer.Interval = TimeSpan.FromMilliseconds(400);
+      configDebounceTimer.Tick += ConfigDebounceTimer_Tick;
     }
 
-    private async void DebounceTimer_Tick(object sender, EventArgs e) {
+    // Bot status is part of the config object; push the whole thing. The textbox
+    // fires TextChanged per keystroke, hence the long debounce.
+    private void DebounceTimer_Tick(object sender, EventArgs e) {
       statusDebounceTimer.Stop();
-      await DiscordClient.SetGameAsync(txtBotStatus.Text);
+      PushConfigNow();
+    }
+
+    private void ConfigDebounceTimer_Tick(object sender, EventArgs e) {
+      configDebounceTimer.Stop();
+      PushConfigNow();
     }
 
     #region IActPluginV1 Members
@@ -898,7 +913,10 @@ namespace ACT_DiscordTriggers {
           Log("Already connected to Discord.");
           return;
         }
-        await DiscordClient.InitAsync(txtToken.Text, txtBotStatus.Text);
+        // The whole settings object (token included) is the config the bridge logs
+        // in with, so capture the live controls before connecting.
+        CaptureControlsToSettings();
+        await DiscordClient.ConnectAsync(settings);
       } catch (Exception ex) {
         Log("Connect failed: " + ex.Message);
       }
@@ -924,52 +942,55 @@ namespace ACT_DiscordTriggers {
        statusDebounceTimer.Start();
     }
 
-    // Mirror the random-effects UI into DiscordClient. DiscordClient rolls the dice
-    // per trigger on a background thread, so it reads these plain fields rather than
-    // touching the controls cross-thread.
+    // All of FX / normalization / audio-quality are now plain config the bridge
+    // interprets (it rolls the fx dice, negates the normalize target, maps the
+    // quality tier to a bitrate). So a change here just refreshes the UI labels and
+    // schedules a debounced SetConfig push (see PushConfig). The Apply* methods are
+    // label-only and are also called once at startup to initialize the labels.
     private void fxSettings_Changed(object sender, EventArgs e) {
       ApplyFxSettings();
+      PushConfig();
     }
 
     private void ApplyFxSettings() {
-      DiscordClient.RandomEffectsEnabled = chkRandomFx.Checked;
-      DiscordClient.RandomEffectChance = sliderFxChance.Value;
       lblFxChance.Text = "FX Chance: " + sliderFxChance.Value + "%";
     }
 
-    // Mirror the auto-leveling UI into DiscordClient, then push it to the bridge.
-    // Unlike FX (rolled per trigger), normalization is global bridge config, so a
-    // change here sends a SetNormalization op (a no-op while disconnected — connect
-    // re-pushes the current values). The slider holds the target magnitude in dB;
-    // the bridge wants a negative dBFS value, hence the sign flip.
     private void normalizeSettings_Changed(object sender, EventArgs e) {
       ApplyNormalizationSettings();
-      _ = DiscordClient.SetNormalizationAsync();
+      PushConfig();
     }
 
     private void ApplyNormalizationSettings() {
-      DiscordClient.NormalizeEnabled = chkNormalize.Checked;
-      DiscordClient.NormalizeTargetDb = -sliderNormalizeTarget.Value;
       lblNormalizeTarget.Text = "Auto-level Target: -" + sliderNormalizeTarget.Value + " dBFS";
     }
 
-    // Audio-quality tier (Opus bitrate). Maps the dropdown to a bitrate, mirrors
-    // it into DiscordClient, then pushes a SetAudioQuality op (a no-op while
-    // disconnected — connect re-pushes the current value). The High tier may
-    // exceed an unboosted channel's 96 kbps cap, so we show an inline warning;
-    // the overshoot is harmless (Discord relays it), just channel-dependent.
-    private static readonly int[] AudioQualityBitrates = { 48000, 96000, 128000 };
-
+    // The High tier may exceed an unboosted channel's 96 kbps cap, so we show an
+    // inline warning; the overshoot is harmless (Discord relays it), just
+    // channel-dependent. The tier→bitrate mapping itself lives in the bridge.
     private void audioQualitySettings_Changed(object sender, EventArgs e) {
       ApplyAudioQualitySettings();
-      _ = DiscordClient.SetAudioQualityAsync();
+      PushConfig();
     }
 
     private void ApplyAudioQualitySettings() {
-      int idx = cmbAudioQuality.SelectedIndex;
-      if (idx < 0 || idx >= AudioQualityBitrates.Length) idx = 1; // default Medium
-      DiscordClient.AudioQualityBitrate = AudioQualityBitrates[idx];
-      lblAudioQualityWarn.Visible = (idx == 2); // High
+      lblAudioQualityWarn.Visible = (cmbAudioQuality.SelectedIndex == 2); // High
+    }
+
+    // Coalesce a burst of FX/normalize/quality changes (a slider drag fires
+    // TrackBar.Scroll per tick) into a single SetConfig push by (re)starting the
+    // debounce timer; the actual push happens on its Tick.
+    private void PushConfig() {
+      configDebounceTimer.Stop();
+      configDebounceTimer.Start();
+    }
+
+    // Capture the live control values into the settings model and push the whole
+    // thing to the bridge as the config object. No-op while disconnected —
+    // ConnectAsync re-pushes on connect anyway.
+    private void PushConfigNow() {
+      CaptureControlsToSettings();
+      _ = DiscordClient.SetConfigAsync(settings);
     }
     #endregion
 

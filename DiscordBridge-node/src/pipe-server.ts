@@ -9,14 +9,13 @@ import {
     FRAME_JSON_MARKER,
     FRAME_BINARY_SPEAK_PCM,
     BINARY_SPEAK_PCM_HEADER_BYTES,
-    SPEAK_FLAG_RANDOM_EFFECT,
+    DEFAULT_CONFIG_VIEW,
+    type BridgeConfigView,
     type Notification,
-    type OpName,
     type OutboundFrame,
     type ReqId,
+    type ResultData,
 } from './protocol.js';
-import { DEFAULT_NORMALIZE_TARGET_DB } from './normalize.js';
-import { DEFAULT_AUDIO_BITRATE } from './audio-quality.js';
 import pkg from '../package.json' with { type: 'json' };
 
 const BRIDGE_VERSION: string = pkg.version;
@@ -30,25 +29,23 @@ export interface OpResult { ok: boolean; error: string }
 // Per-trigger latency context handed to the host so it can stamp the local
 // pipeline (recv -> enqueue) and snapshot voice RTT for that exact trigger.
 // recvT is a monotonic performance.now() captured the moment the frame was read.
-// fx requests a random sound effect be applied to this one trigger (the plugin
-// rolled the dice; the host picks which effect + params).
-export interface SpeakMeta { reqId: number; recvT: number; fx?: boolean }
+// Whether a random effect is applied is decided by the host from its config, not
+// per trigger — so there is no fx flag here.
+export interface SpeakMeta { reqId: number; recvT: number }
 
 // Minimal surface PipeServer needs from the host. discord-host.ts implements this.
 export interface Host {
     setNotifier(fn: Notifier): void;
-    init(token: string, status: string): Promise<OpResult>;
-    deinit(): Promise<void>;
+    setConfig(config: BridgeConfigView): void;
+    connect(): Promise<OpResult>;
+    disconnect(): Promise<void>;
     isConnected(): boolean;
     getServers(): string[];
     getChannels(serverName: string): string[];
-    setGame(text: string): Promise<void>;
     joinChannel(serverName: string, channelName: string): Promise<OpResult>;
     leaveChannel(): Promise<void>;
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult;
     speakFile(path: string, meta?: SpeakMeta): Promise<OpResult>;
-    setNormalization(enabled: boolean, targetDb: number): void;
-    setAudioQuality(bitrate: number): void;
 }
 
 interface IncomingMessage {
@@ -67,6 +64,26 @@ function asString(v: unknown, fallback = ''): string {
 
 function asNumber(v: unknown): number | null {
     return typeof v === 'number' ? v : null;
+}
+
+function asBool(v: unknown, fallback: boolean): boolean {
+    return typeof v === 'boolean' ? v : fallback;
+}
+
+// Coerce the raw incoming config object into the bridge's view. The plugin sends
+// its whole settings POCO; we read the fields we care about and default the rest.
+// Unknown fields (token persistence, TTS, autoConnect) are simply ignored.
+function parseConfig(raw: Record<string, unknown>): BridgeConfigView {
+    const d = DEFAULT_CONFIG_VIEW;
+    return {
+        botToken: asString(raw['botToken'], d.botToken),
+        botStatus: asString(raw['botStatus'], d.botStatus),
+        randomFx: asBool(raw['randomFx'], d.randomFx),
+        fxChance: asNumber(raw['fxChance']) ?? d.fxChance,
+        normalize: asBool(raw['normalize'], d.normalize),
+        normalizeTarget: asNumber(raw['normalizeTarget']) ?? d.normalizeTarget,
+        audioQualityIndex: asNumber(raw['audioQualityIndex']) ?? d.audioQualityIndex,
+    };
 }
 
 export class PipeServer {
@@ -143,29 +160,25 @@ export class PipeServer {
         const sampleRate = payload.readUInt32LE(5);
         const bits = payload.readUInt8(9);
         const channels = payload.readUInt8(10);
-        const flags = payload.readUInt8(11);
-        const fx = (flags & SPEAK_FLAG_RANDOM_EFFECT) !== 0;
         const pcm = payload.subarray(BINARY_SPEAK_PCM_HEADER_BYTES);
-        log.info(`--> SpeakPcm reqId=${reqId} pcmBytes=${pcm.length} fmt=${sampleRate}/${bits}/${channels} fx=${fx}`);
+        log.info(`--> SpeakPcm reqId=${reqId} pcmBytes=${pcm.length} fmt=${sampleRate}/${bits}/${channels}`);
         // Bridge audio path is hard-wired to 48 kHz / 16-bit / stereo end-to-end
         // (see CLAUDE.md "Audio format constraint"). Reject mismatched payloads
         // up front rather than feeding the mixer something it would replay at
         // the wrong rate or with garbled framing.
         if (sampleRate !== 48000 || bits !== 16 || channels !== 2) {
-            await this._sendFrame({
-                op: Op.SpeakResult, reqId, ok: false,
-                error: `Unsupported PCM format: ${sampleRate}/${bits}/${channels}; expected 48000/16/2`,
-            });
+            await this._result(reqId, false,
+                `Unsupported PCM format: ${sampleRate}/${bits}/${channels}; expected 48000/16/2`);
             return;
         }
         try {
-            const r = this.host.speakPcm(pcm, { reqId, recvT, fx });
-            await this._sendFrame({ op: Op.SpeakResult, reqId, ok: r.ok, error: r.error });
+            const r = this.host.speakPcm(pcm, { reqId, recvT });
+            await this._result(reqId, r.ok, r.error);
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             log.error(`SpeakPcm handler threw: ${message}`);
             await this._sendFrame({ op: Op.Log, level: 'Error', message: `Handler 'SpeakPcm' threw: ${message}` });
-            await this._sendFrame({ op: Op.SpeakResult, reqId, ok: false, error: message });
+            await this._result(reqId, false, message);
         }
     }
 
@@ -176,9 +189,7 @@ export class PipeServer {
             const parsed: unknown = JSON.parse(json);
             // Pull reqId opportunistically *before* shape validation so a
             // malformed-but-reqId-bearing frame can get a synthesized error
-            // response via the catch path. C# correlates responses by reqId
-            // alone (the op string is ignored at correlation time), so the
-            // ?Result op below is an intentional placeholder.
+            // response via the catch path.
             reqId = asNumber((parsed as { reqId?: unknown } | null)?.reqId);
             if (!isIncomingMessage(parsed)) {
                 throw new Error('frame is not an object with op:string');
@@ -190,77 +201,56 @@ export class PipeServer {
                 case Op.Hello: {
                     const protocolVersion = asNumber(parsed['protocolVersion']);
                     const ok = protocolVersion === PROTOCOL_VERSION;
-                    await this._sendFrame({
-                        op: Op.HelloResult, reqId,
-                        ok,
-                        bridgeVersion: BRIDGE_VERSION,
-                        error: ok ? '' : `Protocol version mismatch: bridge=${PROTOCOL_VERSION}, plugin=${protocolVersion}`,
-                    });
+                    await this._result(reqId, ok,
+                        ok ? '' : `Protocol version mismatch: bridge=${PROTOCOL_VERSION}, plugin=${protocolVersion}`,
+                        { bridgeVersion: BRIDGE_VERSION });
                     break;
                 }
-                case Op.Init: {
-                    const r = await this.host.init(asString(parsed['token']), asString(parsed['status']));
-                    await this._sendFrame({ op: Op.InitResult, reqId, ok: r.ok, error: r.error });
+                case Op.SetConfig: {
+                    const raw = parsed['config'];
+                    const cfg = (typeof raw === 'object' && raw !== null)
+                        ? parseConfig(raw as Record<string, unknown>)
+                        : DEFAULT_CONFIG_VIEW;
+                    this.host.setConfig(cfg);
+                    await this._result(reqId, true, '');
                     break;
                 }
-                case Op.Deinit: {
-                    await this.host.deinit();
-                    await this._sendFrame({ op: Op.DeinitResult, reqId, ok: true, error: '' });
+                case Op.Connect: {
+                    const r = await this.host.connect();
+                    await this._result(reqId, r.ok, r.error);
                     break;
                 }
                 case Op.IsConnected: {
-                    await this._sendFrame({ op: Op.IsConnectedResult, reqId, connected: this.host.isConnected() });
+                    await this._result(reqId, true, '', { connected: this.host.isConnected() });
                     break;
                 }
                 case Op.GetServers: {
-                    await this._sendFrame({ op: Op.GetServersResult, reqId, servers: this.host.getServers() });
+                    await this._result(reqId, true, '', { servers: this.host.getServers() });
                     break;
                 }
                 case Op.GetChannels: {
-                    await this._sendFrame({
-                        op: Op.GetChannelsResult, reqId,
-                        channels: this.host.getChannels(asString(parsed['server'])),
-                    });
-                    break;
-                }
-                case Op.SetGame: {
-                    await this.host.setGame(asString(parsed['text']));
-                    await this._sendFrame({ op: Op.SetGameResult, reqId, ok: true, error: '' });
+                    await this._result(reqId, true, '', { channels: this.host.getChannels(asString(parsed['server'])) });
                     break;
                 }
                 case Op.JoinChannel: {
                     const r = await this.host.joinChannel(asString(parsed['server']), asString(parsed['channel']));
-                    await this._sendFrame({ op: Op.JoinChannelResult, reqId, ok: r.ok, error: r.error });
+                    await this._result(reqId, r.ok, r.error);
                     break;
                 }
                 case Op.LeaveChannel: {
                     await this.host.leaveChannel();
-                    await this._sendFrame({ op: Op.LeaveChannelResult, reqId, ok: true, error: '' });
+                    await this._result(reqId, true, '');
                     break;
                 }
                 case Op.SpeakFile: {
                     const recvT = performance.now();
-                    const fx = parsed['randomEffect'] === true;
-                    const r = await this.host.speakFile(asString(parsed['path']), { reqId: reqId ?? 0, recvT, fx });
-                    await this._sendFrame({ op: Op.SpeakResult, reqId, ok: r.ok, error: r.error });
-                    break;
-                }
-                case Op.SetNormalization: {
-                    const enabled = parsed['enabled'] === true;
-                    const targetDb = asNumber(parsed['targetDb']) ?? DEFAULT_NORMALIZE_TARGET_DB;
-                    this.host.setNormalization(enabled, targetDb);
-                    await this._sendFrame({ op: Op.SetNormalizationResult, reqId, ok: true, error: '' });
-                    break;
-                }
-                case Op.SetAudioQuality: {
-                    const bitrate = asNumber(parsed['bitrate']) ?? DEFAULT_AUDIO_BITRATE;
-                    this.host.setAudioQuality(bitrate);
-                    await this._sendFrame({ op: Op.SetAudioQualityResult, reqId, ok: true, error: '' });
+                    const r = await this.host.speakFile(asString(parsed['path']), { reqId: reqId ?? 0, recvT });
+                    await this._result(reqId, r.ok, r.error);
                     break;
                 }
                 case Op.Shutdown: {
                     log.info('Shutdown requested');
-                    try { await this.host.deinit(); } catch { /* ignore */ }
+                    try { await this.host.disconnect(); } catch { /* ignore */ }
                     try { this.socket.end(); } catch { /* ignore */ }
                     setImmediate(() => process.exit(0));
                     break;
@@ -281,15 +271,21 @@ export class PipeServer {
                     this._sendFrame({ op: Op.Log, level: 'Error', message: `Handler '${op}' threw: ${message}` }),
                 ];
                 if (reqId !== null) {
-                    // SpeakFile's success op is `SpeakResult`, not `SpeakFileResult`. Keep the
-                    // error frame symmetric with the success path so dispatchers that key on
-                    // `op` (not just reqId) still match.
-                    const resultOp: OpName = op === Op.SpeakFile ? Op.SpeakResult : ((op + 'Result') as OpName);
-                    pending.push(this._sendFrame({ op: resultOp, reqId, ok: false, error: message }));
+                    pending.push(this._result(reqId, false, message));
                 }
                 await Promise.all(pending);
             } catch { /* ignore */ }
         }
+    }
+
+    // The single response envelope: every command/config reply is `Result`,
+    // correlated by reqId. `data` carries op-specific payload for queries.
+    private _result(reqId: ReqId, ok: boolean, error: string, data?: ResultData): Promise<void> {
+        return this._sendFrame(
+            data !== undefined
+                ? { op: Op.Result, reqId, ok, error, data }
+                : { op: Op.Result, reqId, ok, error },
+        );
     }
 
     private _sendFrame(obj: OutboundFrame): Promise<void> {

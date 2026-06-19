@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
 namespace ACT_DiscordTriggers.Settings {
@@ -20,25 +21,29 @@ namespace ACT_DiscordTriggers.Settings {
     /// </summary>
     public const int CurrentSchemaVersion = 1;
 
+    // [JsonPropertyName] sets the wire names the node bridge reads (this whole POCO
+    // is sent verbatim as the SetConfig payload). XML attributes drive on-disk
+    // persistence and are independent of the JSON wire shape.
     [XmlAttribute]
+    [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
     // --- Connection ---
-    public string BotToken { get; set; } = "";
-    public string BotStatus { get; set; } = "Playing with ACT Triggers";
-    public bool AutoConnect { get; set; } = false;
+    [JsonPropertyName("botToken")] public string BotToken { get; set; } = "";
+    [JsonPropertyName("botStatus")] public string BotStatus { get; set; } = "Playing with ACT Triggers";
+    [JsonPropertyName("autoConnect")] public bool AutoConnect { get; set; } = false;
 
-    // --- Text-to-speech ---
+    // --- Text-to-speech (synthesized in-process; the bridge ignores these) ---
     /// <summary>Installed-voice name; empty selects the first available voice.</summary>
-    public string TtsVoice { get; set; } = "";
-    public int TtsVolume { get; set; } = 10;   // slider 0..20
-    public int TtsSpeed { get; set; } = 10;    // slider 0..20
+    [JsonPropertyName("ttsVoice")] public string TtsVoice { get; set; } = "";
+    [JsonPropertyName("ttsVolume")] public int TtsVolume { get; set; } = 10;   // slider 0..20
+    [JsonPropertyName("ttsSpeed")] public int TtsSpeed { get; set; } = 10;    // slider 0..20
 
-    // --- Effects & leveling ---
-    public bool RandomFx { get; set; } = false;
-    public int FxChance { get; set; } = 25;            // 0..100 (%)
-    public bool Normalize { get; set; } = true;
-    public int NormalizeTarget { get; set; } = 20;     // 12..30, positive dB magnitude
-    public int AudioQualityIndex { get; set; } = 1;    // 0=Low, 1=Medium, 2=High
+    // --- Effects & leveling (interpreted by the bridge) ---
+    [JsonPropertyName("randomFx")] public bool RandomFx { get; set; } = false;
+    [JsonPropertyName("fxChance")] public int FxChance { get; set; } = 25;            // 0..100 (%)
+    [JsonPropertyName("normalize")] public bool Normalize { get; set; } = true;
+    [JsonPropertyName("normalizeTarget")] public int NormalizeTarget { get; set; } = 20;     // 12..30, positive dB magnitude
+    [JsonPropertyName("audioQualityIndex")] public int AudioQualityIndex { get; set; } = 1;  // 0=Low, 1=Medium, 2=High
   }
 }

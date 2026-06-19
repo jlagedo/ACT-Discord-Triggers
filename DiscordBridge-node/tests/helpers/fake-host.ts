@@ -1,5 +1,5 @@
 import type { Host, Notifier, OpResult, SpeakMeta } from '../../src/pipe-server.js';
-import type { Notification } from '../../src/protocol.js';
+import type { BridgeConfigView, Notification } from '../../src/protocol.js';
 
 export interface RecordedCall {
     method: string;
@@ -14,7 +14,7 @@ export class FakeHost implements Host {
     public readonly calls: RecordedCall[] = [];
     public notify: Notifier | null = null;
 
-    private _nextInit: OpResult = { ok: true, error: '' };
+    private _nextConnect: OpResult = { ok: true, error: '' };
     private _nextJoinChannel: OpResult = { ok: true, error: '' };
     private _nextSpeakPcm: OpResult = { ok: true, error: '' };
     private _nextSpeakFile: OpResult = { ok: true, error: '' };
@@ -22,9 +22,8 @@ export class FakeHost implements Host {
     private _nextServers: string[] = [];
     private _nextChannels: string[] = [];
 
-    private _initThrows: Error | null = null;
+    private _connectThrows: Error | null = null;
     private _joinThrows: Error | null = null;
-    private _setGameThrows: Error | null = null;
     private _speakPcmThrows: Error | null = null;
     private _speakFileThrows: Error | null = null;
 
@@ -33,14 +32,18 @@ export class FakeHost implements Host {
         this.notify = fn;
     }
 
-    async init(token: string, status: string): Promise<OpResult> {
-        this.calls.push({ method: 'init', args: [token, status] });
-        if (this._initThrows) throw this._initThrows;
-        return this._nextInit;
+    setConfig(config: BridgeConfigView): void {
+        this.calls.push({ method: 'setConfig', args: [config] });
     }
 
-    async deinit(): Promise<void> {
-        this.calls.push({ method: 'deinit', args: [] });
+    async connect(): Promise<OpResult> {
+        this.calls.push({ method: 'connect', args: [] });
+        if (this._connectThrows) throw this._connectThrows;
+        return this._nextConnect;
+    }
+
+    async disconnect(): Promise<void> {
+        this.calls.push({ method: 'disconnect', args: [] });
     }
 
     isConnected(): boolean {
@@ -56,11 +59,6 @@ export class FakeHost implements Host {
     getChannels(serverName: string): string[] {
         this.calls.push({ method: 'getChannels', args: [serverName] });
         return this._nextChannels;
-    }
-
-    async setGame(text: string): Promise<void> {
-        this.calls.push({ method: 'setGame', args: [text] });
-        if (this._setGameThrows) throw this._setGameThrows;
     }
 
     async joinChannel(serverName: string, channelName: string): Promise<OpResult> {
@@ -85,15 +83,7 @@ export class FakeHost implements Host {
         return this._nextSpeakFile;
     }
 
-    setNormalization(enabled: boolean, targetDb: number): void {
-        this.calls.push({ method: 'setNormalization', args: [enabled, targetDb] });
-    }
-
-    setAudioQuality(bitrate: number): void {
-        this.calls.push({ method: 'setAudioQuality', args: [bitrate] });
-    }
-
-    nextInit(r: OpResult): void { this._nextInit = r; }
+    nextConnect(r: OpResult): void { this._nextConnect = r; }
     nextJoinChannel(r: OpResult): void { this._nextJoinChannel = r; }
     nextSpeakPcm(r: OpResult): void { this._nextSpeakPcm = r; }
     nextSpeakFile(r: OpResult): void { this._nextSpeakFile = r; }
@@ -101,9 +91,8 @@ export class FakeHost implements Host {
     nextServers(s: string[]): void { this._nextServers = s; }
     nextChannels(c: string[]): void { this._nextChannels = c; }
 
-    initThrows(err: Error): void { this._initThrows = err; }
+    connectThrows(err: Error): void { this._connectThrows = err; }
     joinChannelThrows(err: Error): void { this._joinThrows = err; }
-    setGameThrows(err: Error): void { this._setGameThrows = err; }
     speakPcmThrows(err: Error): void { this._speakPcmThrows = err; }
     speakFileThrows(err: Error): void { this._speakFileThrows = err; }
 

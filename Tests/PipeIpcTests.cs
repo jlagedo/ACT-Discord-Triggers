@@ -1,7 +1,6 @@
 using DiscordAPI;
 using DiscordBridge.Protocol;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -41,6 +40,12 @@ namespace ActDiscordTriggers.Tests {
             try { serverPipe?.Dispose(); } catch { }
         }
 
+        private static BridgeResponse<HelloData> Hello(int reqId, string bridgeVersion) {
+            return new BridgeResponse<HelloData> {
+                ReqId = reqId, Ok = true, Data = new HelloData { BridgeVersion = bridgeVersion },
+            };
+        }
+
         private static async Task<JsonElement> ReadFrameAsync(Stream pipe) {
             byte[] payload = await ReadRawFrameAsync(pipe);
             using var doc = JsonDocument.Parse(payload);
@@ -78,7 +83,7 @@ namespace ActDiscordTriggers.Tests {
         public async Task SendAsync_correlates_response_by_reqId() {
             await ConnectAsync();
 
-            var sendTask = pipeClient.SendAsync<HelloResponse>(
+            var sendTask = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(5));
 
@@ -87,20 +92,18 @@ namespace ActDiscordTriggers.Tests {
             Assert.Equal("Hello", requestFrame.GetProperty("op").GetString());
             Assert.Equal(ProtocolConstants.Version, requestFrame.GetProperty("protocolVersion").GetInt32());
 
-            await WriteFrameAsync(serverPipe, new HelloResponse {
-                ReqId = reqId, Ok = true, BridgeVersion = "test-1.0"
-            });
+            await WriteFrameAsync(serverPipe, Hello(reqId, "test-1.0"));
 
             var resp = await sendTask;
             Assert.True(resp.Ok);
-            Assert.Equal("test-1.0", resp.BridgeVersion);
+            Assert.Equal("test-1.0", resp.Data.BridgeVersion);
         }
 
         [Fact]
         public async Task SendAsync_times_out_when_no_response() {
             await ConnectAsync();
             await Assert.ThrowsAsync<TimeoutException>(() =>
-                pipeClient.SendAsync<HelloResponse>(
+                pipeClient.SendAsync<BridgeResponse<HelloData>>(
                     new HelloRequest { ProtocolVersion = 1 },
                     TimeSpan.FromMilliseconds(200)));
         }
@@ -108,9 +111,9 @@ namespace ActDiscordTriggers.Tests {
         [Fact]
         public async Task OutOfOrder_responses_correlate_correctly() {
             await ConnectAsync();
-            var t1 = pipeClient.SendAsync<HelloResponse>(
+            var t1 = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = 1 }, TimeSpan.FromSeconds(5));
-            var t2 = pipeClient.SendAsync<HelloResponse>(
+            var t2 = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = 1 }, TimeSpan.FromSeconds(5));
 
             var f1 = await ReadFrameAsync(serverPipe);
@@ -120,15 +123,11 @@ namespace ActDiscordTriggers.Tests {
             Assert.NotEqual(id1, id2);
 
             // respond to second first
-            await WriteFrameAsync(serverPipe, new HelloResponse {
-                ReqId = id2, Ok = true, BridgeVersion = "second"
-            });
-            await WriteFrameAsync(serverPipe, new HelloResponse {
-                ReqId = id1, Ok = true, BridgeVersion = "first"
-            });
+            await WriteFrameAsync(serverPipe, Hello(id2, "second"));
+            await WriteFrameAsync(serverPipe, Hello(id1, "first"));
 
-            Assert.Equal("first", (await t1).BridgeVersion);
-            Assert.Equal("second", (await t2).BridgeVersion);
+            Assert.Equal("first", (await t1).Data.BridgeVersion);
+            Assert.Equal("second", (await t2).Data.BridgeVersion);
         }
 
         [Fact]
@@ -177,7 +176,7 @@ namespace ActDiscordTriggers.Tests {
                 TaskCreationOptions.RunContinuationsAsynchronously);
             pipeClient.OnPipeBroken += r => brokenSignal.TrySetResult(r);
 
-            var sendTask = pipeClient.SendAsync<HelloResponse>(
+            var sendTask = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = 1 }, TimeSpan.FromSeconds(30));
 
             // Drain the request from the server side so we know it landed
@@ -200,53 +199,31 @@ namespace ActDiscordTriggers.Tests {
             var sendTask = pipeClient.SendSpeakPcmAsync(pcm, 48000, 16, 2, TimeSpan.FromSeconds(5));
 
             byte[] frame = await ReadRawFrameAsync(serverPipe);
-            // Binary marker + 12-byte header + payload
+            // Binary marker + 11-byte header + payload
             Assert.Equal(0x01, frame[0]);
             int reqId = BitConverter.ToInt32(frame, 1);
             int sampleRate = BitConverter.ToInt32(frame, 5);
             byte bits = frame[9];
             byte channels = frame[10];
-            byte flags = frame[11];
             Assert.Equal(48000, sampleRate);
             Assert.Equal(16, bits);
             Assert.Equal(2, channels);
-            Assert.Equal(0, flags); // default: no effect
 
-            byte[] gotPcm = new byte[frame.Length - 12];
-            Buffer.BlockCopy(frame, 12, gotPcm, 0, gotPcm.Length);
+            byte[] gotPcm = new byte[frame.Length - 11];
+            Buffer.BlockCopy(frame, 11, gotPcm, 0, gotPcm.Length);
             Assert.Equal(pcm, gotPcm);
 
-            await WriteFrameAsync(serverPipe, new OkResponse {
-                Op = Op.SpeakResult, ReqId = reqId, Ok = true
-            });
+            await WriteFrameAsync(serverPipe, new BridgeResponse { ReqId = reqId, Ok = true });
 
             var resp = await sendTask;
             Assert.True(resp.Ok);
         }
 
         [Fact]
-        public async Task SpeakPcm_randomEffect_sets_flags_bit() {
-            await ConnectAsync();
-            byte[] pcm = new byte[8];
-
-            var sendTask = pipeClient.SendSpeakPcmAsync(pcm, 48000, 16, 2, TimeSpan.FromSeconds(5), randomEffect: true);
-
-            byte[] frame = await ReadRawFrameAsync(serverPipe);
-            Assert.Equal(0x01, frame[0]);
-            Assert.Equal(0x01, frame[11]); // flags bit0 = random effect
-            int reqId = BitConverter.ToInt32(frame, 1);
-
-            await WriteFrameAsync(serverPipe, new OkResponse {
-                Op = Op.SpeakResult, ReqId = reqId, Ok = true
-            });
-            Assert.True((await sendTask).Ok);
-        }
-
-        [Fact]
         public async Task Concurrent_SendAsync_calls_get_correct_responses() {
             await ConnectAsync();
 
-            // Echo server: read each request, reply with HelloResponse echoing protocolVersion
+            // Echo server: read each request, reply with Hello echoing protocolVersion
             var echoCts = new System.Threading.CancellationTokenSource();
             var echoTask = Task.Run(async () => {
                 try {
@@ -254,18 +231,16 @@ namespace ActDiscordTriggers.Tests {
                         var f = await ReadFrameAsync(serverPipe);
                         int reqId = f.GetProperty("reqId").GetInt32();
                         int pv = f.GetProperty("protocolVersion").GetInt32();
-                        await WriteFrameAsync(serverPipe, new HelloResponse {
-                            ReqId = reqId, Ok = true, BridgeVersion = "v" + pv,
-                        });
+                        await WriteFrameAsync(serverPipe, Hello(reqId, "v" + pv));
                     }
                 } catch { }
             });
 
             const int N = 25;
-            var tasks = new Task<HelloResponse>[N];
+            var tasks = new Task<BridgeResponse<HelloData>>[N];
             for (int i = 0; i < N; i++) {
                 int pv = i + 1;
-                tasks[i] = pipeClient.SendAsync<HelloResponse>(
+                tasks[i] = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                     new HelloRequest { ProtocolVersion = pv }, TimeSpan.FromSeconds(5));
             }
             var results = await Task.WhenAll(tasks);
@@ -273,7 +248,7 @@ namespace ActDiscordTriggers.Tests {
 
             for (int i = 0; i < N; i++) {
                 Assert.True(results[i].Ok);
-                Assert.Equal("v" + (i + 1), results[i].BridgeVersion);
+                Assert.Equal("v" + (i + 1), results[i].Data.BridgeVersion);
             }
         }
 
@@ -324,14 +299,12 @@ namespace ActDiscordTriggers.Tests {
             byte[] frame = await ReadRawFrameAsync(serverPipe);
             Assert.Equal(0x01, frame[0]);
             int reqId = BitConverter.ToInt32(frame, 1);
-            byte[] got = new byte[frame.Length - 12];
-            Buffer.BlockCopy(frame, 12, got, 0, got.Length);
+            byte[] got = new byte[frame.Length - 11];
+            Buffer.BlockCopy(frame, 11, got, 0, got.Length);
             Assert.Equal(big.Length, got.Length);
             Assert.Equal(big, got);
 
-            await WriteFrameAsync(serverPipe, new OkResponse {
-                Op = Op.SpeakResult, ReqId = reqId, Ok = true
-            });
+            await WriteFrameAsync(serverPipe, new BridgeResponse { ReqId = reqId, Ok = true });
 
             var resp = await sendTask;
             Assert.True(resp.Ok);
@@ -342,20 +315,16 @@ namespace ActDiscordTriggers.Tests {
             await ConnectAsync();
 
             // Server sends a response correlating to a reqId we never issued
-            await WriteFrameAsync(serverPipe, new HelloResponse {
-                ReqId = 999_999, Ok = true, BridgeVersion = "ghost",
-            });
+            await WriteFrameAsync(serverPipe, Hello(999_999, "ghost"));
 
             // Real subsequent request still works
-            var sendTask = pipeClient.SendAsync<HelloResponse>(
+            var sendTask = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = 1 }, TimeSpan.FromSeconds(5));
             var f = await ReadFrameAsync(serverPipe);
             int reqId = f.GetProperty("reqId").GetInt32();
-            await WriteFrameAsync(serverPipe, new HelloResponse {
-                ReqId = reqId, Ok = true, BridgeVersion = "real",
-            });
+            await WriteFrameAsync(serverPipe, Hello(reqId, "real"));
             var resp = await sendTask;
-            Assert.Equal("real", resp.BridgeVersion);
+            Assert.Equal("real", resp.Data.BridgeVersion);
         }
 
         [Fact]
@@ -408,7 +377,7 @@ namespace ActDiscordTriggers.Tests {
         public async Task Dispose_waits_for_read_loop_and_does_not_throw_with_pending_send() {
             await ConnectAsync();
 
-            var t = pipeClient.SendAsync<HelloResponse>(
+            var t = pipeClient.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(30));
 

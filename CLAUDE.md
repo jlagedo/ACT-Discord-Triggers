@@ -42,19 +42,27 @@ DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 
 Lifecycle — no launcher / Job Object:
 - Plugin shutdown: `process.Kill()`s node directly.
-- Plugin dies (crash, Task Manager): OS closes the pipe → `bridge.ts` `socket.close` handler runs `host.deinit()` + `process.exit(0)`.
+- Plugin dies (crash, Task Manager): OS closes the pipe → `bridge.ts` `socket.close` handler runs `host.disconnect()` + `process.exit(0)`.
 - Don't reintroduce a launcher unless you can show both paths fail.
 
 ## Wire protocol — keep both sides in sync
 
-Defined twice: `DiscordAPI/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS union + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match. When you add/change an op:
+Defined twice: `DiscordAPI/Protocol.cs` (C# DTOs + `Op`) and `DiscordBridge-node/src/protocol.ts` (TS types + `Op`, consumed by `pipe-server.ts`). Both hold a protocol version (`ProtocolConstants.Version` / `PROTOCOL_VERSION`) that must match.
+
+Three message kinds:
+- **Commands** — .NET→bridge request/response. The reply is always the single `Result` envelope `{ op:"Result", reqId, ok, error, data? }`; C# correlates by `reqId` alone (no per-op `*Result` ops). Query payloads ride in `data` (`BridgeResponse<TData>` on the C# side).
+- **Config** — the single `SetConfig` op carries the whole `PluginSettings` POCO verbatim (token included). The bridge reads the fields it knows, ignores the rest, and owns all interpretation (fx dice roll, quality tier→bitrate, normalize target→dBFS). `Connect` takes no args and logs in from the config's token.
+- **Notifications** — bridge→.NET push (`Log`/`BotReady`/`Disconnected`), no `reqId`.
+
+When you add/change an op:
 1. Update `Protocol.cs`, `protocol.ts`, and dispatch in `pipe-server.ts`.
-2. On an incompatible wire change, bump the version in both. The Hello handshake fails fast on mismatch.
+2. On an incompatible wire change, bump the version in both. The Hello handshake fails fast on mismatch. Adding a config field is additive (the bridge defaults what's missing, ignores what's unknown), so it does NOT bump the version.
 3. Extend both `ProtocolTests.cs` and `tests/protocol.test.ts`.
 
 Framing:
 - Frame = little-endian uint32 length prefix + UTF-8 JSON, max 64 MiB.
-- Requests carry `reqId`; responses echo it.
+- Requests carry `reqId`; the `Result` response echoes it.
+- Binary `SpeakPcm` frame: 11-byte header `[0x01][reqId u32][sampleRate u32][bits u8][channels u8]` + raw PCM.
 - `Log`/`BotReady`/`Disconnected` are server-pushed notifications (no `reqId`).
 
 Two non-obvious bits to preserve on refactor:

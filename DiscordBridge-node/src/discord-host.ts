@@ -23,15 +23,19 @@ import * as log from './file-log.js';
 import decode from 'audio-decode';
 import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
 import { applyRandomEffect } from './effects.js';
-import { normalizePcm16, DEFAULT_NORMALIZE_ENABLED, DEFAULT_NORMALIZE_TARGET_DB } from './normalize.js';
+import { normalizePcm16 } from './normalize.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
-import type { LogLevel } from './protocol.js';
+import { DEFAULT_CONFIG_VIEW, type BridgeConfigView, type LogLevel } from './protocol.js';
 import { WavCache } from './wav-cache.js';
 
 const TARGET_SAMPLE_RATE = 48000;
 const TARGET_BITS = 16;
+
+// Maps the plugin's audio-quality tier (config.audioQualityIndex) to an Opus
+// bitrate. Owned here so retuning the tiers never touches the wire contract.
+const AUDIO_QUALITY_BITRATES = [48000, 96000, 128000];
 
 // Bound peak memory before decode: a compressed file expands roughly ~10x once
 // turned into float PCM, so reject pathological input sizes up front.
@@ -112,7 +116,6 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
 
 export class DiscordHost implements Host {
     private client: Client | null = null;
-    private statusMsg = '';
     private notify: Notifier | null = null;
     private connection: VoiceConnection | null = null;
     private player: AudioPlayer | null = null;
@@ -121,55 +124,60 @@ export class DiscordHost implements Host {
     private pingTimer: NodeJS.Timeout | null = null;
     private readonly wavCache = new WavCache();
 
-    // Auto-leveling config, pushed by the plugin via SetNormalization. Defaults
-    // mirror the plugin's defaults (checkbox on, -20 dBFS) so clips are leveled
-    // even before the first config frame lands after connect.
-    private normalizeEnabled = DEFAULT_NORMALIZE_ENABLED;
-    private normalizeTargetDb = DEFAULT_NORMALIZE_TARGET_DB;
+    // The whole plugin config, pushed via SetConfig. Defaults apply until the
+    // first config frame lands. The bridge owns all interpretation: it rolls the
+    // fx dice (randomFx/fxChance), negates normalizeTarget to dBFS, and maps
+    // audioQualityIndex to an Opus bitrate.
+    private config: BridgeConfigView = DEFAULT_CONFIG_VIEW;
 
-    // Opus encoder bitrate, pushed by the plugin via SetAudioQuality. Unlike
-    // normalization (a per-clip PCM op in _enqueue), bitrate is an encoder CTL:
-    // we hold the live encoder from the current resource and apply setBitrate on
-    // join and on every change. Default mirrors the C# DiscordClient default.
-    private audioBitrate = DEFAULT_AUDIO_BITRATE;
+    // Live Opus encoder from the current resource (StreamType.Raw). Bitrate is an
+    // encoder CTL, so we hold it and apply setBitrate on join and on every config
+    // change.
     private encoder: AudioResource['encoder'] = undefined;
 
     setNotifier(fn: Notifier): void { this.notify = fn; }
 
-    setNormalization(enabled: boolean, targetDb: number): void {
-        this.normalizeEnabled = enabled;
-        this.normalizeTargetDb = targetDb;
-        log.info(`setNormalization: enabled=${enabled} targetDb=${targetDb}`);
+    setConfig(config: BridgeConfigView): void {
+        const prev = this.config;
+        this.config = config;
+        log.info(`setConfig: status='${config.botStatus}' fx=${config.randomFx}/${config.fxChance} `
+            + `normalize=${config.normalize}/${config.normalizeTarget} audioQ=${config.audioQualityIndex}`);
+        // Presence and bitrate are stateful on Discord's side (a gateway presence
+        // update and an Opus encoder CTL). The plugin pushes the whole config on
+        // every UI change, so only re-apply each when its field actually changed —
+        // otherwise moving e.g. the FX slider would spam needless setActivity calls.
+        // fx/normalize are read per-clip in _enqueue, so there's nothing to apply
+        // eagerly for them.
+        if (config.botStatus !== prev.botStatus) void this._applyStatus();
+        if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
     }
 
-    setAudioQuality(bitrate: number): void {
-        this.audioBitrate = clampBitrate(bitrate);
-        log.info(`setAudioQuality: bitrate=${this.audioBitrate}`);
-        // Apply immediately when connected; otherwise joinChannel applies the
-        // stored value once the resource (and its encoder) exists.
-        this._applyBitrate();
+    // Bitrate derived from the current audio-quality tier, clamped to prism's range.
+    private _currentBitrate(): number {
+        const b = AUDIO_QUALITY_BITRATES[this.config.audioQualityIndex] ?? DEFAULT_AUDIO_BITRATE;
+        return clampBitrate(b);
     }
 
     // Push the current bitrate onto the live Opus encoder. No-op when not
     // connected or when the resource has no encoder (e.g. a non-Raw input).
     private _applyBitrate(): void {
         if (!this.encoder) return;
+        const bitrate = this._currentBitrate();
         try {
-            this.encoder.setBitrate(this.audioBitrate);
-            log.info(`opus setBitrate=${this.audioBitrate}`);
+            this.encoder.setBitrate(bitrate);
+            log.info(`opus setBitrate=${bitrate}`);
         } catch (e) {
             log.error('opus setBitrate failed', e);
         }
     }
 
-    async init(token: string, status: string): Promise<OpResult> {
+    async connect(): Promise<OpResult> {
         if (this.client) {
-            log.info('init: client already created, returning ok');
+            log.info('connect: client already created, returning ok');
             return { ok: true, error: '' };
         }
         try {
-            log.info('init: creating Client');
-            this.statusMsg = status || '';
+            log.info('connect: creating Client');
             this.client = new Client({
                 intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
             });
@@ -200,20 +208,20 @@ export class DiscordHost implements Host {
                 log.info(`clientReady: logged in as ${client.user.tag}`);
             });
 
-            log.info('init: login starting');
-            await this.client.login(token);
-            log.info('init: login ok');
+            log.info('connect: login starting');
+            await this.client.login(this.config.botToken);
+            log.info('connect: login ok');
             return { ok: true, error: '' };
         } catch (e) {
-            log.error('init failed', e);
+            log.error('connect failed', e);
             try { this.client?.destroy(); } catch { /* ignore */ }
             this.client = null;
             return { ok: false, error: log.errMsg(e) };
         }
     }
 
-    async deinit(): Promise<void> {
-        log.info('deinit');
+    async disconnect(): Promise<void> {
+        log.info('disconnect');
         try { await this.leaveChannel(); } catch { /* ignore */ }
         try { await this.client?.destroy(); } catch { /* ignore */ }
         this.client = null;
@@ -238,15 +246,13 @@ export class DiscordHost implements Host {
             .map(c => c.name);
     }
 
-    async setGame(text: string): Promise<void> {
-        this.statusMsg = (text && text.trim().length > 0) ? text.trim() : 'Playing with ACT Triggers';
-        await this._applyStatus();
-    }
-
     private async _applyStatus(): Promise<void> {
         if (!this.client?.user) return;
+        const text = this.config.botStatus && this.config.botStatus.trim().length > 0
+            ? this.config.botStatus.trim()
+            : 'Playing with ACT Triggers';
         try {
-            this.client.user.setActivity(this.statusMsg, { type: ActivityType.Custom });
+            this.client.user.setActivity(text, { type: ActivityType.Custom });
         } catch (e) {
             log.warn('setActivity failed: ' + log.errMsg(e));
         }
@@ -365,13 +371,15 @@ export class DiscordHost implements Host {
     // for the same reqId (#1), closing the gap between "queued" and "on the wire".
     private _enqueue(kind: string, pcm: Buffer, meta?: SpeakMeta): OpResult {
         const reqId = meta?.reqId ?? 0;
-        // Optional random sound effect (user opted in; plugin rolled the dice).
-        // Applied on the complete buffer here, before it enters the mixer, so the
-        // recv->enqueue stamp below includes the DSP time as the program cost it is.
+        // Optional random sound effect. The bridge owns the whole decision: roll
+        // the dice from the current config (randomFx + fxChance), then let
+        // applyRandomEffect pick which effect. Applied on the complete buffer
+        // before it enters the mixer, so the recv->enqueue stamp below includes
+        // the DSP time as the program cost it is.
         let buf = pcm;
-        if (meta?.fx) {
+        if (this.config.randomFx && this._rollFx()) {
             try {
-                const fx = applyRandomEffect(pcm);
+                const fx = applyRandomEffect(buf);
                 buf = fx.pcm;
                 log.info(`fx reqId=${reqId} effect=${fx.name} ` +
                     `inMs=${this._pcmDurationMs(pcm.length)} outMs=${this._pcmDurationMs(buf.length)}`);
@@ -381,13 +389,15 @@ export class DiscordHost implements Host {
         }
         // Auto-level AFTER the effect so the effect's own level change is what we
         // correct — a distortion hit that came out hot, or an echo tail that
-        // dropped the average, both land near the target loudness.
-        if (this.normalizeEnabled) {
+        // dropped the average, both land near the target loudness. The config
+        // carries a positive magnitude; negate it to a dBFS RMS target.
+        if (this.config.normalize) {
+            const targetDb = -Math.abs(this.config.normalizeTarget);
             try {
-                const norm = normalizePcm16(buf, this.normalizeTargetDb);
+                const norm = normalizePcm16(buf, targetDb);
                 if (norm.applied) {
                     buf = norm.pcm;
-                    log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${this.normalizeTargetDb}dBFS`);
+                    log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${targetDb}dBFS`);
                 }
             } catch (e) {
                 log.error('normalize failed; playing un-leveled', e);
@@ -407,6 +417,14 @@ export class DiscordHost implements Host {
     // Bytes of 48k/16-bit/stereo PCM -> clip duration in ms (192 bytes per ms).
     private _pcmDurationMs(bytes: number): number {
         return Math.round(bytes / (TARGET_SAMPLE_RATE * 2 * (TARGET_BITS / 8) / 1000));
+    }
+
+    // Roll the per-clip random-effect dice from config.fxChance (0..100).
+    private _rollFx(): boolean {
+        const chance = this.config.fxChance;
+        if (chance <= 0) return false;
+        if (chance >= 100) return true;
+        return Math.random() * 100 < chance;
     }
 
     // Voice RTT snapshot for the current connection. udp is the true media-path

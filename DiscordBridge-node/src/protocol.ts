@@ -1,52 +1,61 @@
 // Wire protocol mirror of DiscordAPI/Protocol.cs. Keep both sides in sync.
 // PROTOCOL_VERSION here must match ProtocolConstants.Version on the C# side.
 //
-// Two frame shapes share the outer 4-byte LE length prefix; the first byte of
-// the payload tells them apart:
+// The contract has three channels:
 //
-//   0x7B ('{')  → UTF-8 JSON, dispatched by op string. Used for everything
-//                 except SpeakPcm.
-//   0x01        → Binary SpeakPcm, plugin → bridge only:
-//                   [0x01]
-//                   [reqId u32 LE]
-//                   [sampleRate u32 LE]
-//                   [bits u8]
-//                   [channels u8]
-//                   [flags u8]           // bit0 = apply a random sound effect
-//                   [raw PCM bytes...]   // remainder of payload
-//                 Header is 12 bytes. Response is JSON `SpeakResult` with the
-//                 matching reqId.
+//   Commands   .NET -> bridge, request/response. Each carries a reqId; the reply
+//              is always the single `Result` envelope (below), correlated by reqId.
+//   Config     .NET -> bridge, one `SetConfig` op carrying the whole plugin config
+//              object. The bridge stores it and applies it (presence, fx, normalize,
+//              bitrate). Adding a config field is additive and does NOT bump the
+//              protocol version — the bridge ignores unknown fields and defaults
+//              missing ones.
+//   Notifications  bridge -> .NET push (BotReady / Log / Disconnected), no reqId.
 //
-// SpeakFile is a normal JSON op carrying a file path; the bridge opens and
-// streams the file itself (must be 48 kHz / 16-bit / stereo PCM WAV). Its
-// optional `randomEffect` flag mirrors the binary flags bit above.
+// Two frame shapes share the outer 4-byte LE length prefix; the first byte of the
+// payload tells them apart:
+//
+//   0x7B ('{')  -> UTF-8 JSON, dispatched by op string. Used for everything
+//                  except SpeakPcm.
+//   0x01        -> Binary SpeakPcm, plugin -> bridge only:
+//                    [0x01]
+//                    [reqId u32 LE]
+//                    [sampleRate u32 LE]
+//                    [bits u8]
+//                    [channels u8]
+//                    [raw PCM bytes...]   // remainder of payload
+//                  Header is 11 bytes. Response is the JSON `Result` envelope with
+//                  the matching reqId.
+//
+// SpeakFile is a normal JSON op carrying a file path; the bridge opens and streams
+// the file itself (decoded + resampled to 48 kHz / 16-bit / stereo). Whether a
+// random sound effect is applied is decided by the bridge from the current config
+// (randomFx + fxChance) — it is NOT a per-clip flag on the wire.
 
-export const PROTOCOL_VERSION = 4 as const;
+export const PROTOCOL_VERSION = 5 as const;
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export const FRAME_JSON_MARKER = 0x7B; // '{'
 export const FRAME_BINARY_SPEAK_PCM = 0x01;
-export const BINARY_SPEAK_PCM_HEADER_BYTES = 12;
-// flags byte (offset 11) bit assignments
-export const SPEAK_FLAG_RANDOM_EFFECT = 0x01;
+// [marker u8][reqId u32][sampleRate u32][bits u8][channels u8] = 11 bytes
+export const BINARY_SPEAK_PCM_HEADER_BYTES = 11;
 
 export const Op = {
-    Hello: 'Hello', HelloResult: 'HelloResult',
-    Init: 'Init', InitResult: 'InitResult',
-    Deinit: 'Deinit', DeinitResult: 'DeinitResult',
-    IsConnected: 'IsConnected', IsConnectedResult: 'IsConnectedResult',
-    GetServers: 'GetServers', GetServersResult: 'GetServersResult',
-    GetChannels: 'GetChannels', GetChannelsResult: 'GetChannelsResult',
-    SetGame: 'SetGame', SetGameResult: 'SetGameResult',
-    JoinChannel: 'JoinChannel', JoinChannelResult: 'JoinChannelResult',
-    LeaveChannel: 'LeaveChannel', LeaveChannelResult: 'LeaveChannelResult',
-    SpeakPcm: 'SpeakPcm',
-    SpeakFile: 'SpeakFile',
-    SpeakResult: 'SpeakResult',
-    SetNormalization: 'SetNormalization', SetNormalizationResult: 'SetNormalizationResult',
-    SetAudioQuality: 'SetAudioQuality', SetAudioQualityResult: 'SetAudioQualityResult',
+    Hello: 'Hello',
+    SetConfig: 'SetConfig',
+    Connect: 'Connect',
     Shutdown: 'Shutdown',
-    BotReady: 'BotReady', Log: 'Log', Disconnected: 'Disconnected',
+    IsConnected: 'IsConnected',
+    GetServers: 'GetServers',
+    GetChannels: 'GetChannels',
+    JoinChannel: 'JoinChannel',
+    LeaveChannel: 'LeaveChannel',
+    SpeakFile: 'SpeakFile',
+    SpeakPcm: 'SpeakPcm',
+    Result: 'Result',
+    BotReady: 'BotReady',
+    Log: 'Log',
+    Disconnected: 'Disconnected',
 } as const;
 
 export type OpName = typeof Op[keyof typeof Op];
@@ -57,52 +66,72 @@ export type ReqId = number | null;
 
 export interface BaseRequest { op: OpName; reqId: ReqId }
 
+// The configuration object the plugin pushes via SetConfig. The plugin sends its
+// whole settings POCO; this interface is the subset the bridge actually reads
+// (extra fields — token persistence flags, TTS voice/volume/speed, autoConnect —
+// are ignored). The bridge owns all interpretation:
+//   - randomFx + fxChance: rolled per clip, then a random effect is picked.
+//   - normalize + normalizeTarget: targetdB is a positive magnitude; the bridge
+//     negates it to a dBFS RMS target (e.g. 20 -> -20 dBFS).
+//   - audioQualityIndex: 0/1/2 mapped to an Opus bitrate by the bridge.
+export interface BridgeConfigView {
+    botToken: string;
+    botStatus: string;
+    randomFx: boolean;
+    fxChance: number;          // 0..100 (%)
+    normalize: boolean;
+    normalizeTarget: number;   // positive dB magnitude
+    audioQualityIndex: number; // 0=Low, 1=Medium, 2=High
+}
+
+// Bridge-side defaults, used until the first SetConfig lands (pre-connect clips)
+// and to fill any field missing from an incoming config. The interpreted values
+// (randomFx/fxChance/normalize/normalizeTarget/audioQualityIndex) MUST match the
+// PluginSettings defaults on the C# side. botToken/botStatus are deliberately
+// empty: there is no usable default token, and an empty botStatus makes
+// _applyStatus fall back to its own 'Playing with ACT Triggers' label.
+export const DEFAULT_CONFIG_VIEW: BridgeConfigView = {
+    botToken: '',
+    botStatus: '',
+    randomFx: false,
+    fxChance: 25,
+    normalize: true,
+    normalizeTarget: 20,
+    audioQualityIndex: 1,
+};
+
 export interface HelloRequest        extends BaseRequest { op: 'Hello'; protocolVersion: number }
-export interface InitRequest         extends BaseRequest { op: 'Init'; token: string; status: string }
-export interface DeinitRequest       extends BaseRequest { op: 'Deinit' }
+export interface SetConfigRequest    extends BaseRequest { op: 'SetConfig'; config: BridgeConfigView }
+export interface ConnectRequest      extends BaseRequest { op: 'Connect' }
 export interface IsConnectedRequest  extends BaseRequest { op: 'IsConnected' }
 export interface GetServersRequest   extends BaseRequest { op: 'GetServers' }
 export interface GetChannelsRequest  extends BaseRequest { op: 'GetChannels'; server: string }
-export interface SetGameRequest      extends BaseRequest { op: 'SetGame'; text: string }
 export interface JoinChannelRequest  extends BaseRequest { op: 'JoinChannel'; server: string; channel: string }
 export interface LeaveChannelRequest extends BaseRequest { op: 'LeaveChannel' }
-export interface SpeakFileRequest    extends BaseRequest { op: 'SpeakFile'; path: string; randomEffect?: boolean }
-// Auto-leveling config. Global, not per-trigger: the bridge stores it and applies
-// it to every clip. targetDb is a negative dBFS RMS target (e.g. -20).
-export interface SetNormalizationRequest extends BaseRequest { op: 'SetNormalization'; enabled: boolean; targetDb: number }
-// Opus encoder bitrate config. Global, not per-trigger: the bridge stores it and
-// applies it to the live encoder via setBitrate (bits/sec, e.g. 96000).
-export interface SetAudioQualityRequest extends BaseRequest { op: 'SetAudioQuality'; bitrate: number }
+export interface SpeakFileRequest    extends BaseRequest { op: 'SpeakFile'; path: string }
 export interface ShutdownRequest     extends BaseRequest { op: 'Shutdown' }
 
 export type Request =
-    | HelloRequest | InitRequest | DeinitRequest | IsConnectedRequest
-    | GetServersRequest | GetChannelsRequest | SetGameRequest
-    | JoinChannelRequest | LeaveChannelRequest | SpeakFileRequest
-    | SetNormalizationRequest | SetAudioQualityRequest | ShutdownRequest;
+    | HelloRequest | SetConfigRequest | ConnectRequest
+    | IsConnectedRequest | GetServersRequest | GetChannelsRequest
+    | JoinChannelRequest | LeaveChannelRequest | SpeakFileRequest | ShutdownRequest;
 
-export interface HelloResponse        { op: 'HelloResult';        reqId: ReqId; ok: boolean; bridgeVersion: string; error: string }
-export interface InitResponse         { op: 'InitResult';         reqId: ReqId; ok: boolean; error: string }
-export interface DeinitResponse       { op: 'DeinitResult';       reqId: ReqId; ok: true;    error: '' }
-export interface IsConnectedResponse  { op: 'IsConnectedResult';  reqId: ReqId; connected: boolean }
-export interface GetServersResponse   { op: 'GetServersResult';   reqId: ReqId; servers: string[] }
-export interface GetChannelsResponse  { op: 'GetChannelsResult';  reqId: ReqId; channels: string[] }
-export interface SetGameResponse      { op: 'SetGameResult';      reqId: ReqId; ok: true;    error: '' }
-export interface JoinChannelResponse  { op: 'JoinChannelResult';  reqId: ReqId; ok: boolean; error: string }
-export interface LeaveChannelResponse { op: 'LeaveChannelResult'; reqId: ReqId; ok: true;    error: '' }
-export interface SpeakResponse        { op: 'SpeakResult';        reqId: ReqId; ok: boolean; error: string }
-export interface SetNormalizationResponse { op: 'SetNormalizationResult'; reqId: ReqId; ok: true; error: '' }
-export interface SetAudioQualityResponse { op: 'SetAudioQualityResult'; reqId: ReqId; ok: true; error: '' }
+// Single response envelope for every command/config op. C# correlates responses by
+// reqId alone, so one op string ('Result') suffices; the optional `data` carries
+// op-specific payload for the few queries that return values.
+export interface HelloData     { bridgeVersion: string }
+export interface ConnectedData { connected: boolean }
+export interface ServersData   { servers: string[] }
+export interface ChannelsData  { channels: string[] }
+export type ResultData = HelloData | ConnectedData | ServersData | ChannelsData;
 
-// Generic shape used for the catch-all error response in pipe-server. Matches
-// C# OkResponse: any *Result op with reqId/ok/error fields parses as this.
-export interface ErrorResponse { op: OpName; reqId: ReqId; ok: false; error: string }
-
-export type Response =
-    | HelloResponse | InitResponse | DeinitResponse | IsConnectedResponse
-    | GetServersResponse | GetChannelsResponse | SetGameResponse
-    | JoinChannelResponse | LeaveChannelResponse | SpeakResponse
-    | SetNormalizationResponse | SetAudioQualityResponse;
+export interface ResultFrame {
+    op: 'Result';
+    reqId: ReqId;
+    ok: boolean;
+    error: string;
+    data?: ResultData;
+}
 
 export interface BotReadyNotification     { op: 'BotReady' }
 export interface LogNotification          { op: 'Log'; level: LogLevel; message: string }
@@ -110,4 +139,4 @@ export interface DisconnectedNotification { op: 'Disconnected'; reason: string }
 
 export type Notification = BotReadyNotification | LogNotification | DisconnectedNotification;
 
-export type OutboundFrame = Response | ErrorResponse | Notification;
+export type OutboundFrame = ResultFrame | Notification;

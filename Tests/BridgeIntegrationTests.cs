@@ -1,7 +1,7 @@
+using ACT_DiscordTriggers.Settings;
 using DiscordAPI;
 using DiscordBridge.Protocol;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
@@ -23,22 +23,22 @@ namespace ActDiscordTriggers.Tests {
         public async Task Bridge_handshake_succeeds_against_real_exe() {
             string dir = FindBridgeDir();
             using var bp = new BridgeProcess();
-            var stderr = new List<string>();
+            var stderr = new System.Collections.Generic.List<string>();
             bp.OnStderr += s => { lock (stderr) stderr.Add(s); };
 
             var pipe = await bp.StartAndConnectAsync(dir, TimeSpan.FromSeconds(15));
             using var pc = new PipeClient(pipe);
             pc.Start();
 
-            var hello = await pc.SendAsync<HelloResponse>(
+            var hello = await pc.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(5));
 
             Assert.True(hello.Ok, $"Hello failed: {hello.Error}; stderr:\n{string.Join("\n", stderr)}");
-            Assert.False(string.IsNullOrEmpty(hello.BridgeVersion));
+            Assert.False(string.IsNullOrEmpty(hello.Data.BridgeVersion));
 
             try {
-                await pc.SendAsync<OkResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
+                await pc.SendAsync<BridgeResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
             } catch { /* bridge exits during the call, response may not arrive */ }
 
             await bp.WaitForExitAsync(TimeSpan.FromSeconds(5));
@@ -46,28 +46,28 @@ namespace ActDiscordTriggers.Tests {
         }
 
         [Fact]
-        public async Task Bridge_IsConnected_returns_false_before_Init() {
+        public async Task Bridge_IsConnected_returns_false_before_Connect() {
             string dir = FindBridgeDir();
             using var bp = new BridgeProcess();
             var pipe = await bp.StartAndConnectAsync(dir, TimeSpan.FromSeconds(15));
             using var pc = new PipeClient(pipe);
             pc.Start();
 
-            await pc.SendAsync<HelloResponse>(
+            await pc.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(5));
 
-            var ic = await pc.SendAsync<IsConnectedResponse>(
+            var ic = await pc.SendAsync<BridgeResponse<ConnectedData>>(
                 new IsConnectedRequest(), TimeSpan.FromSeconds(3));
-            Assert.False(ic.Connected);
+            Assert.False(ic.Data.Connected);
 
-            var servers = await pc.SendAsync<GetServersResponse>(
+            var servers = await pc.SendAsync<BridgeResponse<ServersData>>(
                 new GetServersRequest(), TimeSpan.FromSeconds(3));
-            Assert.NotNull(servers.Servers);
-            Assert.Empty(servers.Servers);
+            Assert.NotNull(servers.Data.Servers);
+            Assert.Empty(servers.Data.Servers);
 
             try {
-                await pc.SendAsync<OkResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
+                await pc.SendAsync<BridgeResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
             } catch { }
             await bp.WaitForExitAsync(TimeSpan.FromSeconds(5));
         }
@@ -80,7 +80,7 @@ namespace ActDiscordTriggers.Tests {
             using var pc = new PipeClient(pipe);
             pc.Start();
 
-            var hello = await pc.SendAsync<HelloResponse>(
+            var hello = await pc.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = 9999 },
                 TimeSpan.FromSeconds(5));
 
@@ -88,7 +88,7 @@ namespace ActDiscordTriggers.Tests {
             Assert.Contains("mismatch", hello.Error, StringComparison.OrdinalIgnoreCase);
 
             try {
-                await pc.SendAsync<OkResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
+                await pc.SendAsync<BridgeResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2));
             } catch { }
             await bp.WaitForExitAsync(TimeSpan.FromSeconds(5));
         }
@@ -105,14 +105,14 @@ namespace ActDiscordTriggers.Tests {
             var pipe = await bp.StartAndConnectAsync(FindBridgeDir(), TimeSpan.FromSeconds(15));
             var pc = new PipeClient(pipe);
             pc.Start();
-            await pc.SendAsync<HelloResponse>(
+            await pc.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(5));
             return (bp, pc);
         }
 
         private static async Task ShutdownBridgeAsync(BridgeProcess bp, PipeClient pc) {
-            try { await pc.SendAsync<OkResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2)); } catch { }
+            try { await pc.SendAsync<BridgeResponse>(new ShutdownRequest(), TimeSpan.FromSeconds(2)); } catch { }
             await bp.WaitForExitAsync(TimeSpan.FromSeconds(5));
             try { pc.Dispose(); } catch { }
             try { bp.Dispose(); } catch { }
@@ -122,11 +122,11 @@ namespace ActDiscordTriggers.Tests {
         public async Task GetChannels_for_unknown_server_returns_empty_array() {
             var (bp, pc) = await StartBridgeAndHelloAsync();
             try {
-                var resp = await pc.SendAsync<GetChannelsResponse>(
+                var resp = await pc.SendAsync<BridgeResponse<ChannelsData>>(
                     new GetChannelsRequest { Server = "no-such-server" },
                     TimeSpan.FromSeconds(3));
-                Assert.NotNull(resp.Channels);
-                Assert.Empty(resp.Channels);
+                Assert.NotNull(resp.Data.Channels);
+                Assert.Empty(resp.Data.Channels);
             } finally {
                 await ShutdownBridgeAsync(bp, pc);
             }
@@ -136,7 +136,7 @@ namespace ActDiscordTriggers.Tests {
         public async Task LeaveChannel_before_join_does_not_throw() {
             var (bp, pc) = await StartBridgeAndHelloAsync();
             try {
-                var resp = await pc.SendAsync<OkResponse>(
+                var resp = await pc.SendAsync<BridgeResponse>(
                     new LeaveChannelRequest(), TimeSpan.FromSeconds(3));
                 Assert.True(resp.Ok);
             } finally {
@@ -161,7 +161,7 @@ namespace ActDiscordTriggers.Tests {
         public async Task SpeakFile_without_join_returns_not_connected_error() {
             var (bp, pc) = await StartBridgeAndHelloAsync();
             try {
-                var resp = await pc.SendAsync<OkResponse>(
+                var resp = await pc.SendAsync<BridgeResponse>(
                     new SpeakFileRequest { Path = @"C:\does-not-matter.wav" },
                     TimeSpan.FromSeconds(3));
                 Assert.False(resp.Ok);
@@ -172,22 +172,27 @@ namespace ActDiscordTriggers.Tests {
         }
 
         [Fact]
-        public async Task Init_with_invalid_token_keeps_bridge_responsive_and_disconnected() {
+        public async Task Connect_with_invalid_token_keeps_bridge_responsive_and_disconnected() {
             var (bp, pc) = await StartBridgeAndHelloAsync();
             try {
-                // Discord.Net's eagerness on token validation varies by version; what matters
-                // is the bridge survives and IsConnected stays false. We don't assert on the
-                // Init response directly because Discord.Net 3.19 may accept the request and
-                // fail asynchronously rather than throwing during LoginAsync.
+                // Push a config carrying a bad token, then ask the bridge to log in.
+                // Discord.js's eagerness on token validation varies by version; what
+                // matters is the bridge survives and IsConnected stays false. We don't
+                // assert on the Connect response directly because login may fail
+                // asynchronously rather than throwing during the call.
+                await pc.SendAsync<BridgeResponse>(
+                    new SetConfigRequest<PluginSettings> {
+                        Config = new PluginSettings { BotToken = "obviously-not-a-real-bot-token" },
+                    },
+                    TimeSpan.FromSeconds(5));
                 try {
-                    await pc.SendAsync<OkResponse>(
-                        new InitRequest { Token = "obviously-not-a-real-bot-token", Status = "" },
-                        TimeSpan.FromSeconds(10));
+                    await pc.SendAsync<BridgeResponse>(
+                        new ConnectRequest(), TimeSpan.FromSeconds(10));
                 } catch (TimeoutException) { /* allowed: REST validation can be slow */ }
 
-                var ic = await pc.SendAsync<IsConnectedResponse>(
+                var ic = await pc.SendAsync<BridgeResponse<ConnectedData>>(
                     new IsConnectedRequest(), TimeSpan.FromSeconds(3));
-                Assert.False(ic.Connected);
+                Assert.False(ic.Data.Connected);
             } finally {
                 await ShutdownBridgeAsync(bp, pc);
             }
@@ -198,14 +203,14 @@ namespace ActDiscordTriggers.Tests {
             var (bp, pc) = await StartBridgeAndHelloAsync();
             try {
                 const int N = 10;
-                var tasks = new Task<IsConnectedResponse>[N];
+                var tasks = new Task<BridgeResponse<ConnectedData>>[N];
                 for (int i = 0; i < N; i++) {
-                    tasks[i] = pc.SendAsync<IsConnectedResponse>(
+                    tasks[i] = pc.SendAsync<BridgeResponse<ConnectedData>>(
                         new IsConnectedRequest(), TimeSpan.FromSeconds(5));
                 }
                 var results = await Task.WhenAll(tasks);
                 foreach (var r in results) {
-                    Assert.False(r.Connected);
+                    Assert.False(r.Data.Connected);
                 }
             } finally {
                 await ShutdownBridgeAsync(bp, pc);
@@ -220,7 +225,7 @@ namespace ActDiscordTriggers.Tests {
             using var pc = new PipeClient(pipe);
             pc.Start();
 
-            await pc.SendAsync<HelloResponse>(
+            await pc.SendAsync<BridgeResponse<HelloData>>(
                 new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                 TimeSpan.FromSeconds(5));
 
@@ -233,7 +238,7 @@ namespace ActDiscordTriggers.Tests {
             Assert.NotNull(reason);
 
             await Assert.ThrowsAnyAsync<Exception>(() =>
-                pc.SendAsync<IsConnectedResponse>(
+                pc.SendAsync<BridgeResponse<ConnectedData>>(
                     new IsConnectedRequest(), TimeSpan.FromSeconds(2)));
         }
     }

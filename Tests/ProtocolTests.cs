@@ -1,5 +1,5 @@
+using ACT_DiscordTriggers.Settings;
 using DiscordBridge.Protocol;
-using System;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -22,13 +22,53 @@ namespace ActDiscordTriggers.Tests {
         }
 
         [Fact]
-        public void HelloResponse_round_trips() {
-            var resp = new HelloResponse { ReqId = 2, Ok = true, BridgeVersion = "1.0.0", Error = "" };
+        public void BridgeResponse_defaults_op_to_Result() {
+            var resp = new BridgeResponse { ReqId = 3, Ok = true };
             string json = JsonSerializer.Serialize(resp, opts);
-            var back = JsonSerializer.Deserialize<HelloResponse>(json);
+            Assert.Contains("\"op\":\"Result\"", json);
+            Assert.Contains("\"reqId\":3", json);
+        }
+
+        [Fact]
+        public void BridgeResponse_with_HelloData_round_trips() {
+            var resp = new BridgeResponse<HelloData> {
+                ReqId = 2, Ok = true, Data = new HelloData { BridgeVersion = "1.0.0" },
+            };
+            string json = JsonSerializer.Serialize(resp, opts);
+            var back = JsonSerializer.Deserialize<BridgeResponse<HelloData>>(json);
             Assert.True(back.Ok);
             Assert.Equal(2, back.ReqId);
-            Assert.Equal("1.0.0", back.BridgeVersion);
+            Assert.Equal("Result", back.Op);
+            Assert.Equal("1.0.0", back.Data.BridgeVersion);
+        }
+
+        [Fact]
+        public void BridgeResponse_with_ConnectedData_round_trips() {
+            var resp = new BridgeResponse<ConnectedData> {
+                ReqId = 4, Ok = true, Data = new ConnectedData { Connected = true },
+            };
+            var back = JsonSerializer.Deserialize<BridgeResponse<ConnectedData>>(
+                JsonSerializer.Serialize(resp, opts));
+            Assert.True(back.Data.Connected);
+        }
+
+        [Fact]
+        public void BridgeResponse_with_error_carries_error_string() {
+            var resp = new BridgeResponse { ReqId = 7, Ok = false, Error = "channel not found" };
+            var back = JsonSerializer.Deserialize<BridgeResponse>(JsonSerializer.Serialize(resp, opts));
+            Assert.False(back.Ok);
+            Assert.Equal("channel not found", back.Error);
+        }
+
+        [Fact]
+        public void ChannelsData_with_empty_array_serializes_as_empty_array() {
+            var resp = new BridgeResponse<ChannelsData> {
+                ReqId = 5, Ok = true, Data = new ChannelsData { Channels = new string[0] },
+            };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(resp, opts));
+            var channels = doc.RootElement.GetProperty("data").GetProperty("channels");
+            Assert.Equal(JsonValueKind.Array, channels.ValueKind);
+            Assert.Equal(0, channels.GetArrayLength());
         }
 
         [Fact]
@@ -50,39 +90,38 @@ namespace ActDiscordTriggers.Tests {
         }
 
         [Fact]
-        public void SpeakFileRequest_serializes_with_path() {
+        public void SpeakFileRequest_serializes_with_path_and_no_effect_flag() {
             var req = new SpeakFileRequest { ReqId = 9, Path = @"C:\sounds\alert.wav" };
             string json = JsonSerializer.Serialize(req, opts);
             using var doc = JsonDocument.Parse(json);
             Assert.Equal("SpeakFile", doc.RootElement.GetProperty("op").GetString());
             Assert.Equal(9, doc.RootElement.GetProperty("reqId").GetInt32());
             Assert.Equal(@"C:\sounds\alert.wav", doc.RootElement.GetProperty("path").GetString());
+            // The per-clip effect flag is gone — the bridge decides from config.
+            Assert.False(doc.RootElement.TryGetProperty("randomEffect", out _));
         }
 
+        // The whole plugin settings POCO is the config payload. Serialize via the
+        // runtime type, mirroring PipeClient.SendFrameAsync, and confirm the bridge
+        // sees the camelCase field names it reads (including the bot token).
         [Fact]
-        public void OkResponse_with_caller_supplied_op_keeps_op_in_json() {
-            var resp = new OkResponse { Op = Op.DeinitResult, ReqId = 3, Ok = true };
-            string json = JsonSerializer.Serialize(resp, opts);
-            Assert.Contains("\"op\":\"DeinitResult\"", json);
-            Assert.Contains("\"reqId\":3", json);
-        }
-
-        [Fact]
-        public void GetChannelsResponse_with_empty_array_serializes_as_empty_array() {
-            var resp = new GetChannelsResponse { ReqId = 5, Channels = new string[0] };
-            string json = JsonSerializer.Serialize(resp, opts);
-            using var doc = JsonDocument.Parse(json);
-            Assert.Equal(JsonValueKind.Array, doc.RootElement.GetProperty("channels").ValueKind);
-            Assert.Equal(0, doc.RootElement.GetProperty("channels").GetArrayLength());
-        }
-
-        [Fact]
-        public void JoinChannelResponse_with_error_carries_error_string() {
-            var resp = new JoinChannelResponse { ReqId = 7, Ok = false, Error = "channel not found" };
-            string json = JsonSerializer.Serialize(resp, opts);
-            var back = JsonSerializer.Deserialize<JoinChannelResponse>(json);
-            Assert.False(back.Ok);
-            Assert.Equal("channel not found", back.Error);
+        public void SetConfigRequest_serializes_whole_settings_with_camelCase_fields() {
+            var settings = new PluginSettings {
+                BotToken = "abc", BotStatus = "hi", RandomFx = true, FxChance = 50,
+                Normalize = false, NormalizeTarget = 18, AudioQualityIndex = 2,
+            };
+            var req = new SetConfigRequest<PluginSettings> { ReqId = 1, Config = settings };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, req.GetType(), opts));
+            var root = doc.RootElement;
+            Assert.Equal("SetConfig", root.GetProperty("op").GetString());
+            var cfg = root.GetProperty("config");
+            Assert.Equal("abc", cfg.GetProperty("botToken").GetString());
+            Assert.Equal("hi", cfg.GetProperty("botStatus").GetString());
+            Assert.True(cfg.GetProperty("randomFx").GetBoolean());
+            Assert.Equal(50, cfg.GetProperty("fxChance").GetInt32());
+            Assert.False(cfg.GetProperty("normalize").GetBoolean());
+            Assert.Equal(18, cfg.GetProperty("normalizeTarget").GetInt32());
+            Assert.Equal(2, cfg.GetProperty("audioQualityIndex").GetInt32());
         }
 
         [Fact]
@@ -96,23 +135,27 @@ namespace ActDiscordTriggers.Tests {
         }
 
         [Fact]
-        public void Every_request_op_has_a_paired_result_op() {
+        public void Result_is_the_only_response_op() {
+            var ops = typeof(Op).GetFields()
+                .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+                .Select(f => (string)f.GetValue(null));
+            Assert.Contains(Op.Result, ops);
+            foreach (var op in ops) {
+                if (op != Op.Result) {
+                    Assert.False(op.EndsWith("Result"), $"unexpected *Result op: {op}");
+                }
+            }
+        }
+
+        [Fact]
+        public void Removed_ops_are_gone() {
             var ops = new System.Collections.Generic.HashSet<string>(
                 typeof(Op).GetFields()
                     .Where(f => f.IsLiteral && f.FieldType == typeof(string))
                     .Select(f => (string)f.GetValue(null)));
-            string[] requestsExpectingResult = {
-                Op.Hello, Op.Init, Op.Deinit, Op.IsConnected,
-                Op.GetServers, Op.GetChannels, Op.SetGame,
-                Op.JoinChannel, Op.LeaveChannel, Op.SetNormalization, Op.SetAudioQuality,
-            };
-            foreach (var req in requestsExpectingResult) {
-                Assert.Contains(req + "Result", ops);
+            foreach (var removed in new[] { "SetGame", "SetNormalization", "SetAudioQuality", "Init", "Deinit" }) {
+                Assert.DoesNotContain(removed, ops);
             }
-            // SpeakPcm and SpeakFile both reply with Op.SpeakResult, not "<Op>Result".
-            Assert.Contains(Op.SpeakResult, ops);
-            Assert.Contains(Op.SpeakPcm, ops);
-            Assert.Contains(Op.SpeakFile, ops);
         }
 
         [Fact]
@@ -123,36 +166,7 @@ namespace ActDiscordTriggers.Tests {
         [Fact]
         public void ProtocolVersion_matches_bridge() {
             // Tripwire: bump both this and PROTOCOL_VERSION in protocol.ts together.
-            Assert.Equal(4, ProtocolConstants.Version);
-        }
-
-        [Fact]
-        public void SetAudioQualityRequest_serializes_bitrate() {
-            var req = new SetAudioQualityRequest { ReqId = 6, Bitrate = 128000 };
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, opts));
-            Assert.Equal("SetAudioQuality", doc.RootElement.GetProperty("op").GetString());
-            Assert.Equal(6, doc.RootElement.GetProperty("reqId").GetInt32());
-            Assert.Equal(128000, doc.RootElement.GetProperty("bitrate").GetInt32());
-        }
-
-        [Fact]
-        public void SetNormalizationRequest_serializes_enabled_and_targetDb() {
-            var req = new SetNormalizationRequest { ReqId = 4, Enabled = true, TargetDb = -18 };
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, opts));
-            Assert.Equal("SetNormalization", doc.RootElement.GetProperty("op").GetString());
-            Assert.Equal(4, doc.RootElement.GetProperty("reqId").GetInt32());
-            Assert.True(doc.RootElement.GetProperty("enabled").GetBoolean());
-            Assert.Equal(-18, doc.RootElement.GetProperty("targetDb").GetInt32());
-        }
-
-        [Fact]
-        public void SpeakFileRequest_serializes_randomEffect_flag() {
-            var req = new SpeakFileRequest { ReqId = 1, Path = "beep.wav", RandomEffect = true };
-            using var doc = System.Text.Json.JsonDocument.Parse(
-                System.Text.Json.JsonSerializer.Serialize(req));
-            Assert.Equal("SpeakFile", doc.RootElement.GetProperty("op").GetString());
-            Assert.Equal("beep.wav", doc.RootElement.GetProperty("path").GetString());
-            Assert.True(doc.RootElement.GetProperty("randomEffect").GetBoolean());
+            Assert.Equal(5, ProtocolConstants.Version);
         }
     }
 }
