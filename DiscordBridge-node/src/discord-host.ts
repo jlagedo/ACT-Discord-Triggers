@@ -24,6 +24,7 @@ import decode from 'audio-decode';
 import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
 import { applyRandomEffect } from './effects.js';
 import { normalizePcm16 } from './normalize.js';
+import { declick } from './declick.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
@@ -403,6 +404,11 @@ export class DiscordHost implements Host {
                 log.error('normalize failed; playing un-leveled', e);
             }
         }
+        // Declick last: fade the clip in/out so its edge samples ramp from/to
+        // zero instead of stepping against the mixer's digital silence (the step
+        // is an audible click). Runs after effects + normalize so the final
+        // samples reach zero whatever those stages did to the level.
+        buf = declick(buf);
         const enqueueT = performance.now();
         const r = this.mixer!.addVoice(buf, { id: reqId, enqueueT });
         if (r.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${r.dropped} voice(s)`);
