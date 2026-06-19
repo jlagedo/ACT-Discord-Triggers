@@ -11,7 +11,7 @@ An [Advanced Combat Tracker](https://advancedcombattracker.com/) (ACT) plugin
 that plays your triggers — text-to-speech and sound effects — through a Discord
 bot in a voice channel, so your whole party hears them.
 
-Works with ACT **Custom Triggers** and **Triggernometry**.
+Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
 
 </div>
 
@@ -31,13 +31,14 @@ Works with ACT **Custom Triggers** and **Triggernometry**.
 
 - 🔊 **TTS in voice chat** — fire trigger text-to-speech straight into a Discord
   voice channel.
-- 🎵 **Sound-file triggers** — play `.wav` sound effects through the bot.
+- 🎵 **Sound-file triggers** — play sound effects through the bot in `.wav`,
+  MP3, OGG, or FLAC (MP3/OGG/FLAC via Triggernometry or Triggevent).
 - 🎚️ **Concurrent playback** — overlapping triggers mix together instead of
   queueing, so nothing gets dropped or delayed.
-- 🎲 **Random sound effects** — optionally pick a random sound from a set each
-  time a trigger fires.
-- 📈 **Loudness auto-leveling** — automatic RMS normalization keeps every clip
-  at a consistent volume.
+- 🎲 **Random sound effects** — optionally add a random audio effect (echo,
+  reverb, pitch-shift, and more) to triggers as they play.
+- 📈 **Auto-leveling** — automatically evens out the volume so every callout
+  and sound plays at a consistent level.
 - 🔐 **Discord DAVE support** — speaks Discord's end-to-end voice encryption,
   which is now required to join voice channels.
 
@@ -71,8 +72,14 @@ Works with ACT **Custom Triggers** and **Triggernometry**.
 Follow the
 [First-Time Setup Guide](https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide)
 to create a Discord bot, invite it to your server, and connect it to the
-plugin. Stuck? Check
-[Common Questions & Issues](https://github.com/jlagedo/ACT-Discord-Triggers/wiki/Common-Questions-&-Issues).
+plugin. From there:
+
+- [Settings & Configuration](https://github.com/jlagedo/ACT-Discord-Triggers/wiki/Settings-&-Configuration)
+  — every setting on the plugin tab, explained.
+- [Trigger Software](https://github.com/jlagedo/ACT-Discord-Triggers/wiki/Trigger-Software)
+  — use it with ACT Custom Triggers, Triggernometry, and Triggevent.
+- [Common Questions & Issues](https://github.com/jlagedo/ACT-Discord-Triggers/wiki/Common-Questions-&-Issues)
+  — troubleshooting and FAQ.
 
 ## Updating
 
