@@ -671,15 +671,17 @@
                                             <TextBlock Style="{StaticResource CardDesc}" Text="Where downloaded voices are stored." />
                                         </StackPanel>
                                     </HeaderedContentControl.Header>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBox
-                                            Width="240"
-                                            VerticalAlignment="Center"
-                                            Text="{Binding ModelsDir}" />
+                                    <StackPanel>
                                         <Button
-                                            Margin="8,0,0,0"
+                                            HorizontalAlignment="Left"
                                             Click="OnBrowseModelsFolder"
-                                            Content="Browse…" />
+                                            Content="Pick a folder" />
+                                        <TextBlock
+                                            Margin="0,8,0,0"
+                                            Foreground="{StaticResource TextMuted}"
+                                            Text="{Binding ModelsDir}"
+                                            TextTrimming="CharacterEllipsis"
+                                            ToolTip="{Binding ModelsDir}" />
                                     </StackPanel>
                                 </HeaderedContentControl>
                             </StackPanel>

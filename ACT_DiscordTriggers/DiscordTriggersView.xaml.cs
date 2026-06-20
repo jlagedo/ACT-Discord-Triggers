@@ -137,18 +137,33 @@ namespace ACT_DiscordTriggers {
         new Action(() => TtsScroller.ScrollToBottom()),
         System.Windows.Threading.DispatcherPriority.Loaded);
 
-    // Folder picking is a view concern (Core has no WinForms): open a WinForms folder
-    // dialog parented to ACT's main window, seeded with the current path, and write the
-    // chosen folder back to the VM.
+    // Folder picking is a view concern (Core has no WinForms): open the modern shell
+    // folder picker parented to ACT's main window, seeded with the current path, and
+    // write the chosen folder back to the VM. Falls back to the classic FolderBrowserDialog
+    // if the shell picker is unavailable (pre-Vista) or throws.
     private void OnBrowseModelsFolder(object sender, RoutedEventArgs e) {
+      const string title = "Choose where downloaded voices are stored";
+      var current = vm?.ModelsDir;
+      string picked;
+      try {
+        picked = VistaFolderPicker.PickFolder(ActGlobals.oFormActMain.Handle, title, current);
+      } catch (Exception ex) {
+        DiagnosticsLog.Append("Modern folder picker failed, falling back to classic dialog: " + ex);
+        picked = PickFolderClassic(title, current);
+      }
+      if (!string.IsNullOrEmpty(picked) && vm != null)
+        vm.ModelsDir = picked;
+    }
+
+    private string PickFolderClassic(string description, string current) {
       using (var dlg = new System.Windows.Forms.FolderBrowserDialog()) {
-        dlg.Description = "Choose where downloaded voices are stored";
+        dlg.Description = description;
         dlg.ShowNewFolderButton = true;
-        var current = vm?.ModelsDir;
         if (!string.IsNullOrWhiteSpace(current) && Directory.Exists(current))
           dlg.SelectedPath = current;
-        if (dlg.ShowDialog(ActGlobals.oFormActMain) == System.Windows.Forms.DialogResult.OK && vm != null)
-          vm.ModelsDir = dlg.SelectedPath;
+        return dlg.ShowDialog(ActGlobals.oFormActMain) == System.Windows.Forms.DialogResult.OK
+          ? dlg.SelectedPath
+          : null;
       }
     }
     #endregion
