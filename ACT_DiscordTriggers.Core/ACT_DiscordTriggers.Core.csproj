@@ -23,6 +23,9 @@
   <ItemGroup>
     <!-- DiscordClient synthesizes TTS via System.Speech (a GAC framework assembly). -->
     <Reference Include="System.Speech" />
+    <!-- OnnxDownloader fetches voice packs over HTTPS; HttpClient lives in the GAC
+         System.Net.Http facade on net48 (not referenced by default). -->
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
     <!-- The test project exercises internal members (DiagnosticsLog.MergeInterleave,

@@ -88,4 +88,43 @@ namespace ACT_DiscordTriggers {
       }
     }
   }
+
+  // Keeps a ListBox/ListView pinned to its newest row as items are appended (so the
+  // Diagnostics log follows live activity), but only while the user is already at the
+  // bottom — if they scroll up to read history, new entries don't yank them back down.
+  // Scrolling is a view concern, so it stays out of the Core ViewModel.
+  public static class LogAutoScroll {
+    public static readonly DependencyProperty EnabledProperty =
+      DependencyProperty.RegisterAttached(
+        "Enabled", typeof(bool), typeof(LogAutoScroll),
+        new PropertyMetadata(false, OnEnabledChanged));
+
+    // Per-list "stick to bottom" flag; starts true so the first rows pin to the bottom.
+    private static readonly DependencyProperty AtBottomProperty =
+      DependencyProperty.RegisterAttached(
+        "AtBottom", typeof(bool), typeof(LogAutoScroll), new PropertyMetadata(true));
+
+    public static bool GetEnabled(DependencyObject d) => (bool)d.GetValue(EnabledProperty);
+    public static void SetEnabled(DependencyObject d, bool value) => d.SetValue(EnabledProperty, value);
+
+    private static void OnEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) {
+      if (!(d is ListBox list)) return; // ListView derives from ListBox
+      // ScrollViewer.ScrollChanged bubbles up from the control's inner ScrollViewer.
+      if ((bool)e.NewValue) list.AddHandler(ScrollViewer.ScrollChangedEvent, (ScrollChangedEventHandler)OnScrollChanged);
+      else list.RemoveHandler(ScrollViewer.ScrollChangedEvent, (ScrollChangedEventHandler)OnScrollChanged);
+    }
+
+    private static void OnScrollChanged(object sender, ScrollChangedEventArgs e) {
+      if (!(e.OriginalSource is ScrollViewer sv) || !(sender is DependencyObject d)) return;
+      if (e.ExtentHeightChange == 0) {
+        // A scroll/layout change with no new content: re-evaluate whether we're at the
+        // bottom (within a pixel) and remember it. ScrollableHeight 0 = nothing to scroll.
+        bool atBottom = sv.ScrollableHeight <= 0 || sv.VerticalOffset >= sv.ScrollableHeight - 1.0;
+        d.SetValue(AtBottomProperty, atBottom);
+      } else if ((bool)d.GetValue(AtBottomProperty)) {
+        // Content grew (a row was appended) and we were pinned: follow it to the bottom.
+        sv.ScrollToBottom();
+      }
+    }
+  }
 }

@@ -83,7 +83,7 @@ Confirmed against `sherpa-onnx-node` 1.13.3 (the version benchmarked in the `she
 | Catalog source | **generated from Piper `voices.json`** (filtered to our locales, `medium`+`high` tiers), not hand-typed |
 | Kokoro coverage | **English (graded A–F) + the 3 pt-BR speakers only** — Kokoro's non-English voices are thin/absent, so fr/de/es/ru are **Piper-only** |
 
-> **Architecture decision (this revision):** voice provisioning lives in **C#**, not the bridge. The bridge process is spawned inside `ConnectAsync` (`DiscordClient.cs:46`) and only exists while connected to Discord — but users browse/download voices at settings-time, before any call. So C# owns the curated catalog, the installed scan, and the downloads (`HttpClient` + SharpZipLib). The bridge stays synthesis-only and learns *which* voice to use entirely from `SetConfig`. This removes the previously-planned `ListVoices` / `DownloadVoice` / `DownloadProgress` ops — `SpeakText { text }` is the only new wire message.
+> **Architecture decision (this revision):** voice provisioning lives in **C#**, not the bridge. The bridge process is spawned inside `ConnectAsync` (`DiscordClient.cs:46`) and only exists while connected to Discord — but users browse/download voices at settings-time, before any call. So C# owns the curated catalog, the installed scan, and the downloads (`HttpClient` + Windows `tar.exe`). The bridge stays synthesis-only and learns *which* voice to use entirely from `SetConfig`. This removes the previously-planned `ListVoices` / `DownloadVoice` / `DownloadProgress` ops — `SpeakText { text }` is the only new wire message.
 
 ---
 
@@ -381,7 +381,7 @@ Owned by C# (Core) so it works with **no Discord connection** (the bridge may be
   `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/<DownloadId>.tar.bz2`
 - **Install-state:** scan `ModelsDir/<DownloadId>/` for the model `.onnx`. To avoid half-downloaded false positives, **download + extract to a temp dir, then atomically move into place** — the directory existing means complete.
 - **Download:** `HttpClient` GET with content-length → progress events drive the bar + Debug Log.
-- **Extraction (`.tar.bz2`):** **SharpZipLib** (`BZip2InputStream` → `TarInputStream`), Costura-merged like the other managed deps. This *replaces* the previously-considered Node `unbzip2-stream`/`tar` deps — provisioning no longer touches the bridge.
+- **Extraction (`.tar.bz2`):** Windows' built-in **`tar.exe`** (bsdtar/libarchive, with bzip2) via `Process.Start` — `tar -x -f <archive> -C <stagingDir>`. **No managed archive library.** This is a deliberate choice: ACT loads every plugin into one shared process, and managed archive libs collide there — OverlayPlugin bundles `SharpCompress` 0.24 (and ACT itself bundles `ICSharpCode.SharpZipLib` 0.85), so a Costura-merged copy of either gets hijacked at bind time by the already-loaded version (`MethodNotFound`). `tar.exe` has no managed identity to collide on. It ships with Windows 10 1803+ / Windows 11; absence is reported as a clear error, not a crash. This also *replaces* the previously-considered Node `unbzip2-stream`/`tar` deps — provisioning no longer touches the bridge.
 - **Kokoro special case:** every Kokoro speaker maps to the single 333 MB pack; the UI shows one "Download · 333 MB", after which all Kokoro voices are `✓`.
 - Nothing bundled. Base install adds only the `sherpa-onnx-node` runtime to the bridge (~21 MB native DLLs + `.node`); models arrive on demand.
 
@@ -393,7 +393,7 @@ Owned by C# (Core) so it works with **no Discord connection** (the bridge may be
   'sherpa-onnx-win-x64',   # onnxruntime.dll + sherpa-onnx-*.dll + sherpa-onnx.node (~21 MB)
   ```
   The addon loader (`sherpa-onnx-node/addon.js`) probes `./node_modules/sherpa-onnx-win-x64/sherpa-onnx.node` and siblings, so staging that package next to the bridge is sufficient (no `LD_LIBRARY_PATH` on Windows). **Confirm `build.ps1`'s `BRIDGE_READY` self-test still passes** with the addon present — it's the packaging regression guard and must not be weakened.
-- **C# (managed):** add **SharpZipLib** as a `PackageReference`; it's Costura-merged like the other managed deps so the plugin stays single-file. No Node bz2 deps — extraction is C#-side.
+- **C# (managed):** no archive `PackageReference` — extraction shells out to Windows `tar.exe`, so there is no managed archive dependency to Costura-merge (and nothing to collide with another plugin's bundled copy). No Node bz2 deps either — extraction is C#-side.
 
 ---
 
@@ -441,9 +441,9 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 5. Download function (C#)
 
 - **Goal:** `⬇` voices become installable straight from the UI — with no Discord connection.
-- **Work:** `OnnxDownloader` — `HttpClient` GET `…/tts-models/<DownloadId>.tar.bz2` with content-length → progress; extract via **SharpZipLib** (`BZip2InputStream` → `TarInputStream`) to a temp dir; **atomic move** into `ModelsDir/<DownloadId>/`; refresh install-state. UI: `[Download · NN MB]` row, progress bar, Debug-Log mirror; enable Test + flip `✓` on completion; Kokoro = one pack unlocks all speakers. Add the SharpZipLib `PackageReference` (Costura-merged).
+- **Work:** `OnnxDownloader` — `HttpClient` GET `…/tts-models/<DownloadId>.tar.bz2` with content-length → progress; extract via Windows **`tar.exe`** into a staging dir on the same volume; **atomic `Directory.Move`** into `ModelsDir/<DownloadId>/`; refresh install-state. UI: `[Download · NN MB]` row, progress bar, Debug-Log mirror; enable Test + flip `✓` on completion; Kokoro = one pack unlocks all speakers. No managed archive `PackageReference`.
 - **Files:** `ACT_DiscordTriggers.Core/Tts/OnnxDownloader.cs`, VM download command, `.csproj`.
-- **Done when:** pick an uninstalled voice → Download → progress → `✓`; a cancelled/failed download leaves **no** half-installed dir.
+- **Done when:** pick an uninstalled voice → Download → progress → `✓`; a cancelled/failed download leaves **no** half-installed dir. ✅ **Done** — `OnnxDownloader` (HttpClient + `tar.exe`, staged on-volume + atomic move) replaces the step-3 simulation; the VM re-scans on-disk install-state after a download and whenever `ModelsDir` changes; download is cancelled on teardown. `OnnxDownloaderTests` covers the publish/replace logic (pure FS), a real `tar.exe` round-trip, corrupt-archive cleanup, and an opt-in real-network download (asserts the full pack unpacked). **`tar.exe` is used instead of a managed archive lib** because ACT runs all plugins in one process and OverlayPlugin/ACT bundle older `SharpCompress`/`SharpZipLib` copies that hijack a merged copy at bind time (`MethodNotFound`); shelling out has no managed identity to collide on.
 
 ### 6. Bridge synthesis + protocol v6
 
@@ -455,7 +455,7 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 7. Packaging
 
 - **Goal:** the release ships the native runtime and still self-tests.
-- **Work:** add `sherpa-onnx-node` + `sherpa-onnx-win-x64` to the esbuild `external` list and `build.ps1 $externals`; SharpZipLib already Costura-merged (step 5).
+- **Work:** add `sherpa-onnx-node` + `sherpa-onnx-win-x64` to the esbuild `external` list and `build.ps1 $externals`. No managed archive dep to bundle — extraction shells out to Windows `tar.exe` (step 5).
 - **Done when:** `pwsh ./build.ps1` produces a release that loads the addon and passes the `BRIDGE_READY` self-test.
 
 ### 8. Synthesis cache

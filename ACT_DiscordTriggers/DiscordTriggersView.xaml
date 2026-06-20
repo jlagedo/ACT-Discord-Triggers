@@ -140,6 +140,7 @@
                 Style="{StaticResource SectionHeader}"
                 Text="Diagnostics" />
             <ListView
+                local:LogAutoScroll.Enabled="True"
                 local:LogListCopy.Enabled="True"
                 ItemsSource="{Binding LogEntries}"
                 SelectionMode="Extended"

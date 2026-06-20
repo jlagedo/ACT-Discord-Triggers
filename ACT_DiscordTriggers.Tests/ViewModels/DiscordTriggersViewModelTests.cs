@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ACT_DiscordTriggers.Core.Ipc;
 using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Tts;
 using ACT_DiscordTriggers.Core.ViewModels;
 using Xunit;
 
@@ -279,6 +281,94 @@ namespace ACT_DiscordTriggers.Tests {
       vm.Log("hello world");
       var entry = Assert.Single(vm.LogEntries);
       Assert.Equal("hello world", entry.Message);
+    }
+
+    // --- Network integration: drive the real download through the VM command --------
+    // Opt-in (hits GitHub's tts-models release). Set ACT_DT_NETWORK_TESTS=1 to run; CI
+    // skips it by default so a flaky/absent network never reds the gate.
+    private static bool NetworkTestsEnabled =>
+      !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ACT_DT_NETWORK_TESTS"));
+
+    private const string SmallVoiceId = "vits-piper-en_US-amy-medium";
+
+    private static (DiscordTriggersViewModel vm, string modelsDir) NewOnnxVm() {
+      var modelsDir = Path.Combine(Path.GetTempPath(), "actdt-dl-" + Guid.NewGuid().ToString("N"));
+      Directory.CreateDirectory(modelsDir);
+      var store = TempStore();
+      store.Save(new PluginSettings { TtsEngine = "onnx", OnnxFamily = "piper", ModelsDir = modelsDir });
+      var vm = NewVm(new FakeDiscordService(), store);
+      vm.Initialize();
+      return (vm, modelsDir);
+    }
+
+    [Fact]
+    public async Task DownloadVoiceCommand_RealNetwork_InstallsVoice_AndUpdatesUiAndTestGate() {
+      Assert.SkipUnless(NetworkTestsEnabled, "Set ACT_DT_NETWORK_TESTS=1 to run network integration tests.");
+      var (vm, modelsDir) = NewOnnxVm();
+      try {
+        Assert.True(vm.IsOnnx);
+        var amy = vm.OnnxVoices.Single(v => v.Id == SmallVoiceId);
+        vm.SelectedOnnxVoice = amy;
+
+        // Pre-state: not installed → download strip showing, Test gated off even though
+        // the bot is "in a channel" (CanLeave), proving the gate ties to install-state.
+        Assert.False(amy.Installed);
+        Assert.True(vm.ShowDownloadPrompt);
+        Assert.True(vm.DownloadButtonVisible);
+        vm.CanLeave = true;
+        Assert.False(vm.TestCommand.CanExecute(null));
+
+        await vm.DownloadVoiceCommand.ExecuteAsync(null);
+
+        // Post-state: the action installed the pack, flipped the row, cleared the strip,
+        // surfaced the "ready" confirmation, and enabled Test.
+        Assert.True(amy.Installed);
+        Assert.True(vm.SelectedVoiceInstalled);
+        Assert.False(vm.ShowDownloadPrompt);
+        Assert.False(vm.DownloadButtonVisible);
+        Assert.True(vm.DownloadJustCompleted);
+        Assert.Contains("ready", vm.DownloadDoneText, StringComparison.OrdinalIgnoreCase);
+        Assert.True(vm.TestCommand.CanExecute(null));
+
+        // The files really landed on disk and the catalog agrees.
+        Assert.True(OnnxCatalog.IsInstalled(amy.Info, modelsDir));
+        Assert.True(Directory.EnumerateFiles(Path.Combine(modelsDir, SmallVoiceId), "*.onnx").Any());
+
+        // The download milestones reached the Debug Log.
+        Assert.Contains(vm.LogEntries, e => e.Message.StartsWith("Fetching "));
+        Assert.Contains(vm.LogEntries, e => e.Message.Contains("Installed " + SmallVoiceId));
+        Assert.Contains(vm.LogEntries, e => e.Message == "Downloaded " + amy.Name + ".");
+      } finally {
+        try { Directory.Delete(modelsDir, true); } catch { }
+      }
+    }
+
+    [Fact]
+    public async Task DownloadVoiceCommand_RealNetwork_RescanAfterFolderChange_FindsInstall() {
+      Assert.SkipUnless(NetworkTestsEnabled, "Set ACT_DT_NETWORK_TESTS=1 to run network integration tests.");
+      var (vm, modelsDir) = NewOnnxVm();
+      try {
+        var amy = vm.OnnxVoices.Single(v => v.Id == SmallVoiceId);
+        vm.SelectedOnnxVoice = amy;
+        await vm.DownloadVoiceCommand.ExecuteAsync(null);
+        Assert.True(amy.Installed);
+
+        // Point at an empty folder → the rescan must clear the install marks…
+        var empty = Path.Combine(Path.GetTempPath(), "actdt-empty-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(empty);
+        try {
+          vm.ModelsDir = empty;
+          Assert.False(vm.OnnxVoices.Single(v => v.Id == SmallVoiceId).Installed);
+
+          // …and pointing back at the populated folder must rediscover the install.
+          vm.ModelsDir = modelsDir;
+          Assert.True(vm.OnnxVoices.Single(v => v.Id == SmallVoiceId).Installed);
+        } finally {
+          try { Directory.Delete(empty, true); } catch { }
+        }
+      } finally {
+        try { Directory.Delete(modelsDir, true); } catch { }
+      }
     }
 
     private sealed class FakeDiscordService : IDiscordService {

@@ -22,6 +22,7 @@ C# tests (net48, xUnit v3 — `xunit.v3` builds the test project as an `.exe`, r
 dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
 ```
 - `BridgeIntegrationTests` spawns the real bridge from `dist/` — run `build.ps1` first or it fails with a "build the bridge first" message.
+- Network integration tests (`*_RealNetwork_*` in `OnnxDownloaderTests`/`DiscordTriggersViewModelTests`) download a real ONNX voice pack from the k2-fsa `tts-models` release and drive the VM download command end-to-end. They are opt-in: `Assert.SkipUnless` gates them on the `ACT_DT_NETWORK_TESTS` env var, so they skip by default (CI included) and run with `ACT_DT_NETWORK_TESTS=1 dotnet test ...`.
 - Single test: `dotnet test --filter "FullyQualifiedName~<name>"`.
 
 XAML formatting (XAML Styler `xstyler`, pinned as a local dotnet tool in `.config/dotnet-tools.json`; settings in `Settings.XamlStyler` at the repo root, auto-discovered up-tree):

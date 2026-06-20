@@ -139,6 +139,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         OnPropertyChanged(nameof(QualityDescription));
         RebuildOnnxVoices(value);   // re-selects, which refreshes the download row
         ScheduleConfigPush();
+        // Load sets the family under suppressPush; Initialize logs the scan once instead.
+        if (!suppressPush) Log("Quality set to " + value + " — " + InstallCountText() + ".");
       }
     }
     public bool IsPiper { get => onnxFamily == "piper"; set { if (value) OnnxFamily = "piper"; } }
@@ -178,8 +180,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // once OnnxVoices has been built (SelectedOnnxVoice is an item, not an id).
     private string loadedOnnxVoiceId = "";
 
-    // Simulated-download state (step 3 scaffold; replaced by the real downloader in step 5).
-    private readonly HashSet<string> simulatedInstalled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    // Cancels the in-flight voice download (on re-entry guard or shutdown).
+    private CancellationTokenSource downloadCts;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DownloadButtonVisible))]
@@ -216,7 +218,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public bool IsThreads4 { get => ttsThreads == 4; set { if (value) TtsThreads = 4; } }
 
     [ObservableProperty] private string modelsDir = "";
-    partial void OnModelsDirChanged(string value) => ScheduleConfigPush();
+    partial void OnModelsDirChanged(string value) {
+      ScheduleConfigPush();
+      // Re-scan the new folder so the ✓/size marks and download strip reflect what's
+      // installed there. Skipped during load (suppressPush), where Initialize rebuilds.
+      if (suppressPush) return;
+      RefreshInstallState();
+      Log("Models folder changed to " + OnnxCatalog.ResolveModelsDir(value) + " — " + InstallCountText() + ".");
+    }
     [ObservableProperty] private bool isAdvancedExpanded;
 
     // --- Computed (presentation) ------------------------------------------------
@@ -342,10 +351,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [RelayCommand(CanExecute = nameof(CanTest))]
     private void Test() => SpeakText("Discord Triggers voice test.");
 
-    // Simulated download (the real HttpClient + extract + atomic move is step 5). Runs a
-    // progress ramp, then marks the pack installed in-memory so the row flips to ✓ and the
-    // strip clears. Kokoro shares one pack id across all speakers, so its whole family
-    // flips at once. Nothing is written to disk; installs reset on reload.
+    // Download and install the selected voice pack via OnnxDownloader (HttpClient +
+    // SharpCompress extract + atomic move into ModelsDir/<DownloadId>/). Progress drives
+    // the bar; on success the on-disk state is re-scanned so the row flips to ✓ and the
+    // strip clears. Kokoro shares one pack id across all speakers, so re-scanning flips
+    // its whole family at once.
     [RelayCommand]
     private async Task DownloadVoice() {
       var item = SelectedOnnxVoice;
@@ -353,28 +363,51 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       IsDownloading = true;
       DownloadJustCompleted = false;
       DownloadProgress = 0;
-      Log("Downloading " + item.Name + "… (simulated)");
-      for (int p = 0; p <= 100; p += 4) {
-        DownloadProgress = p;
-        await Task.Delay(100);
+      var cts = new CancellationTokenSource();
+      downloadCts = cts;
+      Log("Downloading " + item.Name + "…");
+      try {
+        // Progress<T> posts back to the captured UI SynchronizationContext, so updating
+        // the observable DownloadProgress from the download thread is UI-safe.
+        var progress = new Progress<double>(p => DownloadProgress = p);
+        await OnnxDownloader.DownloadAsync(item.Info, ModelsDir, progress, cts.Token, Log);
+
+        RefreshInstallState();
+        Log("Downloaded " + item.Name + ".");
+        // Keep a success confirmation in place so completion reads as "done", not a vanish.
+        // It clears when the user picks another voice (see OnSelectedOnnxVoiceChanged).
+        DownloadDoneText = item.Name + " is ready.";
+        DownloadJustCompleted = true;
+      } catch (OperationCanceledException) {
+        Log("Download of " + item.Name + " was cancelled.");
+      } catch (Exception ex) {
+        Log("Download of " + item.Name + " failed: " + ex.Message);
+      } finally {
+        IsDownloading = false;
+        if (downloadCts == cts) downloadCts = null;
+        cts.Dispose();
+        OnPropertyChanged(nameof(ShowDownloadPrompt));
+        OnPropertyChanged(nameof(ShowDownloadStrip));
+        OnPropertyChanged(nameof(DownloadButtonVisible));
       }
-      simulatedInstalled.Add(item.Info.DownloadId);
-      foreach (var v in OnnxVoices)
-        if (string.Equals(v.Info.DownloadId, item.Info.DownloadId, StringComparison.OrdinalIgnoreCase))
-          v.Installed = true;
-      IsDownloading = false;
+    }
+
+    // Re-scan every listed voice's on-disk install-state against the current ModelsDir
+    // and refresh the dependent UI (download strip + Test gate). Preserves the current
+    // selection — used after a download and when the models folder changes.
+    private void RefreshInstallState() {
+      var dir = OnnxCatalog.ResolveModelsDir(ModelsDir);
+      foreach (var v in OnnxVoices) v.Installed = OnnxCatalog.IsInstalled(v.Info, dir);
       OnPropertyChanged(nameof(SelectedVoiceInstalled));
       OnPropertyChanged(nameof(ShowDownloadPrompt));
       OnPropertyChanged(nameof(ShowDownloadStrip));
       OnPropertyChanged(nameof(DownloadButtonVisible));
       TestCommand.NotifyCanExecuteChanged();
-      Log("Downloaded " + item.Name + ".");
-
-      // Keep a success confirmation in place so completion reads as "done", not a vanish.
-      // It clears when the user picks another voice (see OnSelectedOnnxVoiceChanged).
-      DownloadDoneText = item.Name + " is ready.";
-      DownloadJustCompleted = true;
     }
+
+    // One-line install tally for the Debug Log, e.g. "2 of 49 voice(s) installed".
+    private string InstallCountText() =>
+      OnnxVoices.Count(v => v.Installed) + " of " + OnnxVoices.Count + " voice(s) installed";
 
     // Refill OnnxVoices for the given family, annotating each with its on-disk state,
     // then select the first installed voice, else the recommended default, else the
@@ -383,10 +416,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void RebuildOnnxVoices(string family) {
       OnnxVoices.Clear();
       var dir = OnnxCatalog.ResolveModelsDir(ModelsDir);
-      foreach (var v in OnnxCatalog.ByFamily(family)) {
-        var installed = OnnxCatalog.IsInstalled(v, dir) || simulatedInstalled.Contains(v.DownloadId);
-        OnnxVoices.Add(new OnnxVoiceItem(v, installed));
-      }
+      foreach (var v in OnnxCatalog.ByFamily(family))
+        OnnxVoices.Add(new OnnxVoiceItem(v, OnnxCatalog.IsInstalled(v, dir)));
       SelectedOnnxVoice = OnnxVoices.FirstOrDefault(x => x.Installed)
         ?? OnnxVoices.FirstOrDefault(x => x.Recommended)
         ?? OnnxVoices.FirstOrDefault();
@@ -453,6 +484,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       } finally {
         suppressPush = false;
       }
+      Log("ONNX " + OnnxFamily + " voices: " + InstallCountText() + " in " + ModelsDir + ".");
 
       if (AutoConnect) _ = ConnectAsync();
     }
@@ -600,6 +632,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void CancelPendingPushes() {
       Cancel(statusPushCts); statusPushCts = null;
       Cancel(configPushCts); configPushCts = null;
+      Cancel(downloadCts); downloadCts = null;
     }
 
     private static void Cancel(CancellationTokenSource cts) {
