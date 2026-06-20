@@ -26,11 +26,11 @@ Pinned against the tree as of this revision — verify before editing:
 | Thing | Current state | Location |
 |---|---|---|
 | Protocol version | **5** (new ops below bump it to **6**) | `Protocol.cs:6`, `protocol.ts:35` |
-| Settings schema version | **1** (bump to **2**) | `PluginSettings.cs:22` |
+| Settings schema version | **2** (`V1ToV2` migration registered) | `PluginSettings.cs:22`, `Settings/Migrations/V1ToV2.cs` |
 | Reply envelope | single generic `Result` `{op,reqId,ok,error,data?}`, correlated by `reqId` — **there is no `SpeakResult` op** | `Protocol.cs:117`, `pipe-server.ts` `_result` |
 | TTS today | C# `DiscordClient.Speak(text,voice,vol,speed)` → System.Speech → `SpeakPcm` binary frame | `DiscordClient.cs:285` |
 | Dispatch seam | ACT's `PlayTtsMethod` → `DiscordTriggersViewModel.SpeakText(string)` → `discord.Speak(...)` | `DiscordTriggersViewModel.cs:235` |
-| TTS settings | `TtsVoice` / `TtsVolume` / `TtsSpeed` (sliders 0..20); pushed to bridge with **`push:false`** (SAPI is C#-synthesized, bridge ignores them) | `PluginSettings.cs:46-48`, VM `:68-76` |
+| TTS settings | SAPI `TtsVoice`/`TtsVolume` are `push:false` (C#-synthesized). `TtsSpeed` and the ONNX fields (`TtsEngine`/`OnnxFamily`/`OnnxVoice`/`TtsThreads`/`ModelsDir`) persist and **`push:true`** — they ride `SetConfig` for the bridge | `PluginSettings.cs`, VM `FromSettings`/`ToSettings` |
 | Nav | WPF `TabControl` with `TabItem`s **General · Sound · Information** | `DiscordTriggersView.xaml:101/239/351` |
 | Sound page | "Text-to-speech" (Voice/Volume/Speed) **+** "Effects & leveling" + "Audio quality" | `DiscordTriggersView.xaml:239-348` |
 | Playback pipeline | `_enqueue`: random-fx (bridge rolls from config) → normalize (global RMS) → declick → `mixer.addVoice(fullBuffer)` | `discord-host.ts:374-422` |
@@ -436,7 +436,7 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 - **Goal:** the UI state survives restart and reaches the bridge config.
 - **Work:** add `TtsEngine`/`OnnxFamily`/`OnnxVoice`/`TtsThreads`/`ModelsDir` to `PluginSettings`; bump `CurrentSchemaVersion` to **2** + a `Settings/Migrations/` v1→v2 that defaults them; back the step-3 VM props with settings (`FromSettings`/`ToSettings`); make the bridge-relevant props `push:true` (SetConfig); resolve empty `ModelsDir` to the absolute default before sending.
 - **Files:** `PluginSettings.cs`, `Settings/Migrations/*`, VM load/save/push.
-- **Done when:** selections persist across restart; `SetConfig` carries the new fields; the migration test is green; the SAPI path is unchanged.
+- **Done when:** selections persist across restart; `SetConfig` carries the new fields; the migration test is green; the SAPI path is unchanged. ✅ **Done** — committed `0eeff82`; `V1ToV2` registered, VM persists/pushes the five fields, a saved-but-removed voice warns and falls back; full `check.ps1` green and verified live in ACT (v1 config upgrades in place, token preserved). `ModelsDir` is held resolved-absolute in the VM, so `ToSettings` emits an absolute path for both disk and wire.
 
 ### 5. Download function (C#)
 
