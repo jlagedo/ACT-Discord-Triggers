@@ -19,7 +19,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
     /// older files to this version. v1 is the first POCO format (the legacy
     /// control-keyed ACT format is treated as the pre-schema "v0").
     /// </summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     // Valid ranges for the tunable integer settings — the single source of truth the
     // ViewModel clamps loaded/entered values to (and that the WinForms-era sliders used).
@@ -41,11 +41,18 @@ namespace ACT_DiscordTriggers.Core.Settings {
     [JsonPropertyName("botStatus")] public string BotStatus { get; set; } = "Playing with ACT Triggers";
     [JsonPropertyName("autoConnect")] public bool AutoConnect { get; set; } = false;
 
-    // --- Text-to-speech (synthesized in-process; the bridge ignores these) ---
+    // --- Text-to-speech (SAPI synthesized in-process; the bridge ignores TtsVoice/TtsVolume) ---
     /// <summary>Installed-voice name; empty selects the first available voice.</summary>
     [JsonPropertyName("ttsVoice")] public string TtsVoice { get; set; } = "";
-    [JsonPropertyName("ttsVolume")] public int TtsVolume { get; set; } = 10;   // slider 0..20
-    [JsonPropertyName("ttsSpeed")] public int TtsSpeed { get; set; } = 10;    // slider 0..20
+    [JsonPropertyName("ttsVolume")] public int TtsVolume { get; set; } = 10;   // slider 0..20; SAPI only
+    [JsonPropertyName("ttsSpeed")] public int TtsSpeed { get; set; } = 10;    // slider 0..20; both engines
+
+    // --- ONNX TTS (synthesized in the bridge; the bridge reads these from SetConfig) ---
+    [JsonPropertyName("ttsEngine")] public string TtsEngine { get; set; } = "sapi";    // "sapi" | "onnx"
+    [JsonPropertyName("onnxFamily")] public string OnnxFamily { get; set; } = "piper";  // "piper" | "kokoro"
+    [JsonPropertyName("onnxVoice")] public string OnnxVoice { get; set; } = "vits-piper-pt_BR-faber-medium"; // catalog id
+    [JsonPropertyName("ttsThreads")] public int TtsThreads { get; set; } = 1;           // sherpa numThreads
+    [JsonPropertyName("modelsDir")] public string ModelsDir { get; set; } = "";         // empty ⇒ %APPDATA%\ACT_DiscordTriggers\models
 
     // --- Effects & leveling (interpreted by the bridge) ---
     [JsonPropertyName("randomFx")] public bool RandomFx { get; set; } = false;

@@ -80,7 +80,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private int ttsSpeed = 10;
     public int TtsSpeed {
       get => ttsSpeed;
-      set => SetClamped(ref ttsSpeed, value, PluginSettings.TtsSpeedMin, PluginSettings.TtsSpeedMax, push: false);
+      // Speed pushes for both engines (the bridge applies it for ONNX, ignores it for SAPI).
+      set => SetClamped(ref ttsSpeed, value, PluginSettings.TtsSpeedMin, PluginSettings.TtsSpeedMax, push: true);
     }
 
     [ObservableProperty] private bool randomFx;
@@ -107,7 +108,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       set => SetClamped(ref audioQualityIndex, value, PluginSettings.AudioQualityIndexMin, PluginSettings.AudioQualityIndexMax, push: true, dependentLabel: nameof(ShowHighQualityWarning));
     }
 
-    // --- ONNX TTS (transient — step 3; not yet persisted/pushed) ----------------
+    // --- ONNX TTS (persisted in PluginSettings; bridge-relevant fields push) -----
     // Engine and Quality are single-value choices exposed as paired bools so the
     // choice-cards / segmented RadioButtons can two-way bind without a converter:
     // checking one sets the backing string, which re-raises both bools.
@@ -122,6 +123,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         OnPropertyChanged(nameof(ShowDownloadStrip));
         OnPropertyChanged(nameof(DownloadButtonVisible));
         TestCommand.NotifyCanExecuteChanged();
+        ScheduleConfigPush();
       }
     }
     public bool IsOnnx { get => engine == "onnx"; set { if (value) Engine = "onnx"; } }
@@ -136,6 +138,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         OnPropertyChanged(nameof(IsKokoro));
         OnPropertyChanged(nameof(QualityDescription));
         RebuildOnnxVoices(value);   // re-selects, which refreshes the download row
+        ScheduleConfigPush();
       }
     }
     public bool IsPiper { get => onnxFamily == "piper"; set { if (value) OnnxFamily = "piper"; } }
@@ -156,6 +159,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       OnPropertyChanged(nameof(DownloadNoticeText));
       OnPropertyChanged(nameof(DownloadButtonText));
       OnPropertyChanged(nameof(DownloadStatusText));
+      ScheduleConfigPush();   // the picked voice (OnnxVoice id) rides in SetConfig
     }
     public bool SelectedVoiceInstalled => SelectedOnnxVoice?.Installed == true;
     // The strip shows for an ONNX voice that isn't on disk yet (the needs-download button
@@ -169,6 +173,10 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       : "This voice isn't downloaded yet.";
     public string DownloadButtonText =>
       "Download · " + (IsKokoro ? 333 : SelectedOnnxVoice?.Info.SizeMB ?? 0) + " MB";
+
+    // The persisted OnnxVoice id, stashed by FromSettings and applied by Initialize
+    // once OnnxVoices has been built (SelectedOnnxVoice is an item, not an id).
+    private string loadedOnnxVoiceId = "";
 
     // Simulated-download state (step 3 scaffold; replaced by the real downloader in step 5).
     private readonly HashSet<string> simulatedInstalled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -200,6 +208,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         OnPropertyChanged(nameof(IsThreads1));
         OnPropertyChanged(nameof(IsThreads2));
         OnPropertyChanged(nameof(IsThreads4));
+        ScheduleConfigPush();
       }
     }
     public bool IsThreads1 { get => ttsThreads == 1; set { if (value) TtsThreads = 1; } }
@@ -207,6 +216,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public bool IsThreads4 { get => ttsThreads == 4; set { if (value) TtsThreads = 4; } }
 
     [ObservableProperty] private string modelsDir = "";
+    partial void OnModelsDirChanged(string value) => ScheduleConfigPush();
     [ObservableProperty] private bool isAdvancedExpanded;
 
     // --- Computed (presentation) ------------------------------------------------
@@ -382,6 +392,17 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         ?? OnnxVoices.FirstOrDefault();
     }
 
+    // Restore the persisted voice within the already-rebuilt family list. If the saved
+    // id is gone from the catalog (e.g. a voice dropped in a catalog update), warn and
+    // keep the family's auto-selected default rather than silently switching voices.
+    private void RestoreSavedOnnxVoice(string id) {
+      if (string.IsNullOrEmpty(id)) return;   // no saved pick → keep the rebuild default
+      var match = OnnxVoices.FirstOrDefault(
+        x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+      if (match != null) { SelectedOnnxVoice = match; return; }
+      Log("Saved ONNX voice \"" + id + "\" is no longer available; using the default for " + OnnxFamily + ".");
+    }
+
     // --- Information-page actions (bound from the WPF view) ---------------------
     // The Information tab's external links open via the view's XAML
     // (Microsoft.Xaml.Behaviors LaunchUriOrFileAction), so no URL command lives here.
@@ -420,10 +441,18 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       if (string.IsNullOrEmpty(TtsVoice) || !Voices.Contains(TtsVoice))
         TtsVoice = Voices.Count > 0 ? Voices[0] : "";
 
-      // ONNX catalog (transient until step 4): show the resolved default models dir
-      // and populate the family-scoped voice list with install-state.
-      ModelsDir = OnnxCatalog.ResolveModelsDir("");
-      RebuildOnnxVoices(OnnxFamily);
+      // ONNX catalog: resolve the persisted (or default) models dir, build the
+      // family-scoped voice list with install-state, then restore the saved voice.
+      // Wrapped in suppressPush so this load-time churn never schedules a SetConfig
+      // (a fresh connect re-pushes the whole config anyway).
+      suppressPush = true;
+      try {
+        ModelsDir = OnnxCatalog.ResolveModelsDir(ModelsDir);
+        RebuildOnnxVoices(OnnxFamily);
+        RestoreSavedOnnxVoice(loadedOnnxVoiceId);
+      } finally {
+        suppressPush = false;
+      }
 
       if (AutoConnect) _ = ConnectAsync();
     }
@@ -516,6 +545,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         TtsVoice = s.TtsVoice ?? "";
         TtsVolume = s.TtsVolume;
         TtsSpeed = s.TtsSpeed;
+        Engine = s.TtsEngine ?? "sapi";
+        TtsThreads = s.TtsThreads;
+        ModelsDir = s.ModelsDir ?? "";           // set before OnnxFamily, whose setter rebuilds the list
+        OnnxFamily = s.OnnxFamily ?? "piper";
+        loadedOnnxVoiceId = s.OnnxVoice ?? "";   // selected in Initialize, after the list is built
         RandomFx = s.RandomFx;
         FxChance = s.FxChance;
         Normalize = s.Normalize;
@@ -533,6 +567,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       TtsVoice = TtsVoice,
       TtsVolume = TtsVolume,
       TtsSpeed = TtsSpeed,
+      TtsEngine = Engine,
+      OnnxFamily = OnnxFamily,
+      OnnxVoice = SelectedOnnxVoice?.Id ?? "",
+      TtsThreads = TtsThreads,
+      ModelsDir = ModelsDir,
       RandomFx = RandomFx,
       FxChance = FxChance,
       Normalize = Normalize,

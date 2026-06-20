@@ -10,12 +10,11 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// <see cref="PluginSettings.CurrentSchemaVersion"/>, by applying a chain of
   /// <see cref="ISettingsMigration"/> steps in order.
   ///
-  /// The registry is currently EMPTY because v1 is the baseline POCO format — there
-  /// is nothing to upgrade yet. The framework exists so future schema changes are
-  /// trivial:
-  ///   1. Bump <see cref="PluginSettings.CurrentSchemaVersion"/> to 2.
-  ///   2. Add a class implementing <see cref="ISettingsMigration"/> with
-  ///      <c>FromVersion = 1</c> that mutates the XML DOM.
+  /// The registry holds one step (<see cref="V1ToV2"/>). Adding a future schema
+  /// change is the same three moves:
+  ///   1. Bump <see cref="PluginSettings.CurrentSchemaVersion"/>.
+  ///   2. Add a class implementing <see cref="ISettingsMigration"/> whose
+  ///      <c>FromVersion</c> is the prior version, mutating the XML DOM.
   ///   3. Add it to <see cref="DefaultMigrations"/>.
   ///
   /// NOTE: the legacy ACT control-keyed format (root <c>&lt;Config&gt;</c>) is NOT a
@@ -27,9 +26,9 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
     private readonly List<ISettingsMigration> migrations;
     private readonly Action<string> log;
 
-    /// <summary>The shipping set of migrations (empty at v1).</summary>
+    /// <summary>The shipping set of migrations, ordered by source version.</summary>
     public static IReadOnlyList<ISettingsMigration> DefaultMigrations { get; } =
-      new List<ISettingsMigration>();
+      new List<ISettingsMigration> { new V1ToV2() };
 
     public SettingsMigrator() : this(DefaultMigrations) { }
 

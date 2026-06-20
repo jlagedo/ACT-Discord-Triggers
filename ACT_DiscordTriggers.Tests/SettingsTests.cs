@@ -94,6 +94,8 @@ namespace ACT_DiscordTriggers.Tests {
         var original = new PluginSettings {
           BotToken = "tok", BotStatus = "hi", AutoConnect = true,
           TtsVoice = "Microsoft Zira Desktop", TtsVolume = 7, TtsSpeed = 13,
+          TtsEngine = "onnx", OnnxFamily = "kokoro", OnnxVoice = "kokoro-0",
+          TtsThreads = 4, ModelsDir = @"D:\voices",
           RandomFx = true, FxChance = 42, Normalize = false,
           NormalizeTarget = 15, AudioQualityIndex = 2,
         };
@@ -106,6 +108,11 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal(original.TtsVoice, loaded.TtsVoice);
         Assert.Equal(original.TtsVolume, loaded.TtsVolume);
         Assert.Equal(original.TtsSpeed, loaded.TtsSpeed);
+        Assert.Equal(original.TtsEngine, loaded.TtsEngine);
+        Assert.Equal(original.OnnxFamily, loaded.OnnxFamily);
+        Assert.Equal(original.OnnxVoice, loaded.OnnxVoice);
+        Assert.Equal(original.TtsThreads, loaded.TtsThreads);
+        Assert.Equal(original.ModelsDir, loaded.ModelsDir);
         Assert.Equal(original.RandomFx, loaded.RandomFx);
         Assert.Equal(original.FxChance, loaded.FxChance);
         Assert.Equal(original.Normalize, loaded.Normalize);
@@ -145,6 +152,48 @@ namespace ACT_DiscordTriggers.Tests {
         var loaded = StoreAt(path).Load();
         Assert.Equal("", loaded.BotToken);
         Assert.Equal(PluginSettings.CurrentSchemaVersion, loaded.SchemaVersion);
+      }
+    }
+
+    // A new-format v1 file (pre-ONNX fields) with real user data, to prove the
+    // v1 -> v2 upgrade preserves existing settings instead of resetting to defaults.
+    private const string V1Xml =
+@"<?xml version=""1.0"" encoding=""utf-8""?>
+<DiscordTriggersSettings SchemaVersion=""1"">
+  <BotToken>KEEP-ME</BotToken>
+  <BotStatus>hi</BotStatus>
+  <AutoConnect>true</AutoConnect>
+  <TtsVoice>Microsoft Zira Desktop</TtsVoice>
+  <TtsVolume>7</TtsVolume>
+  <TtsSpeed>13</TtsSpeed>
+  <RandomFx>false</RandomFx>
+  <FxChance>25</FxChance>
+  <Normalize>true</Normalize>
+  <NormalizeTarget>20</NormalizeTarget>
+  <AudioQualityIndex>1</AudioQualityIndex>
+</DiscordTriggersSettings>";
+
+    [Fact]
+    public void Load_V1File_UpgradesToV2_PreservesFields_AndDefaultsOnnx() {
+      using (var t = new TempDir()) {
+        var path = t.File("c.xml");
+        File.WriteAllText(path, V1Xml, new UTF8Encoding(false));
+
+        var loaded = StoreAt(path).Load();
+
+        // Existing settings survive the migration (no defaults-reset wipe).
+        Assert.Equal("KEEP-ME", loaded.BotToken);
+        Assert.Equal("Microsoft Zira Desktop", loaded.TtsVoice);
+        Assert.Equal(7, loaded.TtsVolume);
+        // New ONNX fields land on their defaults.
+        Assert.Equal("sapi", loaded.TtsEngine);
+        Assert.Equal("piper", loaded.OnnxFamily);
+        Assert.Equal("vits-piper-pt_BR-faber-medium", loaded.OnnxVoice);
+        Assert.Equal(1, loaded.TtsThreads);
+        Assert.Equal("", loaded.ModelsDir);
+        Assert.Equal(2, loaded.SchemaVersion);
+        // The store rewrites the upgraded doc back to disk at v2.
+        Assert.Equal("2", XDocument.Load(path).Root.Attribute("SchemaVersion").Value);
       }
     }
 
@@ -218,15 +267,35 @@ namespace ACT_DiscordTriggers.Tests {
 
     [Fact]
     public void Migrator_AtCurrentVersion_NoOp() {
-      var doc = XDocument.Parse("<DiscordTriggersSettings SchemaVersion=\"1\" />");
-      Assert.False(new SettingsMigrator().MigrateInPlace(doc)); // target = current (1)
+      var doc = XDocument.Parse(
+        "<DiscordTriggersSettings SchemaVersion=\"" + PluginSettings.CurrentSchemaVersion + "\" />");
+      Assert.False(new SettingsMigrator().MigrateInPlace(doc)); // already at the current version
     }
 
     [Fact]
     public void Migrator_MissingStep_Throws() {
+      // An empty registry has no step for the v1 -> v2 gap, so the migrator must throw
+      // (the framework's gap-detection, independent of the shipping migration set).
       var doc = XDocument.Parse("<DiscordTriggersSettings SchemaVersion=\"1\" />");
       Assert.Throws<SettingsMigrationException>(
-        () => new SettingsMigrator().MigrateInPlace(doc, targetVersion: 2));
+        () => new SettingsMigrator(new ISettingsMigration[0]).MigrateInPlace(doc, targetVersion: 2));
+    }
+
+    [Fact]
+    public void Migrator_V1ToV2_AddsOnnxDefaults() {
+      // The shipping registry (DefaultMigrations) must carry the real v1 -> v2 step, or
+      // existing v1 files would throw on load and reset to defaults (wiping the token).
+      var doc = XDocument.Parse("<DiscordTriggersSettings SchemaVersion=\"1\" />");
+
+      bool changed = new SettingsMigrator().MigrateInPlace(doc); // target = current (2)
+
+      Assert.True(changed);
+      Assert.Equal("2", doc.Root.Attribute("SchemaVersion").Value);
+      Assert.Equal("sapi", doc.Root.Element("TtsEngine").Value);
+      Assert.Equal("piper", doc.Root.Element("OnnxFamily").Value);
+      Assert.Equal("vits-piper-pt_BR-faber-medium", doc.Root.Element("OnnxVoice").Value);
+      Assert.Equal("1", doc.Root.Element("TtsThreads").Value);
+      Assert.NotNull(doc.Root.Element("ModelsDir"));
     }
 
     // ---- Migration logging -----------------------------------------------
