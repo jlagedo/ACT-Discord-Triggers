@@ -129,6 +129,14 @@ namespace ACT_DiscordTriggers {
       VoiceSearchBox.Focus();
     }
 
+    // Expanding Advanced reveals content below the fold at the very bottom of the page,
+    // so scroll there to keep the newly-shown controls in view. Deferred to Loaded
+    // priority so the disclosed panel has laid out (and grown the extent) before we scroll.
+    private void OnAdvancedExpanded(object sender, RoutedEventArgs e) =>
+      Dispatcher.BeginInvoke(
+        new Action(() => TtsScroller.ScrollToBottom()),
+        System.Windows.Threading.DispatcherPriority.Loaded);
+
     // Folder picking is a view concern (Core has no WinForms): open a WinForms folder
     // dialog parented to ACT's main window, seeded with the current path, and write the
     // chosen folder back to the VM.
