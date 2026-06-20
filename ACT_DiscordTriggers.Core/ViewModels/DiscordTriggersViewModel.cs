@@ -1,5 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -181,6 +183,24 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         CanLeave = true;
         Log(ex.Message);
       }
+    }
+
+    // --- Information-page actions (bound from the WPF view) ---------------------
+    // The Information tab's external links open via the view's XAML
+    // (Microsoft.Xaml.Behaviors LaunchUriOrFileAction), so no URL command lives here.
+
+    // Open Explorer at the diagnostics log (selected if present) so the user can grab
+    // the one file we ask for in bug reports.
+    [RelayCommand]
+    private void OpenLogFolder() {
+      try {
+        var path = DiagnosticsLog.UnifiedPath;
+        if (string.IsNullOrEmpty(path)) return;
+        if (File.Exists(path))
+          Process.Start("explorer.exe", "/select,\"" + path + "\"");
+        else
+          Process.Start("explorer.exe", "\"" + Path.GetDirectoryName(path) + "\"");
+      } catch { /* best effort */ }
     }
 
     // --- TTS/sound routing (target of ACT's delegates, wired by the view) -------

@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
+using System.Windows.Forms.Integration;
 using Advanced_Combat_Tracker;
 using ACT_DiscordTriggers.Core.Ipc;
 
@@ -53,10 +54,14 @@ namespace ACT_DiscordTriggers {
         DiagnosticsLog.Init(ActGlobals.oFormActMain.AppDataFolder.FullName, bridgeDir, PluginVersion());
       } catch { }
 
-      //Create and host the view.
-      view = new DiscordTriggersView { Dock = DockStyle.Fill };
+      //Create the WPF view and host it inside ACT's WinForms TabPage via ElementHost
+      //(which boots the WPF dispatcher on the existing UI thread — no WPF Application).
+      view = new DiscordTriggersView();
       pluginScreenSpace.Text = "Discord Triggers";
-      pluginScreenSpace.Controls.Add(view);
+      pluginScreenSpace.Controls.Add(new ElementHost {
+        Child = view,
+        Dock = DockStyle.Fill,
+      });
 
       view.OnPluginInit(configName);
 
@@ -79,6 +84,10 @@ namespace ACT_DiscordTriggers {
       try { return Assembly.GetExecutingAssembly().GetName().Version.ToString(); }
       catch { return "?"; }
     }
+
+    // Version label for the Information tab, bound via {x:Static} from the view's XAML
+    // so the version stays out of the view's code-behind.
+    public static string VersionDisplay => "v" + PluginVersion();
 
     private string FindBridgeDir() {
       // The bridge ships as node.exe + bundle.js + node_modules/ next to the

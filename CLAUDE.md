@@ -2,6 +2,8 @@
 
 ## Build & test
 
+Run every gate at once (fail-fast, mirrors CI): `pwsh ./check.ps1`. Order: ESLint → XAML style → `build.ps1` → C# tests → Node tests. Flags: `-Fast` (skip `build.ps1` + the bridge-spawning C# integration tests; runs a standalone `tsc` typecheck instead), `-Fix` (eslint `--fix` + `xstyler` write mode, then test), `-Install` (`npm ci` first). The no-arg run is the full CI gate set.
+
 Release build (produces `release/ACT_DiscordTriggers/`, the folder users drop into ACT's plugins dir):
 ```
 cd DiscordBridge-node && npm ci && cd ..
@@ -22,9 +24,13 @@ dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
 - `BridgeIntegrationTests` spawns the real bridge from `dist/` — run `build.ps1` first or it fails with a "build the bridge first" message.
 - Single test: `dotnet test --filter "FullyQualifiedName~<name>"`.
 
+XAML formatting (XAML Styler `xstyler`, pinned as a local dotnet tool in `.config/dotnet-tools.json`; settings in `Settings.XamlStyler` at the repo root, auto-discovered up-tree):
+- `dotnet tool restore` once, then `dotnet xstyler -f <file.xaml> -c Settings.XamlStyler` to format. Add `-p` for a no-write check that exits non-zero on any unformatted file (`-r -d .` to sweep the tree).
+- Run in CI as a code-quality gate, not in `build.ps1` (formatting is not a packaging prerequisite). `IndentSize` is 2 and `RemoveDesignTimeReferences` is false (keeps the view's `d:` design attributes).
+
 CI:
 - Needs `Advanced Combat Tracker.exe` to resolve the plugin reference — install ACT to `C:\Program Files (x86)\Advanced Combat Tracker\` (csproj fallback path) or copy the exe to `packages/`.
-- Runs `npm run lint` + `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
+- Runs `npm run lint` + `dotnet xstyler -p` (XAML format check) + `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
 
 ## Architecture: two processes
 
@@ -38,8 +44,8 @@ DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 
 The production code is two net48 assemblies — the thin assembly ACT scans, and a UI-agnostic core that Costura merges into it:
 
-- **`ACT_DiscordTriggers/`** (net48): the entry assembly ACT loads, hosting `Costura.Fody`, WinForms, and the ACT reference. It only *defines* GAC-based types — `DiscordTriggersPlugin : IActPluginV1` (lifecycle, bridge discovery, diagnostics, assembly-resolve fallback), `DiscordTriggersView : UserControl` (UI, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`; TTS synthesized in-process via `System.Speech` → 48k/16/stereo PCM, sound files sent by path), and `ObservableBindingList<T> : BindingList<T>` (one-way `ObservableCollection`→`BindingList` adapter for WinForms combo binding).
-  - **Load-time invariant:** no type *defined in this assembly* may derive from / implement a Costura-merged dependency. ACT loads via `Assembly.LoadFrom` + `GetTypes()`, which resolves every defined type's base/interfaces *before* any managed code of ours runs (so before Costura's module-init resolver attaches). A merged-dep base type here = `GetTypes()` throws = "Invalid Plugin". That's why the MVVM ViewModel lives in Core, not here. `DiscordTriggersPlugin`'s ctor calls `CosturaUtility.Initialize()` and the lifecycle methods carry `[MethodImpl(NoInlining)]` to keep resolver attach deterministic.
+- **`ACT_DiscordTriggers/`** (net48, `UseWPF` + `UseWindowsForms`): the entry assembly ACT loads, hosting `Costura.Fody`, the ACT reference, and `Microsoft.Xaml.Behaviors.Wpf` (Costura-merged). It only *defines* GAC-based types — `DiscordTriggersPlugin : IActPluginV1` (lifecycle, bridge discovery, diagnostics, assembly-resolve fallback; hosts the WPF view inside ACT's WinForms `TabPage` via `ElementHost`), `DiscordTriggersView : System.Windows.Controls.UserControl` (WPF XAML view + code-behind; `DataContext` is the Core ViewModel, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`; TTS synthesized in-process via `System.Speech` → 48k/16/stereo PCM, sound files sent by path), and the `static` attached-property helpers `PasswordBoxBinding`/`LogListCopy` (bindable masked token + Ctrl+C log copy; `ViewBehaviors.cs`).
+  - **Load-time invariant:** no type *defined in this assembly* may derive from / implement a Costura-merged dependency. ACT loads via `Assembly.LoadFrom` + `GetTypes()`, which resolves every defined type's base/interfaces *before* any managed code of ours runs (so before Costura's module-init resolver attaches). A merged-dep base type here = `GetTypes()` throws = "Invalid Plugin". WPF base types (`UserControl`) are GAC, so the view is safe; the MVVM ViewModel lives in Core (not here) because it derives from merged `CommunityToolkit.Mvvm`. `Microsoft.Xaml.Behaviors` is used **XAML-only** (`Interaction.Triggers` with the built-in `LaunchUriOrFileAction` for the Information-tab links) and never subclassed here; view helpers that would otherwise be `Behavior<T>` are written as `static` attached-property classes to stay object-based. `DiscordTriggersPlugin`'s ctor calls `CosturaUtility.Initialize()` and the lifecycle methods carry `[MethodImpl(NoInlining)]` to keep resolver attach deterministic.
 - **`ACT_DiscordTriggers.Core/`** (net48 class lib; no Costura/WinForms/ACT): all UI-agnostic code, referencing `CommunityToolkit.Mvvm` + `System.Text.Json` (PackageReference) and `System.Speech` (GAC). Costura merges Core.dll + those deps into the single plugin DLL (they ride in transitively + copy-local), so the closure stays isolated from other ACT plugins. Organized by folder:
   - `Ipc/` (`ACT_DiscordTriggers.Core.Ipc`): `DiscordClient` (static facade), `DiscordClientService` (`IDiscordService` impl), `BridgeProcess.StartAndConnectAsync` (spawns node, scans stdout for `BRIDGE_READY`, connects the pipe), `PipeClient`, `DiagnosticsLog`.
   - `Protocol/` (`ACT_DiscordTriggers.Core.Protocol`): `Protocol.cs` — the C# wire-protocol DTOs + `Op`.
