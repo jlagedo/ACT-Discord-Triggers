@@ -30,6 +30,8 @@ import { PcmMixer } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
 import { DEFAULT_CONFIG_VIEW, type BridgeConfigView, type LogLevel } from './protocol.js';
 import { WavCache } from './wav-cache.js';
+import { OnnxTts, parseTtsParams } from './tts.js';
+import { createSinkFromEnv, type AudioSink } from './audio-sink.js';
 
 const TARGET_SAMPLE_RATE = 48000;
 const TARGET_BITS = 16;
@@ -115,6 +117,21 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
     return finalPcm;
 }
 
+// ONNX models output Float32 mono. Convert to the bridge's 16-bit signed LE stereo
+// (duplicating the channel) at the model's native rate; the caller resamples to
+// 48 kHz with resampleStereo16. Exported for unit tests.
+export function monoFloat32ToStereoInt16(mono: Float32Array): Buffer {
+    const out = Buffer.alloc(mono.length * 4); // 2 channels * 2 bytes
+    for (let i = 0; i < mono.length; i++) {
+        let s = mono[i]!;
+        if (s > 1) s = 1; else if (s < -1) s = -1;
+        const v = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
+        out.writeInt16LE(v, i * 4);
+        out.writeInt16LE(v, i * 4 + 2);
+    }
+    return out;
+}
+
 export class DiscordHost implements Host {
     private client: Client | null = null;
     private notify: Notifier | null = null;
@@ -124,6 +141,11 @@ export class DiscordHost implements Host {
     private currentGuildId: string | null = null;
     private pingTimer: NodeJS.Timeout | null = null;
     private readonly wavCache = new WavCache();
+    private readonly onnxTts = new OnnxTts();
+    // Diagnostic WAV sink (ACT_DT_AUDIO_SINK). null in normal operation; when set
+    // it captures every played clip to a file and unlocks offline capture mode
+    // (playback without a joined channel) — see _guardPlayback / _enqueue.
+    private readonly sink: AudioSink | null = createSinkFromEnv();
 
     // The whole plugin config, pushed via SetConfig. Defaults apply until the
     // first config frame lands. The bridge owns all interpretation: it rolls the
@@ -138,9 +160,12 @@ export class DiscordHost implements Host {
 
     setNotifier(fn: Notifier): void { this.notify = fn; }
 
-    setConfig(config: BridgeConfigView): void {
+    setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void {
         const prev = this.config;
         this.config = config;
+        // Register the token so it's masked everywhere it could otherwise surface
+        // (a later login/REST error, an uncaught stack). Must happen before connect.
+        log.redactSecret(config.botToken);
         log.info(`setConfig: status='${config.botStatus}' fx=${config.randomFx}/${config.fxChance} `
             + `normalize=${config.normalize}/${config.normalizeTarget} audioQ=${config.audioQualityIndex}`);
         // Presence and bitrate are stateful on Discord's side (a gateway presence
@@ -151,6 +176,21 @@ export class DiscordHost implements Host {
         // eagerly for them.
         if (config.botStatus !== prev.botStatus) this._applyStatus();
         if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
+        this._applyOnnxVoice(ttsParams);
+    }
+
+    // Apply the ONNX synth descriptor from SetConfig's ttsParams. Validation
+    // failures (missing model files) are reported to the user and leave the bridge
+    // with no ready voice; a SpeakText then logs + skips rather than crashing.
+    private _applyOnnxVoice(ttsParams?: Record<string, string>): void {
+        const desc = parseTtsParams(ttsParams);
+        const r = this.onnxTts.configure(desc);
+        if (!r.ok) {
+            log.warn(`ONNX voice unavailable: ${r.error}`);
+            this._sendLog('Warn', `ONNX voice unavailable: ${r.error}`);
+        } else if (desc) {
+            log.info(`ONNX voice set: ${this.onnxTts.describe()} dir=${desc.modelDir}`);
+        }
     }
 
     // Bitrate derived from the current audio-quality tier, clamped to prism's range.
@@ -324,6 +364,16 @@ export class DiscordHost implements Host {
             if (!this.encoder) log.warn('joinChannel: resource has no Opus encoder; bitrate control unavailable');
             this._applyBitrate();
 
+            // Warm the ONNX model once on join (off the critical path) so the first
+            // real callout isn't paying cold-start latency. No-op for SAPI / when no
+            // ONNX voice is configured.
+            if (this.onnxTts.isReady()) {
+                void this.onnxTts.synth('Discord triggers ready.').then(
+                    () => log.info('ONNX warm-up done'),
+                    (e: unknown) => log.warn('ONNX warm-up failed: ' + log.errMsg(e)),
+                );
+            }
+
             return { ok: true, error: '' };
         } catch (e) {
             log.error('joinChannel failed', e);
@@ -410,9 +460,24 @@ export class DiscordHost implements Host {
         // is an audible click). Runs after effects + normalize so the final
         // samples reach zero whatever those stages did to the level.
         buf = declick(buf);
+        // Diagnostic tap: write the final, exactly-as-played buffer to the WAV
+        // sink when enabled. Fires whether or not a live mixer exists, so it both
+        // records a live bot and captures audio in offline capture mode.
+        if (this.sink) {
+            try {
+                const path = this.sink.write(`${kind}-${reqId}`, buf);
+                log.info(`audio sink: ${kind} reqId=${reqId} -> ${path}`);
+            } catch (e) {
+                log.error('audio sink write failed', e);
+            }
+        }
         const enqueueT = performance.now();
-        const r = this.mixer!.addVoice(buf, { id: reqId, enqueueT });
-        if (r.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${r.dropped} voice(s)`);
+        // In offline capture mode there is no mixer; the sink write above is the
+        // whole delivery. When live, feed the mixer as usual.
+        if (this.mixer) {
+            const r = this.mixer.addVoice(buf, { id: reqId, enqueueT });
+            if (r.dropped > 0) this._sendLog('Warn', `Mixer overflow: dropped ${r.dropped} voice(s)`);
+        }
         if (meta) {
             const recvToEnqueue = (enqueueT - meta.recvT).toFixed(1);
             log.info(`${kind} reqId=${reqId} pcmMs=${this._pcmDurationMs(buf.length)} ` +
@@ -487,6 +552,33 @@ export class DiscordHost implements Host {
         return this._enqueue('SpeakFile', finalPcm, meta);
     }
 
+    // ONNX TTS: synthesize the text with the voice learned from SetConfig, convert
+    // the model's Float32 mono output to 48k/16/stereo, then rejoin the same
+    // fx/normalize/declick path as SpeakPcm/SpeakFile via _enqueue. A not-ready or
+    // empty-synthesis case logs + skips so a bad voice never drops the connection.
+    async speakText(text: string, meta?: SpeakMeta): Promise<OpResult> {
+        const guard = this._guardPlayback();
+        if (!guard.ok) return guard;
+        if (!this.onnxTts.isReady()) {
+            this._sendLog('Warn', 'ONNX voice not ready; skipped this callout.');
+            return { ok: false, error: 'ONNX voice not ready' };
+        }
+        let audio;
+        try {
+            audio = await this.onnxTts.synth(text);
+        } catch (e) {
+            return { ok: false, error: log.errMsg(e) };
+        }
+        if (!audio || audio.samples.length === 0) {
+            this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
+            return { ok: false, error: 'ONNX synthesis produced no audio' };
+        }
+        const stereoSrc = monoFloat32ToStereoInt16(audio.samples);
+        const finalPcm = resampleStereo16(stereoSrc, audio.sampleRate, TARGET_SAMPLE_RATE);
+        log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outBytes=${finalPcm.length}`);
+        return this._enqueue('SpeakText', finalPcm, meta);
+    }
+
     private _startPingLog(): void {
         this._stopPingLog();
         const tick = (): void => {
@@ -525,14 +617,18 @@ export class DiscordHost implements Host {
         }
     }
 
+    private _liveReady(): boolean {
+        return this.connection !== null
+            && this.connection.state.status === VoiceConnectionStatus.Ready
+            && this.player !== null && this.mixer !== null;
+    }
+
     private _guardPlayback(): OpResult {
-        if (!this.connection || this.connection.state.status !== VoiceConnectionStatus.Ready) {
-            return { ok: false, error: 'Not connected to a voice channel.' };
-        }
-        if (!this.player || !this.mixer) {
-            return { ok: false, error: 'Audio player not ready.' };
-        }
-        return { ok: true, error: '' };
+        // Offline capture mode: with the WAV sink enabled, deliver to a file even
+        // without a live voice channel so the pipeline is testable end-to-end.
+        if (this._liveReady() || this.sink) return { ok: true, error: '' };
+        const connected = this.connection?.state.status === VoiceConnectionStatus.Ready;
+        return { ok: false, error: connected ? 'Audio player not ready.' : 'Not connected to a voice channel.' };
     }
 
     private _findGuild(name: string): Guild | null {

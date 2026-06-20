@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Tts;
 
 namespace ACT_DiscordTriggers.Core.Ipc {
   // Production IDiscordService: forwards to the static DiscordClient facade and
@@ -24,8 +25,10 @@ namespace ACT_DiscordTriggers.Core.Ipc {
       DiscordClient.Disconnected += disconnectedHandler;
     }
 
-    public Task ConnectAsync(PluginSettings config) => DiscordClient.ConnectAsync(config);
-    public Task SetConfigAsync(PluginSettings config) => DiscordClient.SetConfigAsync(config);
+    // Resolve the ONNX synth descriptor here (where PluginSettings + the catalog
+    // are both in scope) so DiscordClient stays decoupled from the concrete POCO.
+    public Task ConnectAsync(PluginSettings config) => DiscordClient.ConnectAsync(config, OnnxSynthParams.Resolve(config));
+    public Task SetConfigAsync(PluginSettings config) => DiscordClient.SetConfigAsync(config, OnnxSynthParams.Resolve(config));
     public Task<bool> IsConnectedAsync() => DiscordClient.IsConnectedAsync();
     public Task<string[]> GetServersAsync() => DiscordClient.GetServersAsync();
     public Task<string[]> GetChannelsAsync(string server) => DiscordClient.GetChannelsAsync(server);
@@ -34,6 +37,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     public Task DeinitAsync() => DiscordClient.DeinitAsync();
 
     public void Speak(string text, string voice, int vol, int speed) => DiscordClient.Speak(text, voice, vol, speed);
+    public void SpeakOnnx(string text) => DiscordClient.SpeakOnnx(text);
     public void SpeakFile(string path) => DiscordClient.SpeakFile(path);
 
     public string[] GetInstalledVoices() => DiscordClient.GetInstalledVoices();

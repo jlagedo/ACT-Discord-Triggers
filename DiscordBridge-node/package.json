@@ -9,14 +9,16 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "bundle": "node esbuild.config.mjs",
-    "test": "node --import tsx --test \"tests/**/*.test.ts\""
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "tts:probe": "node --import tsx tools/tts-probe.ts"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "audio-decode": "^3.10.2",
     "discord.js": "^14.26.4",
     "libsodium-wrappers": "^0.8.4",
-    "opusscript": "^0.1.1"
+    "opusscript": "^0.1.1",
+    "sherpa-onnx-node": "^1.13.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -63,16 +63,22 @@ try {
     #   opusscript                    — pure-JS Opus encoder (uses its own .wasm via __dirname)
     #   libsodium-wrappers            — pure-JS libsodium API (depends on libsodium)
     #   libsodium                     — WASM blob loaded by libsodium-wrappers
+    #   sherpa-onnx-node              — ONNX neural TTS addon loader (lazy-required by tts.ts)
+    #   sherpa-onnx-win-x64           — its native runtime (onnxruntime + sherpa .dll/.node, ~21 MB)
     #
     # If you bump deps and a require fails at startup, audit this list — npm
     # hoists transitive packages here and our esbuild externals list silently
-    # misses them.
+    # misses them. The two sherpa packages are best-effort: when they aren't
+    # installed the staging warns and continues, and the bridge still self-tests
+    # green (lazy require) — only ONNX synthesis is unavailable until installed.
     $externals = @(
         '@snazzah/davey',
         '@snazzah/davey-win32-x64-msvc',
         'opusscript',
         'libsodium-wrappers',
-        'libsodium'
+        'libsodium',
+        'sherpa-onnx-node',
+        'sherpa-onnx-win-x64'
     )
     $stageDir = 'dist\node_modules'
     foreach ($pkg in $externals) {

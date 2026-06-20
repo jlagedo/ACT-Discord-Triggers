@@ -49,9 +49,37 @@ function ts(): string {
            `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
+// --- Secret redaction --------------------------------------------------------
+// DiscordBridge.log (and the Log notifications pushed to the plugin) get attached
+// to bug reports, so the bot token must never appear in either. Register it from
+// SetConfig and run every logged message through redact(), so logging *any* error
+// is safe no matter what threw — a discord.js login/REST error, an uncaught stack,
+// etc. The exact-token registry is the real guarantee; the token-shape regex is a
+// fallback for anything logged before a token is registered.
+const secrets = new Set<string>();
+
+// Discord bot tokens are three base64url segments joined by dots
+// (id . timestamp . hmac). Specific enough not to hit model paths / op names.
+const TOKEN_SHAPE = /[A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,}/g;
+
+// Register a value to scrub from all future log output. Short/blank values are
+// ignored so we never replace a trivial substring across every line.
+export function redactSecret(value: string | null | undefined): void {
+    if (typeof value === 'string' && value.trim().length >= 8) secrets.add(value);
+}
+
+// Replace registered secrets (exact, literal) and token-shaped runs with '***'.
+export function redact(text: string): string {
+    let out = text;
+    for (const s of secrets) {
+        if (out.includes(s)) out = out.split(s).join('***');
+    }
+    return out.replace(TOKEN_SHAPE, '***');
+}
+
 function write(level: FileLogLevel, msg: string): void {
     if (!logPath) return;
-    const line = `${ts()} ${level} ${msg}${os.EOL}`;
+    const line = `${ts()} ${level} ${redact(msg)}${os.EOL}`;
     writeQueue.push(line);
     drain();
 }

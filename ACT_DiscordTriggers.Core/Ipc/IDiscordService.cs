@@ -24,6 +24,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     Task DeinitAsync();
 
     void Speak(string text, string voice, int vol, int speed);
+    void SpeakOnnx(string text);
     void SpeakFile(string path);
 
     string[] GetInstalledVoices();

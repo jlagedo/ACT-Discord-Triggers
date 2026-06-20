@@ -10,6 +10,7 @@
       "displayName": "Amy",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-amy-medium",
       "sizeMB": 63,
       "recommended": true
@@ -22,6 +23,7 @@
       "displayName": "Ryan",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-ryan-high",
       "sizeMB": 121,
       "recommended": true
@@ -34,6 +36,7 @@
       "displayName": "Arctic",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-arctic-medium",
       "sizeMB": 77,
       "recommended": false
@@ -46,6 +49,7 @@
       "displayName": "Bryce",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-bryce-medium",
       "sizeMB": 64,
       "recommended": false
@@ -58,6 +62,7 @@
       "displayName": "Hfc Female",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-hfc_female-medium",
       "sizeMB": 63,
       "recommended": false
@@ -70,6 +75,7 @@
       "displayName": "Hfc Male",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-hfc_male-medium",
       "sizeMB": 63,
       "recommended": false
@@ -82,6 +88,7 @@
       "displayName": "Joe",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-joe-medium",
       "sizeMB": 63,
       "recommended": false
@@ -94,6 +101,7 @@
       "displayName": "John",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-john-medium",
       "sizeMB": 64,
       "recommended": false
@@ -106,6 +114,7 @@
       "displayName": "Kristin",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-kristin-medium",
       "sizeMB": 64,
       "recommended": false
@@ -118,6 +127,7 @@
       "displayName": "Kusal",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-kusal-medium",
       "sizeMB": 63,
       "recommended": false
@@ -130,6 +140,7 @@
       "displayName": "L2arctic",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-l2arctic-medium",
       "sizeMB": 77,
       "recommended": false
@@ -142,6 +153,7 @@
       "displayName": "Lessac",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-lessac-high",
       "sizeMB": 114,
       "recommended": false
@@ -154,6 +166,7 @@
       "displayName": "Lessac",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-lessac-medium",
       "sizeMB": 63,
       "recommended": false
@@ -166,6 +179,7 @@
       "displayName": "Libritts",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-libritts-high",
       "sizeMB": 137,
       "recommended": false
@@ -178,6 +192,7 @@
       "displayName": "Libritts R",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-libritts_r-medium",
       "sizeMB": 79,
       "recommended": false
@@ -190,6 +205,7 @@
       "displayName": "Ljspeech",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-ljspeech-high",
       "sizeMB": 114,
       "recommended": false
@@ -202,6 +218,7 @@
       "displayName": "Ljspeech",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-ljspeech-medium",
       "sizeMB": 64,
       "recommended": false
@@ -214,6 +231,7 @@
       "displayName": "Norman",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-norman-medium",
       "sizeMB": 64,
       "recommended": false
@@ -226,6 +244,7 @@
       "displayName": "Reza Ibrahim",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-reza_ibrahim-medium",
       "sizeMB": 64,
       "recommended": false
@@ -238,6 +257,7 @@
       "displayName": "Ryan",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-ryan-medium",
       "sizeMB": 63,
       "recommended": false
@@ -250,6 +270,7 @@
       "displayName": "Sam",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_US-sam-medium",
       "sizeMB": 63,
       "recommended": false
@@ -262,6 +283,7 @@
       "displayName": "Alan",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-alan-medium",
       "sizeMB": 63,
       "recommended": true
@@ -274,6 +296,7 @@
       "displayName": "Alba",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-alba-medium",
       "sizeMB": 63,
       "recommended": false
@@ -286,6 +309,7 @@
       "displayName": "Aru",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-aru-medium",
       "sizeMB": 77,
       "recommended": false
@@ -298,6 +322,7 @@
       "displayName": "Cori",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-cori-high",
       "sizeMB": 114,
       "recommended": false
@@ -310,6 +335,7 @@
       "displayName": "Cori",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-cori-medium",
       "sizeMB": 64,
       "recommended": false
@@ -322,6 +348,7 @@
       "displayName": "Jenny Dioco",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-jenny_dioco-medium",
       "sizeMB": 63,
       "recommended": false
@@ -334,6 +361,7 @@
       "displayName": "Northern English Male",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-northern_english_male-medium",
       "sizeMB": 63,
       "recommended": false
@@ -346,6 +374,7 @@
       "displayName": "Semaine",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-semaine-medium",
       "sizeMB": 77,
       "recommended": false
@@ -358,6 +387,7 @@
       "displayName": "Vctk",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-en_GB-vctk-medium",
       "sizeMB": 77,
       "recommended": false
@@ -370,6 +400,7 @@
       "displayName": "Tom",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-fr_FR-tom-medium",
       "sizeMB": 64,
       "recommended": true
@@ -382,6 +413,7 @@
       "displayName": "Mls",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-fr_FR-mls-medium",
       "sizeMB": 77,
       "recommended": false
@@ -394,6 +426,7 @@
       "displayName": "Siwis",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-fr_FR-siwis-medium",
       "sizeMB": 63,
       "recommended": false
@@ -406,6 +439,7 @@
       "displayName": "Upmc",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-fr_FR-upmc-medium",
       "sizeMB": 77,
       "recommended": false
@@ -418,6 +452,7 @@
       "displayName": "Thorsten",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-de_DE-thorsten-medium",
       "sizeMB": 63,
       "recommended": true
@@ -430,6 +465,7 @@
       "displayName": "Mls",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-de_DE-mls-medium",
       "sizeMB": 77,
       "recommended": false
@@ -442,6 +478,7 @@
       "displayName": "Thorsten",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-de_DE-thorsten-high",
       "sizeMB": 114,
       "recommended": false
@@ -454,6 +491,7 @@
       "displayName": "Thorsten Emotional",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-de_DE-thorsten_emotional-medium",
       "sizeMB": 77,
       "recommended": false
@@ -466,6 +504,7 @@
       "displayName": "Davefx",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-es_ES-davefx-medium",
       "sizeMB": 63,
       "recommended": true
@@ -478,6 +517,7 @@
       "displayName": "Sharvard",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-es_ES-sharvard-medium",
       "sizeMB": 77,
       "recommended": false
@@ -490,6 +530,7 @@
       "displayName": "Ald",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-es_MX-ald-medium",
       "sizeMB": 63,
       "recommended": true
@@ -502,6 +543,7 @@
       "displayName": "Claude",
       "quality": "high",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-es_MX-claude-high",
       "sizeMB": 63,
       "recommended": false
@@ -514,6 +556,7 @@
       "displayName": "Faber",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-pt_BR-faber-medium",
       "sizeMB": 63,
       "recommended": true
@@ -526,6 +569,7 @@
       "displayName": "Cadu",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-pt_BR-cadu-medium",
       "sizeMB": 63,
       "recommended": false
@@ -538,6 +582,7 @@
       "displayName": "Jeff",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-pt_BR-jeff-medium",
       "sizeMB": 63,
       "recommended": false
@@ -550,6 +595,7 @@
       "displayName": "Ruslan",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-ru_RU-ruslan-medium",
       "sizeMB": 63,
       "recommended": true
@@ -562,6 +608,7 @@
       "displayName": "Denis",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-ru_RU-denis-medium",
       "sizeMB": 63,
       "recommended": false
@@ -574,6 +621,7 @@
       "displayName": "Dmitri",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-ru_RU-dmitri-medium",
       "sizeMB": 63,
       "recommended": false
@@ -586,6 +634,7 @@
       "displayName": "Irina",
       "quality": "medium",
       "sid": 0,
+      "lang": "",
       "downloadId": "vits-piper-ru_RU-irina-medium",
       "sizeMB": 63,
       "recommended": false
@@ -598,6 +647,7 @@
       "displayName": "Heart (female)",
       "quality": "A",
       "sid": 3,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": true
@@ -610,6 +660,7 @@
       "displayName": "Aoede (female)",
       "quality": "C+",
       "sid": 1,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -622,6 +673,7 @@
       "displayName": "Bella (female)",
       "quality": "A-",
       "sid": 2,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -634,6 +686,7 @@
       "displayName": "Fenrir (male)",
       "quality": "C+",
       "sid": 14,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -646,6 +699,7 @@
       "displayName": "Kore (female)",
       "quality": "C+",
       "sid": 5,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -658,6 +712,7 @@
       "displayName": "Michael (male)",
       "quality": "C+",
       "sid": 16,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -670,6 +725,7 @@
       "displayName": "Nicole (female)",
       "quality": "B-",
       "sid": 6,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -682,6 +738,7 @@
       "displayName": "Puck (male)",
       "quality": "C+",
       "sid": 18,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -694,6 +751,7 @@
       "displayName": "Sarah (female)",
       "quality": "C+",
       "sid": 9,
+      "lang": "",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -706,6 +764,7 @@
       "displayName": "Emma (female)",
       "quality": "B-",
       "sid": 21,
+      "lang": "en-gb-x-rp",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": true
@@ -718,6 +777,7 @@
       "displayName": "Fable (male)",
       "quality": "C",
       "sid": 25,
+      "lang": "en-gb-x-rp",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -730,6 +790,7 @@
       "displayName": "George (male)",
       "quality": "C",
       "sid": 26,
+      "lang": "en-gb-x-rp",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -742,6 +803,7 @@
       "displayName": "Isabella (female)",
       "quality": "C",
       "sid": 22,
+      "lang": "en-gb-x-rp",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -754,6 +816,7 @@
       "displayName": "Dora (female)",
       "quality": "C",
       "sid": 42,
+      "lang": "pt-br",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": true
@@ -766,6 +829,7 @@
       "displayName": "Alex (male)",
       "quality": "C",
       "sid": 43,
+      "lang": "pt-br",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false
@@ -778,6 +842,7 @@
       "displayName": "Santa (male)",
       "quality": "C",
       "sid": 44,
+      "lang": "pt-br",
       "downloadId": "kokoro-multi-lang-v1_0",
       "sizeMB": 333,
       "recommended": false

@@ -31,8 +31,12 @@
 // the file itself (decoded + resampled to 48 kHz / 16-bit / stereo). Whether a
 // random sound effect is applied is decided by the bridge from the current config
 // (randomFx + fxChance) — it is NOT a per-clip flag on the wire.
+//
+// SpeakText is the ONNX-neural counterpart: a JSON op carrying only the text. The
+// bridge synthesizes with the voice it learned from the last SetConfig (ttsParams),
+// resamples to 48 kHz / 16-bit / stereo, then rejoins the same fx/normalize path.
 
-export const PROTOCOL_VERSION = 5 as const;
+export const PROTOCOL_VERSION = 6 as const;
 export const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 
 export const FRAME_JSON_MARKER = 0x7B; // '{'
@@ -52,6 +56,7 @@ export const Op = {
     LeaveChannel: 'LeaveChannel',
     SpeakFile: 'SpeakFile',
     SpeakPcm: 'SpeakPcm',
+    SpeakText: 'SpeakText',
     Result: 'Result',
     BotReady: 'BotReady',
     Log: 'Log',
@@ -101,7 +106,7 @@ export const DEFAULT_CONFIG_VIEW: BridgeConfigView = {
 };
 
 export interface HelloRequest        extends BaseRequest { op: 'Hello'; protocolVersion: number }
-export interface SetConfigRequest    extends BaseRequest { op: 'SetConfig'; config: BridgeConfigView }
+export interface SetConfigRequest    extends BaseRequest { op: 'SetConfig'; config: BridgeConfigView; ttsParams?: Record<string, string> }
 export interface ConnectRequest      extends BaseRequest { op: 'Connect' }
 export interface IsConnectedRequest  extends BaseRequest { op: 'IsConnected' }
 export interface GetServersRequest   extends BaseRequest { op: 'GetServers' }
@@ -109,12 +114,13 @@ export interface GetChannelsRequest  extends BaseRequest { op: 'GetChannels'; se
 export interface JoinChannelRequest  extends BaseRequest { op: 'JoinChannel'; server: string; channel: string }
 export interface LeaveChannelRequest extends BaseRequest { op: 'LeaveChannel' }
 export interface SpeakFileRequest    extends BaseRequest { op: 'SpeakFile'; path: string }
+export interface SpeakTextRequest    extends BaseRequest { op: 'SpeakText'; text: string }
 export interface ShutdownRequest     extends BaseRequest { op: 'Shutdown' }
 
 export type Request =
     | HelloRequest | SetConfigRequest | ConnectRequest
     | IsConnectedRequest | GetServersRequest | GetChannelsRequest
-    | JoinChannelRequest | LeaveChannelRequest | SpeakFileRequest | ShutdownRequest;
+    | JoinChannelRequest | LeaveChannelRequest | SpeakFileRequest | SpeakTextRequest | ShutdownRequest;
 
 // Single response envelope for every command/config op. C# correlates responses by
 // reqId alone, so one op string ('Result') suffices; the optional `data` carries

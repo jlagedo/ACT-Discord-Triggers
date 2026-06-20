@@ -57,6 +57,22 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public void Lang_IsBakedPerFamilyAndLocale() {
+      // Piper carries its own espeak voice -> no per-call lang.
+      foreach (var v in OnnxCatalog.ByFamily(OnnxCatalog.FamilyPiper))
+        Assert.Equal("", v.Lang);
+
+      // Kokoro lang is the espeak-ng voice id resolved from locale at build time.
+      var expected = new System.Collections.Generic.Dictionary<string, string> {
+        ["en_US"] = "", ["en_GB"] = "en-gb-x-rp", ["pt_BR"] = "pt-br",
+      };
+      foreach (var v in OnnxCatalog.ByFamily(OnnxCatalog.FamilyKokoro)) {
+        Assert.True(expected.ContainsKey(v.Locale), $"unexpected Kokoro locale {v.Locale}");
+        Assert.Equal(expected[v.Locale], v.Lang);
+      }
+    }
+
+    [Fact]
     public void Piper_CoversAllSevenShippedLocales() {
       var locales = OnnxCatalog.Locales(OnnxCatalog.FamilyPiper).ToHashSet(StringComparer.OrdinalIgnoreCase);
       foreach (var expected in new[] { "en_US", "en_GB", "fr_FR", "de_DE", "es_ES", "pt_BR", "ru_RU" })

@@ -1,5 +1,6 @@
 using ACT_DiscordTriggers.Core.Protocol;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -43,7 +44,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         // every tunable), then tell the bridge to log in. `config` is the plugin's
         // whole settings POCO; it is serialized verbatim and the bridge reads what
         // it needs.
-        public static async Task ConnectAsync<TConfig>(TConfig config) {
+        public static async Task ConnectAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams = null) {
             // Race guard: a fast double-click on Connect would otherwise spawn two
             // node.exe processes since the long async work below runs unlocked.
             if (Interlocked.CompareExchange(ref connectInProgress, 1, 0) != 0) {
@@ -112,7 +113,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 // Push config (incl. the bot token) before asking the bridge to log in.
                 try {
                     await localClient.SendAsync<BridgeResponse>(
-                        new SetConfigRequest<TConfig> { Config = config },
+                        new SetConfigRequest<TConfig> { Config = config, TtsParams = ttsParams },
                         TimeSpan.FromSeconds(5)).ConfigureAwait(false);
                 } catch (Exception ex) {
                     Log?.Invoke("SetConfig failed: " + ex.Message);
@@ -142,12 +143,12 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         // Push the latest config to the bridge. Called from the UI whenever any
         // setting changes. No-op until the bridge pipe exists — ConnectAsync
         // pushes the config on connect anyway.
-        public static async Task SetConfigAsync<TConfig>(TConfig config) {
+        public static async Task SetConfigAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams = null) {
             var pc = pipeClient;
             if (pc == null) return;
             try {
                 await pc.SendAsync<BridgeResponse>(
-                    new SetConfigRequest<TConfig> { Config = config },
+                    new SetConfigRequest<TConfig> { Config = config, TtsParams = ttsParams },
                     TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             } catch (Exception ex) {
                 Log?.Invoke("SetConfig failed: " + ex.Message);
@@ -318,25 +319,53 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             }
         }
 
-        private static async Task SpeakFileAsync(string path) {
+        private static Task SpeakFileAsync(string path) =>
+            SendSpeakRequestAsync(
+                new SpeakFileRequest { Path = path },
+                notConnected: "Cannot play file: bridge not connected.",
+                rejectedPrefix: "Bridge file rejected: ",
+                opName: "SpeakFile");
+
+        // ONNX TTS dispatch: send only the text. The bridge synthesizes with the
+        // voice it learned from the last SetConfig (ttsParams) and replies via the
+        // Result envelope. Called from ACT's PlayTtsMethod hook on a background
+        // thread (like Speak), so the sync-over-async boundary lives here.
+        public static void SpeakOnnx(string text) {
+            try {
+                Task.Run(() => SpeakOnnxAsync(text)).GetAwaiter().GetResult();
+            } catch (Exception ex) {
+                Log?.Invoke("SpeakText error: " + ex.Message);
+            }
+        }
+
+        private static Task SpeakOnnxAsync(string text) =>
+            SendSpeakRequestAsync(
+                new SpeakTextRequest { Text = text },
+                notConnected: "Cannot speak (ONNX): bridge not connected.",
+                rejectedPrefix: "Bridge TTS rejected: ",
+                opName: "SpeakText");
+
+        // Shared dispatch for the fire-and-await playback commands (SpeakFile /
+        // SpeakText): null-guard the pipe, send, then log either the bridge's
+        // rejection or the IPC timing. opName labels the timing/error lines.
+        private static async Task SendSpeakRequestAsync(
+            IBridgeRequest req, string notConnected, string rejectedPrefix, string opName) {
             var pc = pipeClient;
             if (pc == null) {
-                Log?.Invoke("Cannot play file: bridge not connected.");
+                Log?.Invoke(notConnected);
                 return;
             }
             var sw = Stopwatch.StartNew();
             try {
-                var resp = await pc.SendAsync<BridgeResponse>(
-                    new SpeakFileRequest { Path = path },
-                    TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                var resp = await pc.SendAsync<BridgeResponse>(req, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 sw.Stop();
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
-                    Log?.Invoke("Bridge file rejected: " + resp.Error);
+                    Log?.Invoke(rejectedPrefix + resp.Error);
                 } else {
-                    Log?.Invoke($"SpeakFile timing: ipc={sw.ElapsedMilliseconds}ms");
+                    Log?.Invoke($"{opName} timing: ipc={sw.ElapsedMilliseconds}ms");
                 }
             } catch (Exception ex) {
-                Log?.Invoke("SpeakFile error: " + ex.Message);
+                Log?.Invoke($"{opName} error: " + ex.Message);
             }
         }
 

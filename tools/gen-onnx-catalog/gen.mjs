@@ -51,6 +51,11 @@ const RECOMMENDED_PIPER = new Set([
 // even at C+ so the list isn't female-only) plus the three pt-BR speakers.
 const KOKORO_PACK = "kokoro-multi-lang-v1_0";
 const KOKORO_PACK_MB = 333;
+// espeak-ng voice id per Kokoro locale, baked into each row so the bridge never
+// computes it at runtime: an unknown espeak voice hard-exits the whole sherpa
+// process (no catchable error). "" = use the model's lexicon (American English).
+// There is no plain "en-gb"; British is "en-gb-x-rp".
+const KOKORO_LANG = { en_US: "", en_GB: "en-gb-x-rp", pt_BR: "pt-br" };
 const KOKORO = [
   // en_US (American)
   { sid: 3, name: "Heart", locale: "en_US", grade: "A", gender: "female", recommended: true },
@@ -100,6 +105,8 @@ async function buildPiper() {
       displayName: titleCase(v.name),
       quality: v.quality,
       sid: 0,
+      // Piper models carry their own espeak voice; no per-call lang override.
+      lang: "",
       downloadId: id,
       sizeMB: onnxSizeMB(v.files),
       recommended: RECOMMENDED_PIPER.has(v.key),
@@ -117,6 +124,7 @@ function buildKokoro() {
     displayName: `${k.name} (${k.gender})`,
     quality: k.grade,
     sid: k.sid,
+    lang: KOKORO_LANG[k.locale] ?? "",
     downloadId: KOKORO_PACK,
     sizeMB: KOKORO_PACK_MB,
     recommended: !!k.recommended,

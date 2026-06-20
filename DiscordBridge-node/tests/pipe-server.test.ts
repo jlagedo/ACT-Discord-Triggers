@@ -229,6 +229,27 @@ test('SetConfig: forwards parsed config view to host.setConfig; result ok=true',
     });
 });
 
+test('SetConfig: ttsParams bag is forwarded verbatim as the second host arg', async () => {
+    const { sock, host } = makeHarness();
+    const ttsParams = {
+        engine: 'onnx', family: 'kokoro', modelDir: 'C:\\m\\kokoro-multi-lang-v1_0',
+        sid: '42', lang: 'pt-br', speed: '10', threads: '1',
+    };
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 72, config: {}, ttsParams }));
+    await waitForFrames(sock, 1);
+    const call = host.calls.find((c) => c.method === 'setConfig');
+    assert.ok(call);
+    assert.deepEqual(call.args[1], ttsParams);
+});
+
+test('SetConfig: absent ttsParams forwards undefined (no ONNX voice)', async () => {
+    const { sock, host } = makeHarness();
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 73, config: {} }));
+    await waitForFrames(sock, 1);
+    const call = host.calls.find((c) => c.method === 'setConfig');
+    assert.equal(call!.args[1], undefined);
+});
+
 test('SetConfig: missing fields fall back to defaults', async () => {
     const { sock, host } = makeHarness();
     sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 71, config: {} }));
@@ -388,6 +409,29 @@ test('SpeakFile: host error echoed via Result', async () => {
     assert.match(String(frame!['error']), /Unsupported or unrecognized audio format/);
 });
 
+test('SpeakText: text passes through to host; Result ok=true', async () => {
+    const { sock, host } = makeHarness();
+    host.nextSpeakText({ ok: true, error: '' });
+    sock.emit('data', encodeFrame({ op: Op.SpeakText, reqId: 150, text: 'Stack for the tower' }));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['op'], Op.Result);
+    assert.equal(frame!['reqId'], 150);
+    assert.equal(frame!['ok'], true);
+    const call = host.calls.find((c) => c.method === 'speakText');
+    assert.ok(call);
+    assert.equal(call.args[0], 'Stack for the tower');
+});
+
+test('SpeakText: host error (no ready voice) echoed via Result', async () => {
+    const { sock, host } = makeHarness();
+    host.nextSpeakText({ ok: false, error: 'ONNX voice not ready' });
+    sock.emit('data', encodeFrame({ op: Op.SpeakText, reqId: 151, text: 'hi' }));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['op'], Op.Result);
+    assert.equal(frame!['ok'], false);
+    assert.match(String(frame!['error']), /ONNX voice not ready/);
+});
+
 test('Unknown op: emits Log notification with no reqId, level=Error', async () => {
     const { sock } = makeHarness();
     sock.emit('data', encodeFrame({ op: 'Bogus', reqId: 999 }));
@@ -514,6 +558,16 @@ test('Notifier: Disconnected carries reason', async () => {
     const [frame] = await waitForFrames(sock, 1);
     assert.equal(frame!['op'], Op.Disconnected);
     assert.equal(frame!['reason'], 'gateway closed');
+});
+
+test('Notifier: a token-shaped Log message is redacted on the wire', async () => {
+    const { sock, host } = makeHarness();
+    const tokenShaped = 'not-a-real-token-only-shaped-like-one.abcdef.notarealhmacnotarealhmacnotareal';
+    host.fireNotification({ op: Op.Log, level: 'Error', message: `login failed: ${tokenShaped}` });
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['op'], Op.Log);
+    assert.ok(!String(frame!['message']).includes(tokenShaped), `token leaked on the wire: ${String(frame!['message'])}`);
+    assert.match(String(frame!['message']), /login failed: \*\*\*/);
 });
 
 // ----------------------------------------------------------------------------

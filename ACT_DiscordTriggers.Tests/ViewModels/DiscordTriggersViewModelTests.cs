@@ -276,6 +276,19 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public void SpeakText_OnnxEngine_RoutesToSpeakOnnx_NotSapi() {
+      var fake = new FakeDiscordService();
+      var vm = NewVm(fake, TempStore());
+      vm.Engine = "onnx";
+
+      vm.SpeakText("Stack for the tower");
+
+      // ONNX sends only the text; the voice already reached the bridge via SetConfig.
+      Assert.Equal("Stack for the tower", Assert.Single(fake.SpeakOnnxCalls));
+      Assert.Empty(fake.SpeakCalls);
+    }
+
+    [Fact]
     public void Log_AppendsEntry() {
       var vm = NewVm(new FakeDiscordService(), TempStore());
       vm.Log("hello world");
@@ -390,6 +403,7 @@ namespace ACT_DiscordTriggers.Tests {
       public int DeinitCallCount;
       public readonly List<(string text, string voice, int vol, int speed)> SpeakCalls =
         new List<(string, string, int, int)>();
+      public readonly List<string> SpeakOnnxCalls = new List<string>();
 
       public void RaiseBotReady() => BotReady?.Invoke();
       public void RaiseDisconnected() => Disconnected?.Invoke();
@@ -405,6 +419,7 @@ namespace ACT_DiscordTriggers.Tests {
       public Task LeaveChannelAsync() { LeaveCalled = true; return Task.CompletedTask; }
       public Task DeinitAsync() { DeinitCallCount++; return Task.CompletedTask; }
       public void Speak(string text, string voice, int vol, int speed) => SpeakCalls.Add((text, voice, vol, speed));
+      public void SpeakOnnx(string text) => SpeakOnnxCalls.Add(text);
       public void SpeakFile(string path) { }
       public string[] GetInstalledVoices() => VoicesToReturn;
     }

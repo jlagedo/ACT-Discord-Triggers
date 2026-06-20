@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
     server.on('error', (err: Error) => {
         log.error('pipe server error', err);
-        process.stderr.write(`BRIDGE_FATAL ${err.message}\n`);
+        process.stderr.write(`BRIDGE_FATAL ${log.redact(err.message)}\n`);
         process.exit(2);
     });
 
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
         // produces incoherent IPC. Flush, write the fatal marker, and exit so
         // the plugin's BridgeProcess sees the OnExited event and tears down.
         log.error('uncaughtException', err);
-        process.stderr.write(`BRIDGE_FATAL ${err.stack || err.message}\n`);
+        process.stderr.write(`BRIDGE_FATAL ${log.redact(err.stack || err.message)}\n`);
         process.exit(2);
     });
     process.on('unhandledRejection', (reason: unknown) => {
@@ -96,6 +96,6 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
     try { log.error('main crashed', err); } catch { /* ignore */ }
     const detail = err instanceof Error ? (err.stack || err.message) : String(err);
-    process.stderr.write(`BRIDGE_FATAL ${detail}\n`);
+    process.stderr.write(`BRIDGE_FATAL ${log.redact(detail)}\n`);
     process.exit(2);
 });

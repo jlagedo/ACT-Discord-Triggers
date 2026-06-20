@@ -455,7 +455,13 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // --- TTS/sound routing (target of ACT's delegates, wired by the view) -------
     public void SpeakText(string text) {
       Log("Playing TTS for text: " + text);
-      discord.Speak(text, TtsVoice, TtsVolume, TtsSpeed);
+      if (string.Equals(Engine, "onnx", StringComparison.OrdinalIgnoreCase))
+        // The bridge synthesizes with the voice it learned from SetConfig; only
+        // the text crosses the wire. If no installed ONNX voice is configured the
+        // bridge logs + skips, so a not-yet-downloaded voice never crashes it.
+        discord.SpeakOnnx(text);
+      else
+        discord.Speak(text, TtsVoice, TtsVolume, TtsSpeed);
     }
 
     public void SpeakSoundFile(string path, int volume) {

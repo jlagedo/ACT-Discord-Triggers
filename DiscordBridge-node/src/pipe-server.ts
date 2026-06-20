@@ -36,7 +36,7 @@ export interface SpeakMeta { reqId: number; recvT: number }
 // Minimal surface PipeServer needs from the host. discord-host.ts implements this.
 export interface Host {
     setNotifier(fn: Notifier): void;
-    setConfig(config: BridgeConfigView): void;
+    setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void;
     connect(): Promise<OpResult>;
     disconnect(): Promise<void>;
     isConnected(): boolean;
@@ -46,6 +46,7 @@ export interface Host {
     leaveChannel(): Promise<void>;
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult;
     speakFile(path: string, meta?: SpeakMeta): Promise<OpResult>;
+    speakText(text: string, meta?: SpeakMeta): Promise<OpResult>;
 }
 
 interface IncomingMessage {
@@ -211,7 +212,15 @@ export class PipeServer {
                     const cfg = (typeof raw === 'object' && raw !== null)
                         ? parseConfig(raw as Record<string, unknown>)
                         : DEFAULT_CONFIG_VIEW;
-                    this.host.setConfig(cfg);
+                    // ttsParams is an extensible string-map riding alongside the
+                    // settings: the resolved ONNX synth descriptor (engine/family/
+                    // modelDir/sid/lang/speed/threads). Pass it through verbatim;
+                    // the host parses the keys it knows.
+                    const rawParams = parsed['ttsParams'];
+                    const ttsParams = (typeof rawParams === 'object' && rawParams !== null)
+                        ? rawParams as Record<string, string>
+                        : undefined;
+                    this.host.setConfig(cfg, ttsParams);
                     await this._result(reqId, true, '');
                     break;
                 }
@@ -245,6 +254,12 @@ export class PipeServer {
                 case Op.SpeakFile: {
                     const recvT = performance.now();
                     const r = await this.host.speakFile(asString(parsed['path']), { reqId: reqId ?? 0, recvT });
+                    await this._result(reqId, r.ok, r.error);
+                    break;
+                }
+                case Op.SpeakText: {
+                    const recvT = performance.now();
+                    const r = await this.host.speakText(asString(parsed['text']), { reqId: reqId ?? 0, recvT });
                     await this._result(reqId, r.ok, r.error);
                     break;
                 }
@@ -289,13 +304,20 @@ export class PipeServer {
     }
 
     private _sendFrame(obj: OutboundFrame): Promise<void> {
+        // Scrub Log notifications before they leave the bridge: their message can
+        // carry a discord.js error string, and these end up in the plugin's
+        // shared diagnostics. Other frames (Result, BotReady, Disconnected) never
+        // carry the token. This is the wire-side twin of file-log's redaction.
+        const outbound: OutboundFrame = obj.op === Op.Log
+            ? { ...obj, message: log.redact(obj.message) }
+            : obj;
         // Serialize writes so frames can't interleave. Length + body go in a
         // single socket.write so the kernel either flushes both or fails both —
         // a torn frame (header without body) is impossible with one syscall.
         this.writeQueue = this.writeQueue.then(() => new Promise<void>((resolve) => {
             if (this.closed || !this.socket.writable) { resolve(); return; }
             try {
-                const json = Buffer.from(JSON.stringify(obj), 'utf8');
+                const json = Buffer.from(JSON.stringify(outbound), 'utf8');
                 const frame = Buffer.alloc(4 + json.length);
                 frame.writeUInt32LE(json.length, 0);
                 json.copy(frame, 4);

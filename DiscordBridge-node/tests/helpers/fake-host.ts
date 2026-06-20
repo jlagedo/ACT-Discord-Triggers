@@ -18,6 +18,7 @@ export class FakeHost implements Host {
     private _nextJoinChannel: OpResult = { ok: true, error: '' };
     private _nextSpeakPcm: OpResult = { ok: true, error: '' };
     private _nextSpeakFile: OpResult = { ok: true, error: '' };
+    private _nextSpeakText: OpResult = { ok: true, error: '' };
     private _nextIsConnected = false;
     private _nextServers: string[] = [];
     private _nextChannels: string[] = [];
@@ -26,14 +27,15 @@ export class FakeHost implements Host {
     private _joinThrows: Error | null = null;
     private _speakPcmThrows: Error | null = null;
     private _speakFileThrows: Error | null = null;
+    private _speakTextThrows: Error | null = null;
 
     setNotifier(fn: Notifier): void {
         this.calls.push({ method: 'setNotifier', args: [] });
         this.notify = fn;
     }
 
-    setConfig(config: BridgeConfigView): void {
-        this.calls.push({ method: 'setConfig', args: [config] });
+    setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void {
+        this.calls.push({ method: 'setConfig', args: [config, ttsParams] });
     }
 
     connect(): Promise<OpResult> {
@@ -85,10 +87,17 @@ export class FakeHost implements Host {
         return Promise.resolve(this._nextSpeakFile);
     }
 
+    speakText(text: string, meta?: SpeakMeta): Promise<OpResult> {
+        this.calls.push({ method: 'speakText', args: [text, meta] });
+        if (this._speakTextThrows) return Promise.reject(this._speakTextThrows);
+        return Promise.resolve(this._nextSpeakText);
+    }
+
     nextConnect(r: OpResult): void { this._nextConnect = r; }
     nextJoinChannel(r: OpResult): void { this._nextJoinChannel = r; }
     nextSpeakPcm(r: OpResult): void { this._nextSpeakPcm = r; }
     nextSpeakFile(r: OpResult): void { this._nextSpeakFile = r; }
+    nextSpeakText(r: OpResult): void { this._nextSpeakText = r; }
     nextIsConnected(v: boolean): void { this._nextIsConnected = v; }
     nextServers(s: string[]): void { this._nextServers = s; }
     nextChannels(c: string[]): void { this._nextChannels = c; }
@@ -97,6 +106,7 @@ export class FakeHost implements Host {
     joinChannelThrows(err: Error): void { this._joinThrows = err; }
     speakPcmThrows(err: Error): void { this._speakPcmThrows = err; }
     speakFileThrows(err: Error): void { this._speakFileThrows = err; }
+    speakTextThrows(err: Error): void { this._speakTextThrows = err; }
 
     fireNotification(n: Notification): void {
         if (this.notify) this.notify(n);

@@ -11,7 +11,11 @@ test('PROTOCOL_VERSION is a positive integer', () => {
 });
 
 test('PROTOCOL_VERSION matches the C# side (bump both together)', () => {
-    assert.equal(PROTOCOL_VERSION, 5);
+    assert.equal(PROTOCOL_VERSION, 6);
+});
+
+test('SpeakText is a command op (ONNX neural TTS; only text crosses the wire)', () => {
+    assert.equal(Op.SpeakText, 'SpeakText');
 });
 
 test('binary SpeakPcm header is 11 bytes (matches C# PipeClient, no flags byte)', () => {

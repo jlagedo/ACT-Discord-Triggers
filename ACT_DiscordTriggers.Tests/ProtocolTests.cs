@@ -166,7 +166,44 @@ namespace ACT_DiscordTriggers.Tests {
         [Fact]
         public void ProtocolVersion_matches_bridge() {
             // Tripwire: bump both this and PROTOCOL_VERSION in protocol.ts together.
-            Assert.Equal(5, ProtocolConstants.Version);
+            Assert.Equal(6, ProtocolConstants.Version);
+        }
+
+        [Fact]
+        public void SpeakTextRequest_serializes_with_only_text() {
+            var req = new SpeakTextRequest { ReqId = 12, Text = "Stack for the tower" };
+            string json = JsonSerializer.Serialize(req, opts);
+            using var doc = JsonDocument.Parse(json);
+            Assert.Equal("SpeakText", doc.RootElement.GetProperty("op").GetString());
+            Assert.Equal(12, doc.RootElement.GetProperty("reqId").GetInt32());
+            Assert.Equal("Stack for the tower", doc.RootElement.GetProperty("text").GetString());
+            // ONNX voice/family/speed ride in SetConfig's ttsParams, not on the command.
+            Assert.False(doc.RootElement.TryGetProperty("voice", out _));
+        }
+
+        [Fact]
+        public void SetConfigRequest_carries_ttsParams_bag_alongside_config() {
+            var req = new SetConfigRequest<PluginSettings> {
+                ReqId = 1,
+                Config = new PluginSettings(),
+                TtsParams = new System.Collections.Generic.Dictionary<string, string> {
+                    ["engine"] = "onnx", ["family"] = "kokoro", ["sid"] = "42", ["lang"] = "pt-br",
+                },
+            };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, req.GetType(), opts));
+            var bag = doc.RootElement.GetProperty("ttsParams");
+            Assert.Equal("onnx", bag.GetProperty("engine").GetString());
+            Assert.Equal("kokoro", bag.GetProperty("family").GetString());
+            Assert.Equal("42", bag.GetProperty("sid").GetString());
+            Assert.Equal("pt-br", bag.GetProperty("lang").GetString());
+        }
+
+        [Fact]
+        public void SetConfigRequest_omits_ttsParams_when_null() {
+            // No ONNX voice selected -> the bag is null and drops off the wire.
+            var req = new SetConfigRequest<PluginSettings> { ReqId = 1, Config = new PluginSettings() };
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(req, req.GetType(), opts));
+            Assert.False(doc.RootElement.TryGetProperty("ttsParams", out _));
         }
     }
 }

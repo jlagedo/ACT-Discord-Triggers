@@ -62,6 +62,12 @@ await esbuild.build({
         'utf-8-validate',
         'erlpack',
         'zlib-sync',
+        // ONNX neural TTS native addon + its win-x64 binary package. Loaded lazily
+        // via createRequire in tts.ts (so the bridge starts even when absent); listed
+        // here so a stray static import would also stay external rather than break the
+        // bundle. Staged into dist/node_modules by build.ps1 $externals.
+        'sherpa-onnx-node',
+        'sherpa-onnx-win-x64',
     ],
     minify: false,
     sourcemap: false,

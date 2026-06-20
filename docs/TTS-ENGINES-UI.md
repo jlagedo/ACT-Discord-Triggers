@@ -2,7 +2,7 @@
 
 > **TL;DR** — Add a user-selectable TTS **engine**: keep **Windows (SAPI)** (today's default, offline, synthesized in C#) and add **ONNX** — neural voices run **in the Node bridge** via `sherpa-onnx-node`, because that native addon cannot load in net48. Under ONNX a **Quality** toggle picks **Piper** (fast, light) or **Kokoro** (natural, heavy). TTS configuration moves out of the **Sound** page into a **new top-level "Text-to-Speech" section** whose first control is an **Engine** picker that reshapes the page. **C# (.NET) owns voice provisioning** — the curated catalog, the installed/not-installed state, and downloads — so it all works **with no Discord connection** (the bridge only exists while connected). The only thing that crosses the wire per call is **`SpeakText { text }`**; the chosen voice/family/speed/threads/models-dir all ride in the existing **`SetConfig`**. The bridge synthesizes with `generateAsync` (off the event loop, streaming chunks), caches the result, then rejoins the existing effects → normalize → Opus pipeline. This document is the UI draft (ASCII mockups + navigation) plus the wiring needed to make it work.
 
-This is a design draft, not yet implemented. It captures the decisions taken so far so the build can proceed without re-litigating them.
+This began as a design draft; build-plan **steps 1–6 are now implemented** (catalog, relocated UI, ONNX UI, settings, the C# downloader, and bridge synthesis on protocol v6 — ONNX now speaks in Discord), with **steps 7–9** (release-packaging confirmation, synthesis cache, hardening) still to come. The **Implementation plan** section at the bottom tracks per-step status; the rest captures the decisions so the remaining build proceeds without re-litigating them.
 
 ---
 
@@ -25,7 +25,7 @@ Pinned against the tree as of this revision — verify before editing:
 
 | Thing | Current state | Location |
 |---|---|---|
-| Protocol version | **5** (new ops below bump it to **6**) | `Protocol.cs:6`, `protocol.ts:35` |
+| Protocol version | **6** (`SpeakText` op + SetConfig `ttsParams` bag) | `Protocol.cs:6`, `protocol.ts:35` |
 | Settings schema version | **2** (`V1ToV2` migration registered) | `PluginSettings.cs:22`, `Settings/Migrations/V1ToV2.cs` |
 | Reply envelope | single generic `Result` `{op,reqId,ok,error,data?}`, correlated by `reqId` — **there is no `SpeakResult` op** | `Protocol.cs:117`, `pipe-server.ts` `_result` |
 | TTS today | C# `DiscordClient.Speak(text,voice,vol,speed)` → System.Speech → `SpeakPcm` binary frame | `DiscordClient.cs:285` |
@@ -235,7 +235,7 @@ downloading      ⏬ Downloading Ryan… 58%   ▓▓▓▓▓▓▓▓░░░
 done             ✓ Ryan is ready.    ← persists until another voice is picked
 ```
 
-Test stays disabled until the voice is installed. The **success confirmation persists** (it clears only when another voice is picked) so a finished download isn't an abrupt vanish — large packs run for a while and the user may walk away; the picker's permanent `✓` is the lasting marker. **Kokoro** ⇒ one 333 MB pack download flips every Kokoro speaker to `✓` at once. Progress is mirrored into the Debug Log.
+Test stays disabled until the voice is installed. The **success confirmation persists** (it clears only when another voice is picked) so a finished download isn't an abrupt vanish — large packs run for a while and the user may walk away; the picker's permanent `✓` is the lasting marker. **Kokoro** ⇒ one 333 MB pack download flips every Kokoro speaker to `✓` at once. The download milestones (URL, size, extraction, install path) and the install-state scan results (on load, on a models-folder change) are mirrored into the **Diagnostics log**, which **auto-scrolls to follow new entries** unless the user has scrolled up to read history.
 
 ### Test button (both engines)
 
@@ -301,7 +301,7 @@ public string ModelsDir  { get; set; } = "";         // empty ⇒ %APPDATA%\ACT_
 - **Two ONNX fields** (`OnnxFamily` + `OnnxVoice`) per your call — no per-family voice memory; flipping the Quality toggle sets `OnnxVoice` to that family's first-installed-or-default. SAPI keeps its own `TtsVoice`.
 - **`ModelsDir`** stored empty means "resolve to `%APPDATA%\ACT_DiscordTriggers\models` at runtime." C# resolves it to an **absolute** path before sending, so the bridge always receives a concrete directory.
 - Bump `CurrentSchemaVersion` to **2** with a migration (`Settings/Migrations/`) that defaults the new fields — existing users land on `sapi`/their current voice and behave identically.
-- **The bridge learns the ONNX voice from `SetConfig`, never from `SpeakText`.** `OnnxFamily`, `OnnxVoice`, `TtsSpeed`, `TtsThreads`, and the resolved `ModelsDir` ride in the config POCO (the bridge reads what it needs), consistent with the IPC rule that commands don't carry settings. So these must **push** — flip the relevant VM props to `push:true`. (`TtsSpeed` pushes for both engines; the bridge simply ignores it under SAPI. `TtsVolume` stays `push:false` — SAPI-only, consumed in C#.)
+- **The bridge learns the ONNX voice from `SetConfig`, never from `SpeakText`.** `OnnxFamily`, `OnnxVoice`, `TtsSpeed`, `TtsThreads`, and the resolved `ModelsDir` persist in the settings POCO; on each push C# resolves them (plus the catalog's `sid`/`lang`) into the `ttsParams` descriptor the bridge actually reads (§c) — consistent with the IPC rule that commands don't carry settings. So these must **push** — flip the relevant VM props to `push:true`. (`TtsSpeed` pushes for both engines; the bridge simply ignores it under SAPI. `TtsVolume` stays `push:false` — SAPI-only, consumed in C#.)
 
 ---
 
@@ -343,15 +343,15 @@ Bump `ProtocolConstants.Version` / `PROTOCOL_VERSION` 5 → 6; per `CLAUDE.md` u
 |---|---|---|---|
 | `SpeakText` | C# → bridge | `{ text }` — bridge synthesizes with its **currently-configured** ONNX voice/family/speed | `Result {ok,error}` |
 
-- **No `ListVoices` / `DownloadVoice` / `DownloadProgress`** — provisioning is entirely C#-side (§f). Everything the bridge needs to pick the voice (`OnnxFamily`, `OnnxVoice`, `TtsSpeed`, `TtsThreads`, resolved `ModelsDir`) arrives in `SetConfig`.
+- **No `ListVoices` / `DownloadVoice` / `DownloadProgress`** — provisioning is entirely C#-side (§f). Everything the bridge needs to pick the voice arrives in `SetConfig` as the **resolved synth descriptor `ttsParams`** — an extensible `{string:string}` bag riding *alongside* the settings POCO (not inside it; it's derived, not persisted): `{ engine, family, modelDir (absolute), sid, lang, speed, threads }`. C# fills it (`OnnxSynthParams.Resolve`) only for an **installed** catalog voice, so the bridge stays a pure validated synth with no catalog/speaker knowledge. Adding a synth knob extends the bag with no DTO churn on either side.
 - `SpeakText` deliberately carries **only `text`**, matching the IPC rule that commands don't duplicate settings (like `SpeakPcm`, which carries no fx params).
 - **Random-fx is bridge-rolled** from `config.randomFx`/`fxChance`, same as `SpeakPcm`.
 
 ### d. Bridge synthesis (new `tts.ts`, called from `pipe-server.ts`)
 
-- **The bridge resolves the active voice from `SetConfig`, not from `SpeakText`.** On each config push it reads `OnnxFamily`, `OnnxVoice`, `ModelsDir`, `TtsThreads`, `TtsSpeed` and (re)loads the model when those change. Model dir = `ModelsDir/<downloadId>` — for Piper `downloadId == OnnxVoice`; for Kokoro it's the constant pack id `kokoro-multi-lang-v1_0`. The `*.onnx` inside is found by scanning the dir (as the benchmark does).
-- Lazy `Map<modelDir, OfflineTts>` cache of loaded models; `numThreads` from config; **warm once on channel join** (a throwaway `generateAsync`) so the first real callout isn't cold (benchmark finding #5).
-- **The bridge holds the Kokoro speaker→(sid, lang) map** — model mechanics (~50 entries), *not* catalog curation — so it can turn the configured `OnnxVoice` speaker into `sid` + `generationConfig.extra.lang`. Piper: `sid 0`, lang comes from the model's own espeak config. **Kokoro = one instance** serving all speakers.
+- **The bridge resolves the active voice from `SetConfig`'s `ttsParams`, not from `SpeakText`.** Each config push carries the already-resolved descriptor (`family`, absolute `modelDir`, `sid`, `lang`, `speed`, `threads`); the bridge (re)loads the model when `modelDir`/`threads` change. The `*.onnx` inside is found by scanning the dir (as the benchmark does).
+- Single loaded model kept (keyed `modelDir#threads`) — a neural model is 200–650 MB, so switching Piper voices reloads while switching Kokoro speakers (same pack/dir) does not; `numThreads` from the descriptor; **warm once on channel join** (a throwaway `generateAsync`) so the first real callout isn't cold (benchmark finding #5).
+- **`sid` and the espeak `lang` are baked into the catalog at generation time** (`tools/gen-onnx-catalog`), not held in a bridge-side map: the bridge takes `sid` + `generationConfig.extra.lang` straight from `ttsParams`. This keeps the crash-critical espeak id (an unknown one hard-exits the process) in one vetted place. Piper: `sid 0`, `lang ''` (the model carries its own espeak config). **Kokoro = one instance** serving all speakers, `lang` per call.
 - `SpeakText { text }` → `generateAsync` on the loaded instance → resample → existing `_enqueue`.
 - Synthesize with **`generateAsync`** (off the event loop). Two ways to consume the stream:
   - **(A) Assemble-then-enqueue (recommended v1):** accumulate `onProgress` chunks into the full buffer, convert Float32 mono → 16-bit → `resampleStereo16` → 48 kHz stereo, then hand to the **existing** `_enqueue` (fx → normalize → declick → `mixer.addVoice`). Preserves global-RMS normalize and effect tails. Latency is just synth time (~150 ms Piper), already imperceptible.
@@ -448,15 +448,15 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 6. Bridge synthesis + protocol v6
 
 - **Goal:** ONNX actually speaks in Discord.
-- **Work:** add `sherpa-onnx-node` to `DiscordBridge-node` deps; new `tts.ts` — on `SetConfig` resolve `OnnxFamily`/`OnnxVoice`/`ModelsDir`/`TtsThreads`/`TtsSpeed` → load `vits`/`kokoro` (lazy `Map<modelDir, OfflineTts>`), Kokoro speaker→sid/lang map, **validation guard**, warm on join; `SpeakText { text }` handler → `generateAsync` (assemble `onProgress` chunks) → Float32→16-bit → `resampleStereo16` → existing `_enqueue`. Protocol: add `SpeakText` to `Protocol.cs` + `protocol.ts`, bump Version 5→6, dispatch in `pipe-server.ts`; C# `DiscordClient.SpeakOnnx(text)` + the `VM.SpeakText` engine switch.
-- **Files:** `protocol.ts`/`Protocol.cs`, `pipe-server.ts`, `tts.ts`, `discord-host.ts`, `DiscordClient.cs`, VM.
-- **Done when:** with an installed voice + joined channel, a trigger/Test speaks via ONNX in Discord; a bad voice/lang logs + skips and never crashes the bridge.
+- **Work:** add `sherpa-onnx-node` to `DiscordBridge-node` deps; new `tts.ts` — lazy-`require` the addon (so the bridge still starts/`BRIDGE_READY`s when it's absent), load `vits`/`kokoro` from the `ttsParams` descriptor (single loaded model, keyed `modelDir#threads`), **validation guard**, warm on join; `SpeakText { text }` handler → `generateAsync` (assemble `onProgress` chunks / resolved audio) → Float32→16-bit stereo → `resampleStereo16` → existing `_enqueue`. Protocol: add `SpeakText` + the SetConfig `ttsParams` bag to `Protocol.cs` + `protocol.ts`, bump Version 5→6, dispatch in `pipe-server.ts`; C# `OnnxSynthParams.Resolve` (the install gate) + `DiscordClient.SpeakOnnx(text)` + the `VM.SpeakText` engine switch.
+- **Files:** `protocol.ts`/`Protocol.cs`, `pipe-server.ts`, `tts.ts`, `discord-host.ts`, `DiscordClient.cs`/`DiscordClientService.cs`/`OnnxSynthParams.cs`, VM; `OnnxVoiceInfo.cs` + `gen.mjs` (baked `lang`); `package.json`/`esbuild.config.mjs`/`build.ps1` (staged native runtime).
+- **Done when:** with an installed voice + joined channel, a trigger/Test speaks via ONNX in Discord; a bad voice/lang logs + skips and never crashes the bridge. ✅ **Done** — protocol v6 (`SpeakText` + `ttsParams`); `sid`/`lang` baked statically into the catalog, the bridge holds no speaker map; `OnnxSynthParams.Resolve` emits the descriptor only for an installed voice; the native addon is lazy-required + staged (release ships `sherpa-onnx-win-x64`), so the `BRIDGE_READY` self-test stays green even when it's absent. Full `check.ps1` green.
 
 ### 7. Packaging
 
 - **Goal:** the release ships the native runtime and still self-tests.
-- **Work:** add `sherpa-onnx-node` + `sherpa-onnx-win-x64` to the esbuild `external` list and `build.ps1 $externals`. No managed archive dep to bundle — extraction shells out to Windows `tar.exe` (step 5).
-- **Done when:** `pwsh ./build.ps1` produces a release that loads the addon and passes the `BRIDGE_READY` self-test.
+- **Work:** the esbuild `external` entries + `build.ps1 $externals` staging of `sherpa-onnx-node` + `sherpa-onnx-win-x64` already landed in step 6 (the release folder ships `sherpa-onnx-win-x64`'s `onnxruntime.dll` + `sherpa-onnx.node` + DLLs, ~21 MB). No managed archive dep to bundle — extraction shells out to Windows `tar.exe` (step 5). Remaining: confirm the staged addon actually *loads + synthesizes* in a real run (the `BRIDGE_READY` self-test passes without loading it, since the require is lazy).
+- **Done when:** `pwsh ./build.ps1` produces a release that loads the addon and passes the `BRIDGE_READY` self-test. ✅ build + staging + self-test green; runtime-load + synthesis now confirmed automatically by the step-9 gated suites (`tts-synth`/`tts-e2e` and `OnnxBridgeE2ETests` actually load the staged addon and synthesize real audio), so the only thing left to a human is a subjective listen + the live in-Discord voice-channel path.
 
 ### 8. Synthesis cache
 
@@ -467,4 +467,10 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 9. Hardening + tests
 
 - **Work:** extend `ProtocolTests.cs` + `protocol.test.ts` (SpeakText + version bump); settings v1→v2 migration test; a bridge synth smoke test; verify the dual-side lang/model validation guard.
+- **Validation suite (built):** the synthesis path is confirmed end-to-end by automated, auto-skipping tests rather than only by eye. An **audio sink** (`ACT_DT_AUDIO_SINK=<dir>`) makes the bridge write every played clip as a 48 kHz/16-bit/stereo WAV and lets `SpeakText`/`SpeakFile`/`SpeakPcm` run without a Discord channel (capture mode) — production is unchanged when the var is unset.
+  - `DiscordBridge-node/tests/tts.test.ts` — `parseTtsParams` branches, `sliderToSpeed`, `monoFloat32ToStereoInt16`, the WAV writer, the sink, and `OnnxTts.configure`'s file-validation (no addon/model needed; always runs).
+  - `tts-synth.test.ts` — loads the real Piper + Kokoro models and asserts non-silent audio, the 22050/24000 rates, the baked pt-BR/en-GB Kokoro `lang` path, and that the speed slider changes clip length. Never feeds an invalid espeak `lang` (it would hard-`exit()` the runner).
+  - `tts-e2e.test.ts` — spawns the real bridge with the sink, drives `SetConfig(ttsParams)`+`SpeakText` over the pipe, reads the WAV back; plus negatives (no voice → "not ready"; bad model dir → "unavailable" warn + skip; bridge stays up).
+  - `ACT_DiscordTriggers.Tests/OnnxBridgeE2ETests.cs` — the same loop across the real C# boundary, resolving the descriptor through `OnnxSynthParams.Resolve` and asserting the captured WAV.
+  - The real-model suites auto-skip unless the `sherpa-onnx-node` addon **and** the voice models are present (`ACT_DT_MODELS_DIR`, default `E:\dev\sherpa-onnx-test\models`); `BridgeProcess.ExtraEnv` injects the sink env per-child so concurrent integration tests are unaffected. `npm run tts:probe -- --model <dir> …` dumps a WAV for a subjective listen.
 - **Done when:** `pwsh ./check.ps1` is green.

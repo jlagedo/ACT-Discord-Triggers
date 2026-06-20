@@ -9,7 +9,7 @@ export default tseslint.config(
   { ignores: ['dist/', 'dist-types/', 'node_modules/'] },
   js.configs.recommended,
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'tools/**/*.ts'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {

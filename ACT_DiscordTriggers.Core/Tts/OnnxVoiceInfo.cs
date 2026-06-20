@@ -34,6 +34,12 @@ namespace ACT_DiscordTriggers.Core.Tts {
     /// speaker's index in the multi-lang pack.</summary>
     [JsonPropertyName("sid")] public int Sid { get; set; }
 
+    /// <summary>espeak-ng voice id passed to the bridge per synthesis, baked at
+    /// catalog-build time (an unknown one hard-exits sherpa). Empty for Piper
+    /// (the model carries its own) and for Kokoro American English (uses the
+    /// lexicon); <c>en-gb-x-rp</c> / <c>pt-br</c> for the other Kokoro locales.</summary>
+    [JsonPropertyName("lang")] public string Lang { get; set; } = "";
+
     /// <summary>Release asset / model-directory name. Every Kokoro voice shares the
     /// single pack id <c>kokoro-multi-lang-v1_0</c>; each Piper voice has its own.
     /// The download URL is <c>…/tts-models/&lt;DownloadId&gt;.tar.bz2</c>.</summary>

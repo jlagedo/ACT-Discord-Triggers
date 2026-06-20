@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace ACT_DiscordTriggers.Core.Protocol {
 
     public static class ProtocolConstants {
-        public const int Version = 5;
+        public const int Version = 6;
     }
 
     // Three channels share one op set:
@@ -24,6 +24,11 @@ namespace ACT_DiscordTriggers.Core.Protocol {
         public const string LeaveChannel = "LeaveChannel";
         public const string SpeakFile = "SpeakFile";
         public const string SpeakPcm = "SpeakPcm";
+
+        // ONNX neural TTS: .NET sends only the text; the bridge synthesizes with
+        // the voice it learned from the last SetConfig (ttsParams). SAPI keeps
+        // using the binary SpeakPcm frame.
+        public const string SpeakText = "SpeakText";
 
         // The single response envelope op. Every command/config reply is "Result",
         // correlated by reqId (PipeClient matches on reqId, ignoring the op).
@@ -53,10 +58,17 @@ namespace ACT_DiscordTriggers.Core.Protocol {
     // fields it needs and ignores the rest. Kept generic so the protocol types stay
     // decoupled from the concrete PluginSettings POCO — PipeClient.SendFrameAsync
     // serializes by runtime type, so the closed generic serializes the full POCO.
+    //
+    // TtsParams is an extensible, derived (not persisted) string-map riding alongside
+    // the settings: the resolved ONNX synth descriptor for the currently-selected,
+    // installed voice (engine/family/modelDir/sid/lang/speed/threads). The bridge
+    // reads the keys it knows; new synth knobs need no DTO change. Empty when no
+    // installed ONNX voice is selected, so the bridge loads nothing.
     public class SetConfigRequest<TConfig> : IBridgeRequest {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SetConfig;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("config")] public TConfig Config { get; set; }
+        [JsonPropertyName("ttsParams")] public System.Collections.Generic.Dictionary<string, string> TtsParams { get; set; }
     }
 
     public class ConnectRequest : IBridgeRequest {
@@ -101,6 +113,15 @@ namespace ACT_DiscordTriggers.Core.Protocol {
         [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SpeakFile;
         [JsonPropertyName("reqId")] public int? ReqId { get; set; }
         [JsonPropertyName("path")] public string Path { get; set; } = "";
+    }
+
+    // ONNX TTS. Carries only the text — the voice/family/speed/lang already reached
+    // the bridge in SetConfig's ttsParams, matching the rule that commands don't
+    // duplicate settings (like SpeakPcm carrying no fx params).
+    public class SpeakTextRequest : IBridgeRequest {
+        [JsonPropertyName("op")] public string Op { get; set; } = Protocol.Op.SpeakText;
+        [JsonPropertyName("reqId")] public int? ReqId { get; set; }
+        [JsonPropertyName("text")] public string Text { get; set; } = "";
     }
 
     // SpeakPcm is sent as a length-prefixed BINARY frame, not JSON.

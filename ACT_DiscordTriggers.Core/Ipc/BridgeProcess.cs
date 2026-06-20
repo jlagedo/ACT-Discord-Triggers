@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -16,6 +17,12 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         private Process process;
 
         public string PipeName { get; private set; }
+
+        // Extra environment variables to set on the spawned node child only (its
+        // ProcessStartInfo is seeded from this process's env, so these are additive
+        // and never mutate the parent's environment). Used by the diagnostic
+        // audio sink in tests; null/empty in normal operation.
+        public IDictionary<string, string> ExtraEnv { get; set; }
 
         public event Action<string> OnStderr;
         public event Action<int> OnExited;
@@ -44,6 +51,9 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 RedirectStandardError = true,
                 WorkingDirectory = bridgeDir,
             };
+            if (ExtraEnv != null) {
+                foreach (var kv in ExtraEnv) psi.EnvironmentVariables[kv.Key] = kv.Value;
+            }
 
             process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             process.Exited += (_, __) => {
