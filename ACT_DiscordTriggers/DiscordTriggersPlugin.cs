@@ -9,9 +9,8 @@ using ACT_DiscordTriggers.Core.Ipc;
 
 namespace ACT_DiscordTriggers {
   // The IActPluginV1 that ACT loads. Owns plugin-identity and lifecycle concerns
-  // (assembly resolution, bridge discovery, diagnostics) and hosts the view. The
-  // view is intentionally swappable: when it becomes WPF, only the "create + add
-  // view" lines below change (Controls.Add(view) -> an ElementHost wrapper).
+  // (assembly resolution, bridge discovery, diagnostics) and hosts the WPF view inside
+  // ACT's WinForms TabPage via an ElementHost (see InitPlugin).
   public class DiscordTriggersPlugin : IActPluginV1 {
     private DiscordTriggersView view;
     private Label lblStatus;

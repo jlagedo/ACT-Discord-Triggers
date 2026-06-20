@@ -1,6 +1,4 @@
 using System;
-using System.Linq;
-using System.Speech.Synthesis;
 using System.Threading.Tasks;
 using ACT_DiscordTriggers.Core.Settings;
 
@@ -34,14 +32,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     public void Speak(string text, string voice, int vol, int speed) => DiscordClient.Speak(text, voice, vol, speed);
     public void SpeakFile(string path) => DiscordClient.SpeakFile(path);
 
-    public string[] GetInstalledVoices() {
-      try {
-        using (var tts = new SpeechSynthesizer())
-          return tts.GetInstalledVoices().Select(v => v.VoiceInfo.Name).ToArray();
-      } catch {
-        return new string[0];
-      }
-    }
+    public string[] GetInstalledVoices() => DiscordClient.GetInstalledVoices();
 
     public void Dispose() {
       DiscordClient.BotReady -= botReadyHandler;

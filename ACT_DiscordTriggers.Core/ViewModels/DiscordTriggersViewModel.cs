@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -25,14 +26,6 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private const int ConfigDebounceMs = 400;
     private CancellationTokenSource statusPushCts;
     private CancellationTokenSource configPushCts;
-
-    // Domain ranges (mirror the WinForms control limits). The VM clamps so loading a
-    // stale/out-of-range saved value can't throw when a range-limited control binds.
-    private const int VolMin = 0, VolMax = 20;
-    private const int SpeedMin = 0, SpeedMax = 20;
-    private const int FxMin = 0, FxMax = 100;
-    private const int NormMin = 12, NormMax = 30;
-    private const int QualityMin = 0, QualityMax = 2; // 0=Low, 1=Medium, 2=High
 
     // Suppresses config/status pushes while loading settings into the properties.
     private bool suppressPush;
@@ -66,18 +59,20 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [ObservableProperty] private string botStatus = "Playing with ACT Triggers";
     partial void OnBotStatusChanged(string value) => ScheduleStatusPush();
 
-    // Manual where a clamp or computed label applies (the generator writes the field
-    // before the hook, so it can't enforce a clamp).
+    // Manual where a clamp applies (the source generator writes the field before its
+    // hook, so it can't enforce a clamp). SetClamped centralizes clamp + notify +
+    // dependent-label + debounced push. TTS volume/speed are synthesized in-process,
+    // so the bridge ignores them (push: false); the bridge-interpreted tunables push.
     private int ttsVolume = 10;
     public int TtsVolume {
       get => ttsVolume;
-      set => SetProperty(ref ttsVolume, Clamp(value, VolMin, VolMax));
+      set => SetClamped(ref ttsVolume, value, PluginSettings.TtsVolumeMin, PluginSettings.TtsVolumeMax, push: false);
     }
 
     private int ttsSpeed = 10;
     public int TtsSpeed {
       get => ttsSpeed;
-      set => SetProperty(ref ttsSpeed, Clamp(value, SpeedMin, SpeedMax));
+      set => SetClamped(ref ttsSpeed, value, PluginSettings.TtsSpeedMin, PluginSettings.TtsSpeedMax, push: false);
     }
 
     [ObservableProperty] private bool randomFx;
@@ -86,12 +81,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private int fxChance = 25;
     public int FxChance {
       get => fxChance;
-      set {
-        if (SetProperty(ref fxChance, Clamp(value, FxMin, FxMax))) {
-          OnPropertyChanged(nameof(FxChanceLabel));
-          ScheduleConfigPush();
-        }
-      }
+      set => SetClamped(ref fxChance, value, PluginSettings.FxChanceMin, PluginSettings.FxChanceMax, push: true, dependentLabel: nameof(FxChanceLabel));
     }
 
     [ObservableProperty] private bool normalize = true;
@@ -100,30 +90,20 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private int normalizeTarget = 20;
     public int NormalizeTarget {
       get => normalizeTarget;
-      set {
-        if (SetProperty(ref normalizeTarget, Clamp(value, NormMin, NormMax))) {
-          OnPropertyChanged(nameof(NormalizeTargetLabel));
-          ScheduleConfigPush();
-        }
-      }
+      set => SetClamped(ref normalizeTarget, value, PluginSettings.NormalizeTargetMin, PluginSettings.NormalizeTargetMax, push: true, dependentLabel: nameof(NormalizeTargetLabel));
     }
 
     private int audioQualityIndex = 1;
     public int AudioQualityIndex {
       get => audioQualityIndex;
-      set {
-        if (SetProperty(ref audioQualityIndex, Clamp(value, QualityMin, QualityMax))) {
-          OnPropertyChanged(nameof(ShowHighQualityWarning));
-          ScheduleConfigPush();
-        }
-      }
+      set => SetClamped(ref audioQualityIndex, value, PluginSettings.AudioQualityIndexMin, PluginSettings.AudioQualityIndexMax, push: true, dependentLabel: nameof(ShowHighQualityWarning));
     }
 
     // --- Computed (presentation) ------------------------------------------------
     public string FxChanceLabel => "FX Chance: " + FxChance + "%";
     public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " dBFS";
     // The High tier may exceed an unboosted channel's 96 kbps cap; the view shows a warning.
-    public bool ShowHighQualityWarning => AudioQualityIndex == QualityMax;
+    public bool ShowHighQualityWarning => AudioQualityIndex == PluginSettings.AudioQualityIndexMax;
 
     // --- Command-enable state ---------------------------------------------------
     [ObservableProperty]
@@ -204,8 +184,15 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- TTS/sound routing (target of ACT's delegates, wired by the view) -------
-    public void SpeakText(string text) => discord.Speak(text, TtsVoice, TtsVolume, TtsSpeed);
-    public void SpeakSoundFile(string path, int volume) => discord.SpeakFile(path);
+    public void SpeakText(string text) {
+      Log("Playing TTS for text: " + text);
+      discord.Speak(text, TtsVoice, TtsVolume, TtsSpeed);
+    }
+
+    public void SpeakSoundFile(string path, int volume) {
+      Log("Playing Audio file: " + path);
+      discord.SpeakFile(path);
+    }
 
     // --- Lifecycle --------------------------------------------------------------
     public void Initialize() {
@@ -359,6 +346,16 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void OnUi(Action action) {
       if (sync != null) sync.Post(_ => action(), null);
       else action();
+    }
+
+    // Clamp into [min,max], assign, and on an actual change raise PropertyChanged for the
+    // property (plus an optional dependent computed label) and schedule a config push.
+    private bool SetClamped(ref int field, int value, int min, int max, bool push,
+                            string dependentLabel = null, [CallerMemberName] string propertyName = null) {
+      if (!SetProperty(ref field, Clamp(value, min, max), propertyName)) return false;
+      if (dependentLabel != null) OnPropertyChanged(dependentLabel);
+      if (push) ScheduleConfigPush();
+      return true;
     }
 
     private static int Clamp(int value, int min, int max) {

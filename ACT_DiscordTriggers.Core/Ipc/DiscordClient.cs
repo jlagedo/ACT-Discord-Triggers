@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
 using System.Speech.AudioFormat;
 using System.Speech.Synthesis;
 using System.Threading;
@@ -252,6 +253,17 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     new LeaveChannelRequest(), TimeSpan.FromSeconds(10));
             } catch (Exception ex) {
                 Log?.Invoke("LeaveChannelAsync failed: " + ex.Message);
+            }
+        }
+
+        // Names of the SAPI voices installed on this machine. Centralized here so all
+        // System.Speech usage (and its COM/disposal quirks) lives in one place.
+        public static string[] GetInstalledVoices() {
+            try {
+                using (var tts = new SpeechSynthesizer())
+                    return tts.GetInstalledVoices().Select(v => v.VoiceInfo.Name).ToArray();
+            } catch {
+                return new string[0];
             }
         }
 

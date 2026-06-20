@@ -50,17 +50,26 @@ namespace ACT_DiscordTriggers {
     public async Task OnPluginDeInitAsync() {
       ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
       ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
+      // Detach the static DiscordClient.BotReady/Log subscriptions synchronously, before
+      // the async bridge shutdown below, so a deferred continuation can't leave a stale
+      // handler bound to a disposed view across a plugin reload.
+      discordService?.Dispose();
       if (vm != null) {
         vm.JoinedChannel -= OnJoinedChannel;
         vm.LeftChannel -= OnLeftChannel;
-        vm.Save();
+        // Guard each teardown step independently: a save failure (e.g. a locked settings
+        // file) must not skip the bridge shutdown and orphan node.exe.
+        try {
+          vm.Save();
+        } catch (Exception ex) {
+          ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error saving Discord plugin settings on exit.");
+        }
         try {
           await vm.ShutdownAsync();
         } catch (Exception ex) {
           ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with DeInit of Discord Plugin.");
         }
       }
-      discordService?.Dispose();
     }
     #endregion
 

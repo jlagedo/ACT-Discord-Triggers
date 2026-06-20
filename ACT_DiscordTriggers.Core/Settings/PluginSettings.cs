@@ -21,6 +21,14 @@ namespace ACT_DiscordTriggers.Core.Settings {
     /// </summary>
     public const int CurrentSchemaVersion = 1;
 
+    // Valid ranges for the tunable integer settings — the single source of truth the
+    // ViewModel clamps loaded/entered values to (and that the WinForms-era sliders used).
+    public const int TtsVolumeMin = 0, TtsVolumeMax = 20;
+    public const int TtsSpeedMin = 0, TtsSpeedMax = 20;
+    public const int FxChanceMin = 0, FxChanceMax = 100;
+    public const int NormalizeTargetMin = 12, NormalizeTargetMax = 30;
+    public const int AudioQualityIndexMin = 0, AudioQualityIndexMax = 2; // 0=Low, 1=Medium, 2=High
+
     // [JsonPropertyName] sets the wire names the node bridge reads (this whole POCO
     // is sent verbatim as the SetConfig payload). XML attributes drive on-disk
     // persistence and are independent of the JSON wire shape.
