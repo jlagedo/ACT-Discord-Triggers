@@ -235,8 +235,8 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!--  ===== Sound =====  -->
-            <TabItem Header="Sound" Tag="{StaticResource Icon.Sound}">
+            <!--  ===== Text-to-Speech =====  -->
+            <TabItem Header="Text-to-Speech" Tag="{StaticResource Icon.Voice}">
                 <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="640">
 
@@ -277,7 +277,19 @@
                                 Value="{Binding TtsSpeed}" />
                         </HeaderedContentControl>
 
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="Effects &amp; leveling" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!--  ===== Sound =====  -->
+            <TabItem Header="Sound" Tag="{StaticResource Icon.Sound}">
+                <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="640">
+
+                        <TextBlock
+                            Margin="2,0,0,8"
+                            Style="{StaticResource SectionHeader}"
+                            Text="Effects &amp; leveling" />
 
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Wand}">
                             <HeaderedContentControl.Header>
