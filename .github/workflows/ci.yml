@@ -24,6 +24,11 @@ jobs:
     - name: Lint bridge (ESLint)
       working-directory: DiscordBridge-node
       run: npm run lint
+    - name: Check XAML formatting (XAML Styler)
+      shell: pwsh
+      run: |
+        dotnet tool restore
+        dotnet xstyler -p -r -d . -c Settings.XamlStyler
     - name: Test bridge (Node)
       working-directory: DiscordBridge-node
       run: npm test

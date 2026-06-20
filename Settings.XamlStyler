@@ -1,0 +1,19 @@
+{
+  "IndentSize": 2,
+  "AttributesTolerance": 2,
+  "KeepFirstAttributeOnSameLine": false,
+  "MaxAttributeCharactersPerLine": 0,
+  "MaxAttributesPerLine": 1,
+  "PutAttributeOrderRuleGroupsOnSeparateLines": false,
+  "AttributeIndentationStyle": "Spread",
+  "RemoveDesignTimeReferences": false,
+  "EnableAttributeReordering": true,
+  "ReorderVSM": "AsConfigured",
+  "ReorderGridChildren": false,
+  "ReorderCanvasChildren": false,
+  "ReorderSetters": "None",
+  "FormatMarkupExtension": true,
+  "NoNewLineMarkupExtensions": "x:Bind, Binding",
+  "ThicknessStyle": "None",
+  "CommentSpaces": 1
+}
