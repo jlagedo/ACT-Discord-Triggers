@@ -140,8 +140,8 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         }
 
         // Push the latest config to the bridge. Called from the UI whenever any
-        // setting changes. No-op when not connected — ConnectAsync re-pushes on
-        // connect anyway.
+        // setting changes. No-op until the bridge pipe exists — ConnectAsync
+        // pushes the config on connect anyway.
         public static async Task SetConfigAsync<TConfig>(TConfig config) {
             var pc = pipeClient;
             if (pc == null) return;

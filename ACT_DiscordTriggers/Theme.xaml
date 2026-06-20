@@ -369,12 +369,13 @@
     <Style x:Key="ScrollThumb" TargetType="Thumb">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Foreground" Value="#C2D0E0" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
                     <Border
                         Padding="0"
-                        Background="#C2D0E0"
+                        Background="{TemplateBinding Foreground}"
                         CornerRadius="4" />
                 </ControlTemplate>
             </Setter.Value>

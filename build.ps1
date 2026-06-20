@@ -2,11 +2,11 @@
 # drops into ACT's plugins directory.
 #
 # Steps:
-#   1. msbuild plugin (net48, Release)
-#   2. type-check + bundle bridge TS (esbuild)
-#   3. copy node.exe + stage native/WASM externals
-#   4. self-test bridge spawn (asserts BRIDGE_READY on stdout)
-#   5. assemble ./release/ from plugin DLL + bridge dist
+#   - dotnet build plugin (net48, Release)
+#   - type-check + bundle bridge TS (esbuild)
+#   - copy node.exe + stage native/WASM externals
+#   - self-test bridge spawn (asserts BRIDGE_READY on stdout)
+#   - assemble ./release/ from plugin DLL + bridge dist
 #
 # For bridge-only iteration, use the npm scripts in DiscordBridge-node/
 # (typecheck / bundle / test). Those stay independent of this script.

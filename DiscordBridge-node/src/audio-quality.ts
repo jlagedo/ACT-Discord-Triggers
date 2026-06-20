@@ -1,5 +1,6 @@
-// Opus encoder bitrate config. Pushed by the plugin via SetAudioQuality and
-// applied to the live encoder with prism's setBitrate (see discord-host.ts).
+// Opus encoder bitrate config. Pushed by the plugin inside SetConfig
+// (audioQualityIndex) and applied to the live encoder with prism's setBitrate
+// (see discord-host.ts).
 //
 // Only bitrate is exposed: it's the single Opus knob reachable through the
 // supported discord.js/prism public API (resource.encoder.setBitrate). Signal

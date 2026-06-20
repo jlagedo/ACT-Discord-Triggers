@@ -39,10 +39,11 @@ await esbuild.build({
     outfile: path.join(__dirname, 'dist/bundle.js'),
     banner: { js: banner },
     // Native modules and packages with __dirname / require.resolve runtime tricks
-    // can't be statically bundled. Mark them external so SEA loads them from
-    // node_modules at runtime via Node's normal require resolution.
+    // can't be statically bundled. Mark them external so node.exe loads them from
+    // node_modules at runtime via Node's normal require resolution (see the
+    // NODE_PATH banner above).
     external: [
-        '@snazzah/davey',          // native (.node)
+        '@snazzah/davey',          // DAVE JS wrapper (loads its native .node sibling)
         'opusscript',              // ships pure-JS but uses path tricks
         'libsodium-wrappers',
         'libsodium-wrappers-sumo',

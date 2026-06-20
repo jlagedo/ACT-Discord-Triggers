@@ -8,8 +8,8 @@ namespace ACT_DiscordTriggers.Core.Settings {
   /// <c>SettingsSerializer</c>). It is a plain POCO with no WinForms / ACT
   /// dependency so it can be unit-tested and, later, bound from a WPF UI.
   ///
-  /// Defaults below MUST match the control defaults in <c>DiscordTriggersView.InitializeComponent</c>
-  /// so a fresh install behaves exactly as it did before this refactor.
+  /// Defaults below are the single source of truth for a fresh install; the WPF
+  /// view binds to the ViewModel, which seeds its initial values from this POCO.
   /// </summary>
   [XmlRoot("DiscordTriggersSettings")]
   public class PluginSettings {

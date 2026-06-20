@@ -318,7 +318,8 @@ export class DiscordHost implements Host {
 
             // StreamType.Raw makes @discordjs/voice insert a prism Opus encoder
             // into the pipeline and expose it as resource.encoder. Hold it so we
-            // can tune the bitrate now and on later SetAudioQuality pushes.
+            // can tune the bitrate now and on later SetConfig pushes that
+            // change audioQualityIndex.
             this.encoder = resource.encoder;
             if (!this.encoder) log.warn('joinChannel: resource has no Opus encoder; bitrate control unavailable');
             this._applyBitrate();

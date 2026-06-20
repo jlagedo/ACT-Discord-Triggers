@@ -2,18 +2,16 @@
 // 'audio-decode') directly — it auto-detects the container (wav/mp3/ogg/flac/
 // opus/…) via `audio-type` and decodes to planar Float32 PCM, with each codec's
 // WASM inlined (no native bindings, nothing to stage). This module only adds
-// the (temporary) float->int16 conversion and a startup warm-up.
-//
-// The float->int16 conversion (`*_PHASE1_SHIM`) is deliberately temporary:
-// Phase 3 moves the pipeline to float32 end-to-end and deletes it, letting
-// decoded float ride straight into the mixer.
+// the float->int16 conversion (`*_PHASE1_SHIM`) and a startup warm-up. The
+// conversion exists because the rest of the pipeline (mixer, effects) works in
+// int16; it could be dropped if that ever moves to float32 end-to-end.
 import decode from 'audio-decode';
 
 import * as log from './file-log.js';
 
 function floatToInt16(f: number): number {
     // Match effects.ts: decode is int16/32768, so encode is round(f*32768),
-    // hard-clamped to the int16 range (no dither — that arrives in Phase 3a).
+    // hard-clamped to the int16 range (no dither).
     let s = Math.round(f * 32768);
     if (s > 32767) s = 32767;
     else if (s < -32768) s = -32768;

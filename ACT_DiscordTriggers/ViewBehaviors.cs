@@ -56,7 +56,7 @@ namespace ACT_DiscordTriggers {
 
   // Enables Ctrl+C on a ListBox/ListView of LogEntry rows to copy the selected messages to
   // the clipboard (one per line). Clipboard is a view concern, so it stays out of the Core
-  // ViewModel. Mirrors the old WinForms LogList_KeyUp.
+  // ViewModel.
   public static class LogListCopy {
     public static readonly DependencyProperty EnabledProperty =
       DependencyProperty.RegisterAttached(

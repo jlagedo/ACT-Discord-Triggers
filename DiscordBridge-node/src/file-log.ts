@@ -11,8 +11,8 @@ let writing = false;
 const MAX_BYTES = 5 * 1024 * 1024;
 
 function exeDir(): string {
-    // Launcher: process.execPath is node.exe sitting next to bundle.js / launcher exe.
-    // Dev (npm run): also node.exe — fall back to cwd of the main script in that case.
+    // process.execPath is always node.exe (prod ships node.exe next to bundle.js,
+    // dev runs via npm), so this falls back to the main script's cwd.
     try {
         const dir = path.dirname(process.execPath);
         if (process.execPath.toLowerCase().endsWith('node.exe')) {

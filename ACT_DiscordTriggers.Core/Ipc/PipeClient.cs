@@ -203,8 +203,8 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             if (first == FrameJsonMarker) {
                 DispatchJsonFrame(Encoding.UTF8.GetString(payload));
             } else {
-                // Bridge does not currently push binary frames. Log silently and drop;
-                // the JSON Log path is the ordinary diagnostic channel.
+                // Bridge never pushes binary frames; drop unexpected non-JSON
+                // frames. The JSON Log path is the ordinary diagnostic channel.
             }
         }
 
