@@ -9,15 +9,19 @@ namespace ACT_DiscordTriggers.Core.Ipc {
   public sealed class DiscordClientService : IDiscordService, IDisposable {
     private readonly DiscordClient.BotLoaded botReadyHandler;
     private readonly DiscordClient.BotMessage logHandler;
+    private readonly Action disconnectedHandler;
 
     public event Action BotReady;
     public event Action<string> Log;
+    public event Action Disconnected;
 
     public DiscordClientService() {
       botReadyHandler = () => BotReady?.Invoke();
       logHandler = msg => Log?.Invoke(msg);
+      disconnectedHandler = () => Disconnected?.Invoke();
       DiscordClient.BotReady += botReadyHandler;
       DiscordClient.Log += logHandler;
+      DiscordClient.Disconnected += disconnectedHandler;
     }
 
     public Task ConnectAsync(PluginSettings config) => DiscordClient.ConnectAsync(config);
@@ -37,6 +41,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     public void Dispose() {
       DiscordClient.BotReady -= botReadyHandler;
       DiscordClient.Log -= logHandler;
+      DiscordClient.Disconnected -= disconnectedHandler;
     }
   }
 }

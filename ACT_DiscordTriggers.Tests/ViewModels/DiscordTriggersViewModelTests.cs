@@ -188,6 +188,80 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public void BotReady_MarksConnected_AndTogglesCommandAvailability() {
+      var fake = new FakeDiscordService { ServersToReturn = new[] { "S1" } };
+      var vm = NewVm(fake, TempStore());
+
+      Assert.False(vm.IsConnected);
+      Assert.True(vm.CanConnect);
+      Assert.True(vm.ConnectCommand.CanExecute(null));
+      Assert.False(vm.DisconnectCommand.CanExecute(null));
+
+      fake.RaiseBotReady();
+
+      Assert.True(vm.IsConnected);
+      Assert.False(vm.CanConnect);
+      Assert.False(vm.ConnectCommand.CanExecute(null));
+      Assert.True(vm.DisconnectCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Disconnect_TearsDownBridge_ClearsChannels_AndRevertsState() {
+      var fake = new FakeDiscordService {
+        ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" },
+      };
+      var vm = NewVm(fake, TempStore());
+      fake.RaiseBotReady();
+      Assert.NotEmpty(vm.Servers);
+
+      await vm.DisconnectCommand.ExecuteAsync(null);
+
+      Assert.Equal(1, fake.DeinitCallCount);
+      Assert.False(vm.IsConnected);
+      Assert.True(vm.CanConnect);
+      Assert.False(vm.CanJoin);
+      Assert.False(vm.CanLeave);
+      Assert.Empty(vm.Servers);
+      Assert.Empty(vm.Channels);
+      Assert.Null(vm.SelectedServer);
+      Assert.Null(vm.SelectedChannel);
+    }
+
+    [Fact]
+    public async Task Disconnect_WhileJoined_RaisesLeftChannel() {
+      var fake = new FakeDiscordService {
+        ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" },
+      };
+      var vm = NewVm(fake, TempStore());
+      fake.RaiseBotReady();
+      await vm.JoinCommand.ExecuteAsync(null);
+      bool left = false;
+      vm.LeftChannel += () => left = true;
+
+      await vm.DisconnectCommand.ExecuteAsync(null);
+
+      Assert.True(left);
+    }
+
+    [Fact]
+    public void UnsolicitedDisconnect_RevertsState() {
+      var fake = new FakeDiscordService {
+        ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" },
+      };
+      var vm = NewVm(fake, TempStore());
+      fake.RaiseBotReady();
+      Assert.True(vm.IsConnected);
+
+      // Bridge died / pipe broke — not a user action.
+      fake.RaiseDisconnected();
+
+      Assert.False(vm.IsConnected);
+      Assert.True(vm.CanConnect);
+      Assert.Empty(vm.Servers);
+      Assert.Empty(vm.Channels);
+    }
+
+    [Fact]
     public void SpeakText_ForwardsCurrentVoiceVolumeSpeed() {
       var fake = new FakeDiscordService();
       var vm = NewVm(fake, TempStore());
@@ -210,6 +284,7 @@ namespace ACT_DiscordTriggers.Tests {
     private sealed class FakeDiscordService : IDiscordService {
       public event Action BotReady;
       public event Action<string> Log;
+      public event Action Disconnected;
 
       public bool IsConnectedResult;
       public bool JoinResult = true;
@@ -222,10 +297,12 @@ namespace ACT_DiscordTriggers.Tests {
       public string JoinedChannel;
       public int GetServersCallCount;
       public bool LeaveCalled;
+      public int DeinitCallCount;
       public readonly List<(string text, string voice, int vol, int speed)> SpeakCalls =
         new List<(string, string, int, int)>();
 
       public void RaiseBotReady() => BotReady?.Invoke();
+      public void RaiseDisconnected() => Disconnected?.Invoke();
 
       public Task ConnectAsync(PluginSettings config) { ConnectCalledWith = config; return Task.CompletedTask; }
       public Task SetConfigAsync(PluginSettings config) => Task.CompletedTask;
@@ -236,7 +313,7 @@ namespace ACT_DiscordTriggers.Tests {
         JoinedServer = server; JoinedChannel = channel; return Task.FromResult(JoinResult);
       }
       public Task LeaveChannelAsync() { LeaveCalled = true; return Task.CompletedTask; }
-      public Task DeinitAsync() => Task.CompletedTask;
+      public Task DeinitAsync() { DeinitCallCount++; return Task.CompletedTask; }
       public void Speak(string text, string voice, int vol, int speed) => SpeakCalls.Add((text, voice, vol, speed));
       public void SpeakFile(string path) { }
       public string[] GetInstalledVoices() => VoicesToReturn;

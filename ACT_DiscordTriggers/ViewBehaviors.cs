@@ -16,11 +16,16 @@ namespace ACT_DiscordTriggers {
   // bindable attached string. Lets the XAML keep the token masked while two-way binding it
   // to the ViewModel's BotToken with no view code-behind.
   public static class PasswordBoxBinding {
+    // Default is null, not "": OnBoundPasswordChanged (which subscribes the
+    // PasswordChanged handler) only runs when the DP value actually changes. The
+    // bound BotToken starts as "", so a "" default would mean the binding's first
+    // transfer ("" -> "") is a no-op, the callback never fires, and typing is never
+    // captured. null -> "" is a real change, so the handler always gets wired up.
     public static readonly DependencyProperty BoundPasswordProperty =
       DependencyProperty.RegisterAttached(
         "BoundPassword", typeof(string), typeof(PasswordBoxBinding),
         new FrameworkPropertyMetadata(
-          "", FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnBoundPasswordChanged));
+          null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnBoundPasswordChanged));
 
     // Re-entrancy guard: HandlePasswordChanged writes BoundPassword, which would otherwise
     // re-enter OnBoundPasswordChanged and reset PasswordBox.Password (moving the caret).

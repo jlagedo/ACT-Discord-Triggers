@@ -27,6 +27,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         public delegate void BotLoaded();
         public static event BotLoaded BotReady;
 
+        // Fired when the bridge connection is gone (CleanupAfterPipeBroken): bridge
+        // process exit, broken pipe, or a failed login teardown. The UI uses this to
+        // drop back to the disconnected state.
+        public static event Action Disconnected;
+
         public delegate void BotMessage(string message);
         public static event BotMessage Log;
 
@@ -66,7 +71,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
 
                 NamedPipeClientStream pipe;
                 try {
-                    pipe = await localBridge.StartAndConnectAsync(bridgeDir);
+                    pipe = await localBridge.StartAndConnectAsync(bridgeDir).ConfigureAwait(false);
                 } catch (Exception ex) {
                     Log?.Invoke("Failed to start bridge: " + ex.Message);
                     try { localBridge.Dispose(); } catch { }
@@ -92,7 +97,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 try {
                     hello = await localClient.SendAsync<BridgeResponse<HelloData>>(
                         new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
-                        TimeSpan.FromSeconds(10));
+                        TimeSpan.FromSeconds(10)).ConfigureAwait(false);
                 } catch (Exception ex) {
                     Log?.Invoke("Bridge handshake error: " + ex.Message);
                     CleanupAfterPipeBroken();
@@ -108,19 +113,24 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 try {
                     await localClient.SendAsync<BridgeResponse>(
                         new SetConfigRequest<TConfig> { Config = config },
-                        TimeSpan.FromSeconds(5));
+                        TimeSpan.FromSeconds(5)).ConfigureAwait(false);
                 } catch (Exception ex) {
                     Log?.Invoke("SetConfig failed: " + ex.Message);
                 }
 
                 try {
                     var connect = await localClient.SendAsync<BridgeResponse>(
-                        new ConnectRequest(), TimeSpan.FromSeconds(20));
+                        new ConnectRequest(), TimeSpan.FromSeconds(20)).ConfigureAwait(false);
                     if (!connect.Ok) {
+                        // Login failed (e.g. bad token). Tear the bridge down so the
+                        // user can retry with a new token — otherwise the stale
+                        // pipeClient makes the next Connect bail with "Already connected."
                         Log?.Invoke("Discord login failed: " + connect.Error);
+                        CleanupAfterPipeBroken();
                     }
                 } catch (Exception ex) {
                     Log?.Invoke("Discord login error: " + ex.Message);
+                    CleanupAfterPipeBroken();
                 }
             } catch (Exception ex) {
                 Log?.Invoke("Connect error: " + ex.Message);
@@ -138,7 +148,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             try {
                 await pc.SendAsync<BridgeResponse>(
                     new SetConfigRequest<TConfig> { Config = config },
-                    TimeSpan.FromSeconds(5));
+                    TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             } catch (Exception ex) {
                 Log?.Invoke("SetConfig failed: " + ex.Message);
             }
@@ -159,11 +169,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 if (localClient != null) {
                     try {
                         await localClient.SendAsync<BridgeResponse>(
-                            new ShutdownRequest(), TimeSpan.FromSeconds(3));
+                            new ShutdownRequest(), TimeSpan.FromSeconds(3)).ConfigureAwait(false);
                     } catch { }
                 }
                 if (localBridge != null) {
-                    await localBridge.WaitForExitAsync(TimeSpan.FromSeconds(3));
+                    await localBridge.WaitForExitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
                     if (!localBridge.HasExited) {
                         localBridge.Kill();
                     }
@@ -185,6 +195,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             }
             try { localClient?.Dispose(); } catch { }
             try { localBridge?.Dispose(); } catch { }
+            // Only signal a transition: if there was nothing to tear down this was a
+            // no-op (e.g. a failed login that never connected), so don't fire.
+            if (localClient != null || localBridge != null) {
+                try { Disconnected?.Invoke(); } catch { }
+            }
         }
 
         public static async Task<bool> IsConnectedAsync() {
@@ -192,7 +207,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             if (pc == null) return false;
             try {
                 var resp = await pc.SendAsync<BridgeResponse<ConnectedData>>(
-                    new IsConnectedRequest(), TimeSpan.FromSeconds(3));
+                    new IsConnectedRequest(), TimeSpan.FromSeconds(3)).ConfigureAwait(false);
                 return resp.Data?.Connected ?? false;
             } catch {
                 return false;
@@ -204,7 +219,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             if (pc == null) return new string[0];
             try {
                 var resp = await pc.SendAsync<BridgeResponse<ServersData>>(
-                    new GetServersRequest());
+                    new GetServersRequest()).ConfigureAwait(false);
                 return resp.Data?.Servers ?? new string[0];
             } catch (Exception ex) {
                 Log?.Invoke("GetServersAsync failed: " + ex.Message);
@@ -217,7 +232,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             if (pc == null) return new string[0];
             try {
                 var resp = await pc.SendAsync<BridgeResponse<ChannelsData>>(
-                    new GetChannelsRequest { Server = server });
+                    new GetChannelsRequest { Server = server }).ConfigureAwait(false);
                 return resp.Data?.Channels ?? new string[0];
             } catch (Exception ex) {
                 Log?.Invoke("GetChannelsAsync failed: " + ex.Message);
@@ -234,7 +249,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             try {
                 var resp = await pc.SendAsync<BridgeResponse>(
                     new JoinChannelRequest { Server = server, Channel = channel },
-                    TimeSpan.FromSeconds(15));
+                    TimeSpan.FromSeconds(15)).ConfigureAwait(false);
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
                     Log?.Invoke("JoinChannel failed: " + resp.Error);
                 }
@@ -250,7 +265,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             if (pc == null) return;
             try {
                 await pc.SendAsync<BridgeResponse>(
-                    new LeaveChannelRequest(), TimeSpan.FromSeconds(10));
+                    new LeaveChannelRequest(), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
             } catch (Exception ex) {
                 Log?.Invoke("LeaveChannelAsync failed: " + ex.Message);
             }
@@ -313,7 +328,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             try {
                 var resp = await pc.SendAsync<BridgeResponse>(
                     new SpeakFileRequest { Path = path },
-                    TimeSpan.FromSeconds(30));
+                    TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 sw.Stop();
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
                     Log?.Invoke("Bridge file rejected: " + resp.Error);

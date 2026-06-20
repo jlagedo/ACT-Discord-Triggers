@@ -69,14 +69,29 @@ namespace ACT_DiscordTriggers {
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public async void DeInitPlugin() {
-      if (view != null)
-        await view.OnPluginDeInitAsync();
-      // Flush + regenerate the unified diagnostics file one last time so it reflects
-      // this whole session before ACT tears the plugin down.
-      try { DiagnosticsLog.Shutdown(); } catch { }
-      AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve;
-      if (lblStatus != null)
-        lblStatus.Text = "Plugin Exited";
+      // async void: ACT can't await this, so any escaping exception surfaces as an
+      // unhandled exception on the UI sync-context — a crash dialog that flashes as
+      // ACT is already exiting and is impossible to read. Capture everything here and
+      // persist it to the diagnostics file (which outlives the process) instead.
+      try {
+        if (view != null)
+          // ConfigureAwait(false): ACT calls this async-void method on the UI thread
+          // and does not await it, so it returns at the first suspension and ACT
+          // proceeds to destroy the window handle. Marshaling the continuation back to
+          // that (now-dead) WinForms context would throw in Control.BeginInvoke. The
+          // teardown below this is handle-independent (and the lblStatus write is
+          // already guarded), so resume off the UI thread.
+          await view.OnPluginDeInitAsync().ConfigureAwait(false);
+      } catch (Exception ex) {
+        try { DiagnosticsLog.Append("DeInit error: " + ex); DiagnosticsLog.Flush(); } catch { }
+        try { ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error de-initializing Discord plugin."); } catch { }
+      } finally {
+        // Flush + regenerate the unified diagnostics file one last time so it reflects
+        // this whole session before ACT tears the plugin down.
+        try { DiagnosticsLog.Shutdown(); } catch { }
+        try { AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomain_AssemblyResolve; } catch { }
+        try { if (lblStatus != null) lblStatus.Text = "Plugin Exited"; } catch { }
+      }
     }
 
     internal static string PluginVersion() {

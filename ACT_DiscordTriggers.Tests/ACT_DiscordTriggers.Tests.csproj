@@ -6,6 +6,9 @@
     <Nullable>disable</Nullable>
     <!-- xunit v3 test projects are executables, run via the VSTest adapter below. -->
     <OutputType>Exe</OutputType>
+    <!-- Pulls in PresentationFramework/Core etc. so the view-layer WPF helpers
+         (PasswordBoxBinding) can be exercised against a real PasswordBox. -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <!-- xunit v3 supports net472+; net48 satisfies it. Microsoft.NET.Test.Sdk +
@@ -24,5 +27,12 @@
          Core's InternalsVisibleTo grants access to the internal members the tests use
          (DiagnosticsLog.MergeInterleave, the internal PipeClient/BridgeProcess types). -->
     <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
+    <!-- The view-layer WPF helpers live in the entry assembly (Costura/Fody + ACT
+         reference), which is heavy to reference from tests. Compile the source in
+         directly so PasswordBoxBinding can be unit-tested against a real PasswordBox
+         without dragging in Costura or the ACT dependency. -->
+    <Compile Include="..\ACT_DiscordTriggers\ViewBehaviors.cs">
+      <Link>View\ViewBehaviors.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>

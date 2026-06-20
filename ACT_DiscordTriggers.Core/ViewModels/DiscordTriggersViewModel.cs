@@ -46,6 +46,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       this.sync = SynchronizationContext.Current;
       this.discord.BotReady += OnBotReady;
       this.discord.Log += OnLog;
+      this.discord.Disconnected += OnDisconnected;
     }
 
     // --- Settings-backed properties ---------------------------------------------
@@ -106,6 +107,19 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public bool ShowHighQualityWarning => AudioQualityIndex == PluginSettings.AudioQualityIndexMax;
 
     // --- Command-enable state ---------------------------------------------------
+    // True once the bot has signalled BotReady; flipped back on disconnect (explicit
+    // or a dropped bridge). Drives the Connect/Disconnect button swap and gates which
+    // of the two commands can run.
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DisconnectCommand))]
+    [NotifyPropertyChangedFor(nameof(CanConnect))]
+    private bool isConnected;
+
+    // CanExecute can't express negation directly, so expose the inverse for the
+    // Connect command (and any view that wants it).
+    public bool CanConnect => !IsConnected;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(JoinCommand))]
     private bool canJoin;
@@ -124,17 +138,50 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- Commands ---------------------------------------------------------------
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanConnect))]
     private async Task ConnectAsync() {
       try {
         if (await discord.IsConnectedAsync()) {
           Log("Already connected to Discord.");
           return;
         }
+        Log("Connecting to Discord...");
         await discord.ConnectAsync(ToSettings());
       } catch (Exception ex) {
         Log("Connect failed: " + ex.Message);
       }
+    }
+
+    [RelayCommand(CanExecute = nameof(IsConnected))]
+    private async Task DisconnectAsync() {
+      Log("Disconnecting from Discord...");
+      // Drop the UI to a disconnected state up front so the button swaps back and the
+      // stale server/channel lists clear immediately, regardless of teardown timing.
+      ResetConnectionState();
+      try {
+        await discord.DeinitAsync();
+      } catch (Exception ex) {
+        Log("Disconnect error: " + ex.Message);
+      }
+    }
+
+    // Revert all connection-derived UI state. Shared by the explicit Disconnect command
+    // and the unsolicited Disconnected event (dropped bridge). Marshalled to the UI
+    // thread: the event path arrives on a background thread, and clearing the
+    // ObservableCollections / restoring ACT delegates must happen on the UI thread.
+    private void ResetConnectionState() {
+      OnUi(() => {
+        bool wasJoined = CanLeave;
+        IsConnected = false;
+        CanJoin = false;
+        CanLeave = false;
+        Servers.Clear();
+        Channels.Clear();
+        SelectedServer = null;
+        SelectedChannel = null;
+        // If we were in a voice channel, hand ACT's TTS/sound delegates back.
+        if (wasJoined) LeftChannel?.Invoke();
+      });
     }
 
     [RelayCommand(CanExecute = nameof(CanJoin))]
@@ -142,6 +189,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       CanJoin = false;
       if (await discord.JoinChannelAsync(SelectedServer, SelectedChannel)) {
         CanLeave = true;
+        Log("Joined channel " + SelectedChannel + " on " + SelectedServer + ".");
         JoinedChannel?.Invoke();
       } else {
         Log("Unable to join channel. Does your bot have permission to join this channel?");
@@ -211,12 +259,18 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public async Task ShutdownAsync() {
       discord.BotReady -= OnBotReady;
       discord.Log -= OnLog;
+      discord.Disconnected -= OnDisconnected;
       // Stop any in-flight debounce so a pending SetConfig can't fire at the bridge
       // after we tear it down; suppressPush blocks a late property change (e.g. a
       // binding write-back during teardown) from scheduling a new one.
       suppressPush = true;
       CancelPendingPushes();
-      await discord.DeinitAsync();
+      // ConfigureAwait(false): teardown runs from the UI thread via an async-void
+      // DeInitPlugin that ACT doesn't await, so by the time the bridge finishes
+      // shutting down the host window handle may be gone. Resuming on the captured
+      // WinForms context would marshal via Control.BeginInvoke and throw. Nothing
+      // after this needs the UI thread.
+      await discord.DeinitAsync().ConfigureAwait(false);
     }
 
     // --- Logging ----------------------------------------------------------------
@@ -232,10 +286,16 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void OnBotReady() {
       // Bridge notifications arrive on a thread-pool thread; marshal to the UI.
       OnUi(() => {
+        IsConnected = true;
         CanJoin = true;
         _ = PopulateServersAsync();
       });
     }
+
+    // The bridge connection dropped on its own (process exit / broken pipe). Revert
+    // the UI so the user can reconnect. (The explicit Disconnect command resets state
+    // itself, so this is the unsolicited path; resetting twice is harmless.)
+    private void OnDisconnected() => ResetConnectionState();
 
     private async Task PopulateServersAsync() {
       try {
@@ -336,10 +396,16 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     private async Task DebouncedPush(int delayMs, CancellationToken token) {
-      try { await Task.Delay(delayMs, token); } catch (OperationCanceledException) { return; }
+      // ConfigureAwait(false): this runs fire-and-forget off a UI-thread property
+      // change, so the awaits would otherwise capture ACT's WinForms
+      // SynchronizationContext and marshal the continuation back via Control.BeginInvoke.
+      // The push does no UI work, and at shutdown the host handle may be gone — that
+      // BeginInvoke throws on the thread pool as an unhandled exception. Resuming off
+      // the pool avoids both the needless hop and the teardown crash.
+      try { await Task.Delay(delayMs, token).ConfigureAwait(false); } catch (OperationCanceledException) { return; }
       if (token.IsCancellationRequested) return;
       // No-op while disconnected; ConnectAsync re-pushes the whole config on connect.
-      await discord.SetConfigAsync(ToSettings());
+      await discord.SetConfigAsync(ToSettings()).ConfigureAwait(false);
     }
 
     // --- Helpers ----------------------------------------------------------------

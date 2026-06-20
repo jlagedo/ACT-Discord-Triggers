@@ -68,11 +68,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 var lineTask = process.StandardOutput.ReadLineAsync();
                 var remaining = deadline - DateTime.UtcNow;
                 if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
-                var done = await Task.WhenAny(lineTask, Task.Delay(remaining));
+                var done = await Task.WhenAny(lineTask, Task.Delay(remaining)).ConfigureAwait(false);
                 if (done != lineTask) {
                     throw new TimeoutException("Bridge did not signal ready within " + to.TotalSeconds + "s.");
                 }
-                string line = await lineTask;
+                string line = await lineTask.ConfigureAwait(false);
                 if (line == null) {
                     int code = -1;
                     try { code = process.ExitCode; } catch { }
@@ -80,7 +80,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 }
                 if (line.StartsWith("BRIDGE_READY", StringComparison.Ordinal)) {
                     var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-                    await client.ConnectAsync(5000);
+                    await client.ConnectAsync(5000).ConfigureAwait(false);
                     return client;
                 }
                 try { OnStderr?.Invoke(line); } catch { }
@@ -90,7 +90,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
 
         public async Task WaitForExitAsync(TimeSpan timeout) {
             if (process == null || process.HasExited) return;
-            await Task.Run(() => process.WaitForExit((int)timeout.TotalMilliseconds));
+            await Task.Run(() => process.WaitForExit((int)timeout.TotalMilliseconds)).ConfigureAwait(false);
         }
 
         public bool HasExited => process == null || process.HasExited;

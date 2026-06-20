@@ -8,37 +8,85 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     d:DesignHeight="730"
     d:DesignWidth="760"
+    Background="#EFF4FA"
     FontFamily="Segoe UI"
     FontSize="13"
+    Foreground="#1C2A3A"
     mc:Ignorable="d">
     <UserControl.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVis" />
-        <Thickness x:Key="FieldMargin">0,4,0,10</Thickness>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/ACT_DiscordTriggers;component/Theme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+            <!--
+                Connection status indicator: a soft halo behind a solid dot, plus a label.
+                All three flip on the VM's IsConnected (red/"Disconnected" -> green/"Connected").
+            -->
+            <Style x:Key="StatusHalo" TargetType="Ellipse">
+                <Setter Property="Width" Value="16" />
+                <Setter Property="Height" Value="16" />
+                <Setter Property="Opacity" Value="0.20" />
+                <Setter Property="Fill" Value="{StaticResource StatusOffline}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                        <Setter Property="Fill" Value="{StaticResource StatusOnline}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="StatusDot" TargetType="Ellipse">
+                <Setter Property="Width" Value="9" />
+                <Setter Property="Height" Value="9" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Fill" Value="{StaticResource StatusOffline}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                        <Setter Property="Fill" Value="{StaticResource StatusOnline}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style x:Key="StatusText" TargetType="TextBlock">
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="9,0,0,0" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                <Setter Property="Text" Value="Disconnected" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                        <Setter Property="Text" Value="Connected" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </ResourceDictionary>
     </UserControl.Resources>
 
-    <DockPanel LastChildFill="True">
+    <DockPanel Margin="14" LastChildFill="True">
 
-        <!--  Debug log: docked at the bottom across the full width.  -->
+        <!--  Diagnostics log: docked at the bottom across the full width.  -->
         <DockPanel
-            Height="210"
-            Margin="6"
+            Height="206"
+            Margin="0,14,0,0"
             DockPanel.Dock="Bottom">
             <TextBlock
-                Margin="2,0,0,4"
                 DockPanel.Dock="Top"
-                Text="Debug Log" />
+                Style="{StaticResource Eyebrow}"
+                Text="DIAGNOSTICS" />
             <ListView
                 local:LogListCopy.Enabled="True"
                 ItemsSource="{Binding LogEntries}"
-                SelectionMode="Extended">
+                SelectionMode="Extended"
+                Style="{StaticResource LogList}">
                 <ListView.View>
-                    <GridView>
+                    <GridView ColumnHeaderContainerStyle="{StaticResource LogColumnHeader}">
                         <GridViewColumn
-                            Width="160"
+                            Width="170"
                             DisplayMemberBinding="{Binding Timestamp, StringFormat='{}{0:G}'}"
                             Header="Timestamp" />
                         <GridViewColumn
-                            Width="540"
+                            Width="560"
                             DisplayMemberBinding="{Binding Message}"
                             Header="Message" />
                     </GridView>
@@ -47,72 +95,107 @@
         </DockPanel>
 
         <!--  Left-rail navigation (General / Sound / Information) over the remaining area.  -->
-        <TabControl Margin="6,6,6,0" TabStripPlacement="Left">
+        <TabControl Style="{StaticResource NavTabControl}" TabStripPlacement="Left">
 
             <!--  ===== General =====  -->
             <TabItem Header="General">
-                <ScrollViewer Padding="10" VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <GroupBox
-                            Margin="0,0,0,10"
-                            Padding="10"
-                            Header="Discord Connection">
+                <ScrollViewer Padding="24,22" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+                        <GroupBox Header="DISCORD CONNECTION">
                             <StackPanel>
-                                <TextBlock Text="Discord Bot Token" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Discord bot token" />
                                 <PasswordBox
-                                    MaxWidth="340"
-                                    Margin="{StaticResource FieldMargin}"
+                                    MaxWidth="360"
+                                    Margin="0,0,0,14"
                                     HorizontalAlignment="Left"
                                     local:PasswordBoxBinding.BoundPassword="{Binding BotToken, UpdateSourceTrigger=PropertyChanged}" />
-                                <StackPanel Margin="0,0,0,10" Orientation="Horizontal">
+                                <StackPanel Margin="0,0,0,14" Orientation="Horizontal">
+                                    <!--  Connect / Disconnect occupy the same slot; IsConnected toggles which is shown.  -->
                                     <Button
-                                        Width="140"
-                                        Height="32"
+                                        MinWidth="132"
                                         Command="{Binding ConnectCommand}"
-                                        Content="Connect" />
-                                    <CheckBox
-                                        Margin="16,0,0,0"
+                                        Content="Connect">
+                                        <Button.Style>
+                                            <Style BasedOn="{StaticResource PrimaryButton}" TargetType="Button">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <Button
+                                        MinWidth="132"
+                                        Command="{Binding DisconnectCommand}"
+                                        Content="Disconnect">
+                                        <Button.Style>
+                                            <Style BasedOn="{StaticResource PrimaryButton}" TargetType="Button">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <!--  Live connection status: glowing dot + label, driven by IsConnected.  -->
+                                    <StackPanel
+                                        Margin="20,0,0,0"
                                         VerticalAlignment="Center"
-                                        Content="Auto Connect"
+                                        Orientation="Horizontal">
+                                        <Grid
+                                            Width="16"
+                                            Height="16"
+                                            VerticalAlignment="Center">
+                                            <Ellipse Style="{StaticResource StatusHalo}" />
+                                            <Ellipse Style="{StaticResource StatusDot}" />
+                                        </Grid>
+                                        <TextBlock Style="{StaticResource StatusText}" />
+                                    </StackPanel>
+                                    <CheckBox
+                                        Margin="18,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Content="Connect automatically"
                                         IsChecked="{Binding AutoConnect}" />
                                 </StackPanel>
-                                <TextBlock Text="Bot Status" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Bot status message" />
                                 <TextBox
-                                    MaxWidth="340"
-                                    Margin="{StaticResource FieldMargin}"
+                                    MaxWidth="360"
                                     HorizontalAlignment="Left"
                                     Text="{Binding BotStatus, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </GroupBox>
 
-                        <GroupBox Padding="10" Header="Voice Channel">
+                        <GroupBox Margin="0,0,0,0" Header="VOICE CHANNEL">
                             <StackPanel>
-                                <TextBlock Text="Server" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Server" />
                                 <ComboBox
-                                    MaxWidth="340"
-                                    Margin="{StaticResource FieldMargin}"
+                                    MaxWidth="360"
+                                    Margin="0,0,0,14"
                                     HorizontalAlignment="Left"
                                     ItemsSource="{Binding Servers}"
                                     SelectedItem="{Binding SelectedServer}" />
-                                <TextBlock Text="Channel" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Channel" />
                                 <ComboBox
-                                    MaxWidth="340"
-                                    Margin="{StaticResource FieldMargin}"
+                                    MaxWidth="360"
+                                    Margin="0,0,0,16"
                                     HorizontalAlignment="Left"
                                     ItemsSource="{Binding Channels}"
                                     SelectedItem="{Binding SelectedChannel}" />
                                 <StackPanel Orientation="Horizontal">
                                     <Button
-                                        Width="140"
-                                        Height="32"
+                                        MinWidth="132"
                                         Command="{Binding JoinCommand}"
-                                        Content="Join Channel" />
+                                        Content="Join channel"
+                                        Style="{StaticResource PrimaryButton}" />
                                     <Button
-                                        Width="140"
-                                        Height="32"
+                                        MinWidth="132"
                                         Margin="12,0,0,0"
                                         Command="{Binding LeaveCommand}"
-                                        Content="Leave Channel" />
+                                        Content="Leave channel" />
                                 </StackPanel>
                             </StackPanel>
                         </GroupBox>
@@ -122,32 +205,28 @@
 
             <!--  ===== Sound =====  -->
             <TabItem Header="Sound">
-                <ScrollViewer Padding="10" VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <GroupBox
-                            Margin="0,0,0,10"
-                            Padding="10"
-                            Header="Text-to-Speech">
+                <ScrollViewer Padding="24,22" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="560" HorizontalAlignment="Left">
+                        <GroupBox Header="TEXT-TO-SPEECH">
                             <StackPanel>
-                                <TextBlock Text="TTS Voice" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Voice" />
                                 <ComboBox
-                                    MaxWidth="340"
-                                    Margin="{StaticResource FieldMargin}"
+                                    MaxWidth="360"
+                                    Margin="0,0,0,16"
                                     HorizontalAlignment="Left"
                                     ItemsSource="{Binding Voices}"
                                     SelectedItem="{Binding TtsVoice}" />
-                                <TextBlock Text="TTS Volume" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Volume" />
                                 <Slider
-                                    Width="320"
-                                    Margin="{StaticResource FieldMargin}"
+                                    Width="340"
+                                    Margin="0,0,0,16"
                                     HorizontalAlignment="Left"
                                     Maximum="20"
                                     Minimum="0"
                                     Value="{Binding TtsVolume}" />
-                                <TextBlock Text="TTS Speed" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Speed" />
                                 <Slider
-                                    Width="320"
-                                    Margin="{StaticResource FieldMargin}"
+                                    Width="340"
                                     HorizontalAlignment="Left"
                                     Maximum="20"
                                     Minimum="0"
@@ -155,47 +234,47 @@
                             </StackPanel>
                         </GroupBox>
 
-                        <GroupBox Padding="10" Header="Effects &amp; Leveling">
+                        <GroupBox Margin="0,0,0,0" Header="EFFECTS &amp; LEVELING">
                             <StackPanel>
                                 <CheckBox
-                                    Margin="0,0,0,8"
-                                    Content="Random Sound FX"
+                                    Margin="0,0,0,10"
+                                    Content="Random sound effects"
                                     IsChecked="{Binding RandomFx}" />
-                                <TextBlock Text="{Binding FxChanceLabel}" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding FxChanceLabel}" />
                                 <Slider
-                                    Width="320"
-                                    Margin="{StaticResource FieldMargin}"
+                                    Width="340"
+                                    Margin="0,0,0,18"
                                     HorizontalAlignment="Left"
                                     Maximum="100"
                                     Minimum="0"
                                     Value="{Binding FxChance}" />
                                 <CheckBox
-                                    Margin="0,0,0,8"
-                                    Content="Auto-level Volume"
+                                    Margin="0,0,0,10"
+                                    Content="Auto-level volume"
                                     IsChecked="{Binding Normalize}" />
-                                <TextBlock Text="{Binding NormalizeTargetLabel}" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding NormalizeTargetLabel}" />
                                 <Slider
-                                    Width="320"
-                                    Margin="{StaticResource FieldMargin}"
+                                    Width="340"
+                                    Margin="0,0,0,16"
                                     HorizontalAlignment="Left"
                                     Maximum="30"
                                     Minimum="12"
                                     Value="{Binding NormalizeTarget}" />
-                                <TextBlock Text="Audio Quality" />
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Audio quality" />
                                 <ComboBox
-                                    Width="200"
-                                    Margin="{StaticResource FieldMargin}"
+                                    Width="220"
                                     HorizontalAlignment="Left"
                                     SelectedIndex="{Binding AudioQualityIndex}">
                                     <ComboBoxItem>Low (48 kbps)</ComboBoxItem>
                                     <ComboBoxItem>Medium (96 kbps)</ComboBoxItem>
                                     <ComboBoxItem>High (128 kbps)</ComboBoxItem>
                                 </ComboBox>
-                                <TextBlock
-                                    Foreground="Firebrick"
-                                    Text="High needs a Discord channel that supports 128 kbps (boosted server)."
-                                    TextWrapping="Wrap"
-                                    Visibility="{Binding ShowHighQualityWarning, Converter={StaticResource BoolToVis}}" />
+                                <Border Style="{StaticResource InfoCallout}" Visibility="{Binding ShowHighQualityWarning, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock
+                                        Foreground="{StaticResource TextPrimary}"
+                                        Text="High quality needs a Discord channel that supports 128 kbps (a boosted server)."
+                                        TextWrapping="Wrap" />
+                                </Border>
                             </StackPanel>
                         </GroupBox>
                     </StackPanel>
@@ -204,35 +283,40 @@
 
             <!--  ===== Information =====  -->
             <TabItem Header="Information">
-                <ScrollViewer Padding="10" VerticalScrollBarVisibility="Auto">
-                    <StackPanel MaxWidth="560" HorizontalAlignment="Center">
+                <ScrollViewer Padding="24,22" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="520" HorizontalAlignment="Center">
                         <Image
                             Width="112"
                             Height="112"
-                            Margin="0,8,0,6"
+                            Margin="0,8,0,10"
                             HorizontalAlignment="Center"
                             Source="pack://application:,,,/ACT_DiscordTriggers;component/logo.png" />
                         <TextBlock
                             HorizontalAlignment="Center"
-                            FontSize="20"
+                            FontSize="21"
                             FontWeight="Bold"
+                            Foreground="{StaticResource TextPrimary}"
                             Text="ACT Discord Triggers" />
                         <TextBlock
-                            Margin="0,0,0,8"
+                            Margin="0,2,0,10"
                             HorizontalAlignment="Center"
-                            Foreground="Gray"
+                            Foreground="{StaticResource TextMuted}"
                             Text="{x:Static local:DiscordTriggersPlugin.VersionDisplay}" />
                         <TextBlock
-                            Margin="0,0,0,12"
+                            Margin="0,0,0,4"
+                            Foreground="{StaticResource TextSecondary}"
                             Text="Play your ACT triggers — text-to-speech and sound effects — through a Discord voice bot, so your whole party hears them."
                             TextAlignment="Center"
                             TextWrapping="Wrap" />
 
-                        <Separator Margin="20,8" />
+                        <Border
+                            Height="1"
+                            Margin="40,18"
+                            Background="{StaticResource Divider}" />
 
-                        <StackPanel Margin="0,0,0,12" HorizontalAlignment="Center">
-                            <TextBlock Margin="0,2">
-                                <Hyperlink NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers">
+                        <StackPanel Margin="0,0,0,4" HorizontalAlignment="Center">
+                            <TextBlock Margin="0,3" Foreground="{StaticResource Accent}">
+                                <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers">
                                     <i:Interaction.Triggers>
                                         <i:EventTrigger EventName="RequestNavigate">
                                             <i:LaunchUriOrFileAction Path="https://github.com/jlagedo/ACT-Discord-Triggers" />
@@ -241,8 +325,8 @@
                                     ↗  Project on GitHub
                                 </Hyperlink>
                             </TextBlock>
-                            <TextBlock Margin="0,2">
-                                <Hyperlink NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/issues/new">
+                            <TextBlock Margin="0,3" Foreground="{StaticResource Accent}">
+                                <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/issues/new">
                                     <i:Interaction.Triggers>
                                         <i:EventTrigger EventName="RequestNavigate">
                                             <i:LaunchUriOrFileAction Path="https://github.com/jlagedo/ACT-Discord-Triggers/issues/new" />
@@ -251,8 +335,8 @@
                                     ↗  Report a problem / open an issue
                                 </Hyperlink>
                             </TextBlock>
-                            <TextBlock Margin="0,2">
-                                <Hyperlink NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide">
+                            <TextBlock Margin="0,3" Foreground="{StaticResource Accent}">
+                                <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide">
                                     <i:Interaction.Triggers>
                                         <i:EventTrigger EventName="RequestNavigate">
                                             <i:LaunchUriOrFileAction Path="https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide" />
@@ -263,27 +347,32 @@
                             </TextBlock>
                         </StackPanel>
 
-                        <Separator Margin="20,8" />
+                        <Border
+                            Height="1"
+                            Margin="40,18"
+                            Background="{StaticResource Divider}" />
 
                         <TextBlock
-                            Margin="0,0,0,4"
-                            Foreground="Gray"
+                            Margin="0,0,0,10"
+                            Foreground="{StaticResource TextSecondary}"
                             Text="Hit a bug? Open the diagnostics log and attach it to your report."
                             TextAlignment="Center"
                             TextWrapping="Wrap" />
                         <Button
-                            Margin="0,0,0,12"
-                            Padding="10,3"
+                            Margin="0,0,0,4"
                             HorizontalAlignment="Center"
                             Command="{Binding OpenLogFolderCommand}"
                             Content="Open log folder" />
 
-                        <Separator Margin="20,8" />
+                        <Border
+                            Height="1"
+                            Margin="40,18"
+                            Background="{StaticResource Divider}" />
 
                         <TextBlock
-                            Margin="0,6,0,0"
+                            Margin="0,2,0,0"
                             FontSize="11"
-                            Foreground="Gray"
+                            Foreground="{StaticResource TextMuted}"
                             Text="ACT Discord Triggers is a community plugin — not affiliated with or endorsed by Discord, Square Enix, or Advanced Combat Tracker. Provided as-is under the MIT License, without warranty; use at your own risk and follow Discord's Terms of Service. Originally created by Makar8000."
                             TextAlignment="Center"
                             TextWrapping="Wrap" />

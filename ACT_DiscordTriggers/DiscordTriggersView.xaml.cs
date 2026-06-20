@@ -48,12 +48,21 @@ namespace ACT_DiscordTriggers {
     }
 
     public async Task OnPluginDeInitAsync() {
-      ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
-      ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
+      // Guard the restore prologue: during ACT shutdown oFormActMain may already be
+      // disposed, so these assignments can throw. An unguarded throw here would skip
+      // the bridge teardown below (orphaning node.exe) and escape the async-void
+      // DeInitPlugin as a crash dialog.
+      try {
+        ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
+        ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
+      } catch (Exception ex) {
+        DiagnosticsLog.Append("Error restoring ACT delegates on exit: " + ex);
+        try { ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error restoring ACT delegates on Discord plugin exit."); } catch { }
+      }
       // Detach the static DiscordClient.BotReady/Log subscriptions synchronously, before
       // the async bridge shutdown below, so a deferred continuation can't leave a stale
       // handler bound to a disposed view across a plugin reload.
-      discordService?.Dispose();
+      try { discordService?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Append("Error disposing Discord service on exit: " + ex); }
       if (vm != null) {
         vm.JoinedChannel -= OnJoinedChannel;
         vm.LeftChannel -= OnLeftChannel;
@@ -65,7 +74,10 @@ namespace ACT_DiscordTriggers {
           ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error saving Discord plugin settings on exit.");
         }
         try {
-          await vm.ShutdownAsync();
+          // ConfigureAwait(false): see DeInitPlugin / ShutdownAsync — the host window
+          // handle may be torn down by the time the bridge finishes, so the
+          // continuation must not marshal back to the (dead) WinForms UI context.
+          await vm.ShutdownAsync().ConfigureAwait(false);
         } catch (Exception ex) {
           ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error with DeInit of Discord Plugin.");
         }

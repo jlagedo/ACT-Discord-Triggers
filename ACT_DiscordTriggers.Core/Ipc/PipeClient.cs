@@ -48,13 +48,13 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             pending[reqId] = tcs;
 
             try {
-                await SendFrameAsync(request);
+                await SendFrameAsync(request).ConfigureAwait(false);
                 var to = timeout ?? TimeSpan.FromSeconds(60);
-                var done = await Task.WhenAny(tcs.Task, Task.Delay(to));
+                var done = await Task.WhenAny(tcs.Task, Task.Delay(to)).ConfigureAwait(false);
                 if (done != tcs.Task) {
                     throw new TimeoutException($"Bridge request '{request.GetType().Name}' timed out after {to.TotalSeconds:0}s.");
                 }
-                var element = await tcs.Task;
+                var element = await tcs.Task.ConfigureAwait(false);
                 return element.Deserialize<TResp>(jsonOpts);
             } finally {
                 pending.TryRemove(reqId, out _);
@@ -87,14 +87,14 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 payload[10] = (byte)channels;
                 Buffer.BlockCopy(pcm, 0, payload, 11, pcm.Length);
 
-                await SendBinaryFrameAsync(payload);
+                await SendBinaryFrameAsync(payload).ConfigureAwait(false);
 
                 var to = timeout ?? TimeSpan.FromSeconds(60);
-                var done = await Task.WhenAny(tcs.Task, Task.Delay(to));
+                var done = await Task.WhenAny(tcs.Task, Task.Delay(to)).ConfigureAwait(false);
                 if (done != tcs.Task) {
                     throw new TimeoutException($"Bridge request 'SpeakPcm' timed out after {to.TotalSeconds:0}s.");
                 }
-                var element = await tcs.Task;
+                var element = await tcs.Task.ConfigureAwait(false);
                 return element.Deserialize<BridgeResponse>(jsonOpts);
             } finally {
                 pending.TryRemove(reqId, out _);
@@ -111,10 +111,10 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         private async Task SendFrameAsync(object frame) {
             byte[] json = JsonSerializer.SerializeToUtf8Bytes(frame, frame.GetType(), jsonOpts);
             byte[] len = BitConverter.GetBytes(json.Length);
-            await writeLock.WaitAsync();
+            await writeLock.WaitAsync().ConfigureAwait(false);
             try {
-                await WriteWithTimeoutAsync(len, 0, 4);
-                await WriteWithTimeoutAsync(json, 0, json.Length);
+                await WriteWithTimeoutAsync(len, 0, 4).ConfigureAwait(false);
+                await WriteWithTimeoutAsync(json, 0, json.Length).ConfigureAwait(false);
                 // No FlushAsync: on Windows named pipes that calls FlushFileBuffers, which
                 // blocks until the peer drains the pipe. WriteAsync already pushes bytes into
                 // the OS pipe buffer, which is what the peer reads.
@@ -125,10 +125,10 @@ namespace ACT_DiscordTriggers.Core.Ipc {
 
         private async Task SendBinaryFrameAsync(byte[] payload) {
             byte[] len = BitConverter.GetBytes(payload.Length);
-            await writeLock.WaitAsync();
+            await writeLock.WaitAsync().ConfigureAwait(false);
             try {
-                await WriteWithTimeoutAsync(len, 0, 4);
-                await WriteWithTimeoutAsync(payload, 0, payload.Length);
+                await WriteWithTimeoutAsync(len, 0, 4).ConfigureAwait(false);
+                await WriteWithTimeoutAsync(payload, 0, payload.Length).ConfigureAwait(false);
             } finally {
                 writeLock.Release();
             }
@@ -145,7 +145,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         // correct teardown.
         private async Task WriteWithTimeoutAsync(byte[] buf, int offset, int count) {
             var writeTask = pipe.WriteAsync(buf, offset, count);
-            var winner = await Task.WhenAny(writeTask, Task.Delay(WriteTimeoutMs));
+            var winner = await Task.WhenAny(writeTask, Task.Delay(WriteTimeoutMs)).ConfigureAwait(false);
             if (winner != writeTask) {
                 try { pipe.Dispose(); } catch { }
                 // Observe the orphaned write so its eventual fault doesn't surface
@@ -154,14 +154,14 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
                 throw new IOException("Bridge pipe write timed out after " + WriteTimeoutMs + "ms; tearing down.");
             }
-            await writeTask;
+            await writeTask.ConfigureAwait(false);
         }
 
         private async Task ReadLoopAsync(CancellationToken ct) {
             string failureReason = "Bridge pipe closed";
             try {
                 while (!ct.IsCancellationRequested && pipe.IsConnected) {
-                    byte[] payload = await ReadFrameAsync(ct);
+                    byte[] payload = await ReadFrameAsync(ct).ConfigureAwait(false);
                     if (payload == null) break;
                     DispatchFrame(payload);
                 }
@@ -179,7 +179,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             byte[] lenBuf = new byte[4];
             int read = 0;
             while (read < 4) {
-                int n = await pipe.ReadAsync(lenBuf, read, 4 - read, ct);
+                int n = await pipe.ReadAsync(lenBuf, read, 4 - read, ct).ConfigureAwait(false);
                 if (n == 0) return null;
                 read += n;
             }
@@ -190,7 +190,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             byte[] payload = new byte[len];
             read = 0;
             while (read < len) {
-                int n = await pipe.ReadAsync(payload, read, len - read, ct);
+                int n = await pipe.ReadAsync(payload, read, len - read, ct).ConfigureAwait(false);
                 if (n == 0) return null;
                 read += n;
             }

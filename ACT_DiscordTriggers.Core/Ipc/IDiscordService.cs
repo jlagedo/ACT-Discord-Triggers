@@ -10,6 +10,9 @@ namespace ACT_DiscordTriggers.Core.Ipc {
   public interface IDiscordService {
     event Action BotReady;
     event Action<string> Log;
+    // Raised when the bridge connection is lost (clean teardown, bridge exit, or a
+    // broken pipe), so the UI can revert to a disconnected state.
+    event Action Disconnected;
 
     Task ConnectAsync(PluginSettings config);
     Task SetConfigAsync(PluginSettings config);
