@@ -36,14 +36,15 @@ export class FakeHost implements Host {
         this.calls.push({ method: 'setConfig', args: [config] });
     }
 
-    async connect(): Promise<OpResult> {
+    connect(): Promise<OpResult> {
         this.calls.push({ method: 'connect', args: [] });
-        if (this._connectThrows) throw this._connectThrows;
-        return this._nextConnect;
+        if (this._connectThrows) return Promise.reject(this._connectThrows);
+        return Promise.resolve(this._nextConnect);
     }
 
-    async disconnect(): Promise<void> {
+    disconnect(): Promise<void> {
         this.calls.push({ method: 'disconnect', args: [] });
+        return Promise.resolve();
     }
 
     isConnected(): boolean {
@@ -61,14 +62,15 @@ export class FakeHost implements Host {
         return this._nextChannels;
     }
 
-    async joinChannel(serverName: string, channelName: string): Promise<OpResult> {
+    joinChannel(serverName: string, channelName: string): Promise<OpResult> {
         this.calls.push({ method: 'joinChannel', args: [serverName, channelName] });
-        if (this._joinThrows) throw this._joinThrows;
-        return this._nextJoinChannel;
+        if (this._joinThrows) return Promise.reject(this._joinThrows);
+        return Promise.resolve(this._nextJoinChannel);
     }
 
-    async leaveChannel(): Promise<void> {
+    leaveChannel(): Promise<void> {
         this.calls.push({ method: 'leaveChannel', args: [] });
+        return Promise.resolve();
     }
 
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult {
@@ -77,10 +79,10 @@ export class FakeHost implements Host {
         return this._nextSpeakPcm;
     }
 
-    async speakFile(path: string, meta?: SpeakMeta): Promise<OpResult> {
+    speakFile(path: string, meta?: SpeakMeta): Promise<OpResult> {
         this.calls.push({ method: 'speakFile', args: [path, meta] });
-        if (this._speakFileThrows) throw this._speakFileThrows;
-        return this._nextSpeakFile;
+        if (this._speakFileThrows) return Promise.reject(this._speakFileThrows);
+        return Promise.resolve(this._nextSpeakFile);
     }
 
     nextConnect(r: OpResult): void { this._nextConnect = r; }

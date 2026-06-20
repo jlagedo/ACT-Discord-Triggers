@@ -319,7 +319,7 @@ test('SpeakPcm: binary frame decodes to byte-equal Buffer at host', async () => 
     const call = host.calls.find((c) => c.method === 'speakPcm');
     assert.ok(call);
     assert.ok(Buffer.isBuffer(call.args[0]));
-    assert.equal(Buffer.compare(call.args[0] as Buffer, pcm), 0);
+    assert.equal(Buffer.compare(call.args[0], pcm), 0);
 });
 
 test('SpeakPcm: mismatched sample rate is rejected without invoking host', async () => {

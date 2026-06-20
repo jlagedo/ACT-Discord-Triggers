@@ -7,6 +7,7 @@
   "main": "src/bridge.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "bundle": "node esbuild.config.mjs",
     "test": "node --import tsx --test \"tests/**/*.test.ts\""
   },
@@ -18,9 +19,12 @@
     "opusscript": "^0.1.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.0",
     "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.1"
   }
 }

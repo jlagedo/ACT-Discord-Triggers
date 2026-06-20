@@ -21,6 +21,9 @@ jobs:
     - name: Install bridge npm deps
       working-directory: DiscordBridge-node
       run: npm ci
+    - name: Lint bridge (ESLint)
+      working-directory: DiscordBridge-node
+      run: npm run lint
     - name: Test bridge (Node)
       working-directory: DiscordBridge-node
       run: npm test

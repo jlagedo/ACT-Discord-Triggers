@@ -77,7 +77,7 @@ export function error(msg: string, err?: unknown): void {
             write('ERROR', `${msg} :: ${name}: ${message}`);
             if (err.stack) write('ERROR', err.stack);
         } else {
-            write('ERROR', `${msg} :: ${String(err)}`);
+            write('ERROR', `${msg} :: ${stringifyNonError(err)}`);
         }
     } else {
         write('ERROR', msg);
@@ -86,4 +86,18 @@ export function error(msg: string, err?: unknown): void {
 
 export function errMsg(e: unknown): string {
     return e instanceof Error ? (e.message || String(e)) : String(e);
+}
+
+// Stringify a thrown value that isn't an Error. JSON-encodes objects so we log
+// their shape instead of "[object Object]", and degrades safely for values that
+// can't be serialized (circular refs, BigInt, etc.).
+function stringifyNonError(value: unknown): string {
+    if (typeof value === 'object' && value !== null) {
+        try {
+            return JSON.stringify(value) ?? '[unserializable value]';
+        } catch {
+            return '[unserializable value]';
+        }
+    }
+    return String(value);
 }

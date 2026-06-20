@@ -142,7 +142,7 @@ export class PcmMixer extends Readable {
         return out;
     }
 
-    override _read(_size: number): void {
+    override _read(): void {
         try {
             this.push(this._mixOneChunk());
         } catch (e) {

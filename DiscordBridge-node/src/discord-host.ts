@@ -78,7 +78,7 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
     try {
         input = await readFile(path);
     } catch (e) {
-        throw new Error(`Cannot read file: ${log.errMsg(e)}`);
+        throw new Error(`Cannot read file: ${log.errMsg(e)}`, { cause: e });
     }
 
     // Self-enforce the memory bound here, not just in speakFile: this function is
@@ -96,7 +96,7 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
     try {
         ({ channelData, sampleRate } = await decode(input));
     } catch (e) {
-        throw new Error(`Failed to decode audio: ${log.errMsg(e)}`);
+        throw new Error(`Failed to decode audio: ${log.errMsg(e)}`, { cause: e });
     }
 
     // A corrupt/truncated-but-detected stream comes back empty (audio-decode
@@ -149,7 +149,7 @@ export class DiscordHost implements Host {
         // otherwise moving e.g. the FX slider would spam needless setActivity calls.
         // fx/normalize are read per-clip in _enqueue, so there's nothing to apply
         // eagerly for them.
-        if (config.botStatus !== prev.botStatus) void this._applyStatus();
+        if (config.botStatus !== prev.botStatus) this._applyStatus();
         if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
     }
 
@@ -199,12 +199,8 @@ export class DiscordHost implements Host {
                 if (this.notify) this.notify({ op: 'Disconnected', reason });
             });
 
-            this.client.once('clientReady', async (client: Client<true>) => {
-                try {
-                    await this._applyStatus();
-                } catch (e) {
-                    log.error('clientReady setActivity failed', e);
-                }
+            this.client.once('clientReady', (client: Client<true>) => {
+                this._applyStatus();
                 if (this.notify) this.notify({ op: 'BotReady' });
                 log.info(`clientReady: logged in as ${client.user.tag}`);
             });
@@ -215,7 +211,7 @@ export class DiscordHost implements Host {
             return { ok: true, error: '' };
         } catch (e) {
             log.error('connect failed', e);
-            try { this.client?.destroy(); } catch { /* ignore */ }
+            try { await this.client?.destroy(); } catch { /* ignore */ }
             this.client = null;
             return { ok: false, error: log.errMsg(e) };
         }
@@ -247,7 +243,7 @@ export class DiscordHost implements Host {
             .map(c => c.name);
     }
 
-    private async _applyStatus(): Promise<void> {
+    private _applyStatus(): void {
         if (!this.client?.user) return;
         const text = this.config.botStatus && this.config.botStatus.trim().length > 0
             ? this.config.botStatus.trim()
@@ -339,7 +335,10 @@ export class DiscordHost implements Host {
         }
     }
 
-    async leaveChannel(): Promise<void> {
+    // Synchronous in practice (VoiceConnection.destroy() returns void), but the
+    // Host contract is async, so return a resolved promise rather than marking
+    // the method `async` (which would have no `await`).
+    leaveChannel(): Promise<void> {
         log.info('leaveChannel');
         this._stopPingLog();
         this.mixer?.clear();
@@ -357,6 +356,7 @@ export class DiscordHost implements Host {
         } catch { /* ignore */ }
         this.connection = null;
         this.currentGuildId = null;
+        return Promise.resolve();
     }
 
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult {
