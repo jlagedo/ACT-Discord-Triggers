@@ -412,9 +412,9 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 1. Build the catalog (C#, data only — no UI, no settings)
 
 - **Goal:** a generated, queryable voice catalog with install-state. No UI, no persistence, no bridge.
-- **Work:** define `OnnxVoiceInfo` (`{ Id, Family, Locale, DisplayName, Quality, Sid, DownloadId, SizeMB, Recommended }`); a **dev script** that pulls Piper `voices.json`, filters to the seven locales + `medium`/`high`, and emits the C# Piper rows; hand-seed the Kokoro rows (A/B-grade English from `VOICES.md` + the pt-BR trio). `OnnxCatalog` static accessors (by family/locale); `IsInstalled(voice, modelsDir)` directory scan; `ResolveModelsDir(settingValue)` → `%APPDATA%\ACT_DiscordTriggers\models` when empty.
-- **Files:** `ACT_DiscordTriggers.Core/Tts/OnnxCatalog.cs` (+ generated data), `tools/gen-onnx-catalog.*`.
-- **Done when:** a unit test enumerates voices per family/locale and computes install-state against a temp dir.
+- **Work:** define `OnnxVoiceInfo` (`{ Id, Family, Locale, DisplayName, Quality, Sid, DownloadId, SizeMB, Recommended }`); a **dev script** that pulls Piper `voices.json`, filters to the seven locales + `medium`/`high`, and emits the Piper rows, **hand-seeding** the Kokoro rows (top-graded English from `VOICES.md` + the pt-BR trio) — written to **`onnx-voices.json`, embedded as a .NET resource** in Core (data-only, refreshable without code changes, ships inside the DLL). `OnnxCatalog` reads that resource and exposes static accessors (`All`/`ByFamily`/`Locales`/`Find`); `IsInstalled(voice, modelsDir)` directory scan (Piper = any `*.onnx`; Kokoro = `model.onnx` + `voices.bin`); `ResolveModelsDir(settingValue)` → `%APPDATA%\ACT_DiscordTriggers\models` when empty.
+- **Files:** `ACT_DiscordTriggers.Core/Tts/OnnxVoiceInfo.cs`, `OnnxCatalog.cs`, `Tts/onnx-voices.json` (embedded; **generated**), `tools/gen-onnx-catalog/gen.mjs`.
+- **Done when:** a unit test enumerates voices per family/locale and computes install-state against a temp dir. ✅ **Done** — 65 voices (49 Piper / 16 Kokoro), 12 passing tests in `OnnxCatalogTests.cs`.
 
 ### 2. Relocate the existing TTS UI to the new section (behavior-preserving)
 
