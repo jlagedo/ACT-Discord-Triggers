@@ -34,7 +34,7 @@ CI:
 
 ## Architecture: two processes
 
-The plugin must not open a Discord connection itself — Discord voice now requires DAVE E2EE, which net48 (all ACT loads) can't do. Voice lives in a separate node process:
+The plugin must not open a Discord connection itself — Discord voice requires DAVE E2EE, which net48 (all ACT loads) can't do. Voice lives in a separate node process:
 
 ```
 ACT (net48) --loads--> ACT_DiscordTriggers.dll (net48)
@@ -57,7 +57,7 @@ The production code is two net48 assemblies — the thin assembly ACT scans, and
 Lifecycle — no launcher / Job Object:
 - Plugin shutdown: `process.Kill()`s node directly.
 - Plugin dies (crash, Task Manager): OS closes the pipe → `bridge.ts` `socket.close` handler runs `host.disconnect()` + `process.exit(0)`.
-- Don't reintroduce a launcher unless you can show both paths fail.
+- Don't add a launcher unless you can show both paths fail.
 
 ## Wire protocol — keep both sides in sync
 
