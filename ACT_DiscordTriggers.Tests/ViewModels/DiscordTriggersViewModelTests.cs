@@ -276,6 +276,22 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public async Task TestCommand_PushesConfigBeforeSpeaking() {
+      var fake = new FakeDiscordService();
+      var vm = NewVm(fake, TempStore());
+      vm.TtsVoice = "V";       // SAPI voice → CanTest needs only CanLeave + a voice
+      vm.CanLeave = true;      // "in a channel", so Test is allowed
+      Assert.True(vm.TestCommand.CanExecute(null));
+
+      await vm.TestCommand.ExecuteAsync(null);
+
+      // The bridge got the current config (so it synthesizes with the live selection),
+      // and the sample was spoken.
+      Assert.Contains(fake.SetConfigCalls, c => c.TtsVoice == "V");
+      Assert.Contains(fake.SpeakCalls, c => c.voice == "V");
+    }
+
+    [Fact]
     public void SpeakText_OnnxEngine_RoutesToSpeakOnnx_NotSapi() {
       var fake = new FakeDiscordService();
       var vm = NewVm(fake, TempStore());
@@ -304,20 +320,21 @@ namespace ACT_DiscordTriggers.Tests {
 
     private const string SmallVoiceId = "vits-piper-en_US-amy-medium";
 
-    private static (DiscordTriggersViewModel vm, string modelsDir) NewOnnxVm() {
+    private static (DiscordTriggersViewModel vm, string modelsDir, FakeDiscordService discord) NewOnnxVm() {
       var modelsDir = Path.Combine(Path.GetTempPath(), "actdt-dl-" + Guid.NewGuid().ToString("N"));
       Directory.CreateDirectory(modelsDir);
       var store = TempStore();
       store.Save(new PluginSettings { TtsEngine = "onnx", OnnxFamily = "piper", ModelsDir = modelsDir });
-      var vm = NewVm(new FakeDiscordService(), store);
+      var discord = new FakeDiscordService();
+      var vm = NewVm(discord, store);
       vm.Initialize();
-      return (vm, modelsDir);
+      return (vm, modelsDir, discord);
     }
 
     [Fact]
     public async Task DownloadVoiceCommand_RealNetwork_InstallsVoice_AndUpdatesUiAndTestGate() {
       Assert.SkipUnless(NetworkTestsEnabled, "Set ACT_DT_NETWORK_TESTS=1 to run network integration tests.");
-      var (vm, modelsDir) = NewOnnxVm();
+      var (vm, modelsDir, discord) = NewOnnxVm();
       try {
         Assert.True(vm.IsOnnx);
         var amy = vm.OnnxVoices.Single(v => v.Id == SmallVoiceId);
@@ -351,6 +368,10 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Contains(vm.LogEntries, e => e.Message.StartsWith("Fetching "));
         Assert.Contains(vm.LogEntries, e => e.Message.Contains("Installed " + SmallVoiceId));
         Assert.Contains(vm.LogEntries, e => e.Message == "Downloaded " + amy.Name + ".");
+
+        // The download re-pushed config to the bridge with the now-installed voice, so a
+        // Test right after finds it loaded instead of "ONNX voice not ready".
+        Assert.Contains(discord.SetConfigCalls, c => c.OnnxVoice == SmallVoiceId);
       } finally {
         try { Directory.Delete(modelsDir, true); } catch { }
       }
@@ -359,7 +380,7 @@ namespace ACT_DiscordTriggers.Tests {
     [Fact]
     public async Task DownloadVoiceCommand_RealNetwork_RescanAfterFolderChange_FindsInstall() {
       Assert.SkipUnless(NetworkTestsEnabled, "Set ACT_DT_NETWORK_TESTS=1 to run network integration tests.");
-      var (vm, modelsDir) = NewOnnxVm();
+      var (vm, modelsDir, _) = NewOnnxVm();
       try {
         var amy = vm.OnnxVoices.Single(v => v.Id == SmallVoiceId);
         vm.SelectedOnnxVoice = amy;
@@ -396,6 +417,7 @@ namespace ACT_DiscordTriggers.Tests {
       public string[] VoicesToReturn = new string[0];
 
       public PluginSettings ConnectCalledWith;
+      public readonly List<PluginSettings> SetConfigCalls = new List<PluginSettings>();
       public string JoinedServer;
       public string JoinedChannel;
       public int GetServersCallCount;
@@ -409,7 +431,7 @@ namespace ACT_DiscordTriggers.Tests {
       public void RaiseDisconnected() => Disconnected?.Invoke();
 
       public Task ConnectAsync(PluginSettings config) { ConnectCalledWith = config; return Task.CompletedTask; }
-      public Task SetConfigAsync(PluginSettings config) => Task.CompletedTask;
+      public Task SetConfigAsync(PluginSettings config) { SetConfigCalls.Add(config); return Task.CompletedTask; }
       public Task<bool> IsConnectedAsync() => Task.FromResult(IsConnectedResult);
       public Task<string[]> GetServersAsync() { GetServersCallCount++; return Task.FromResult(ServersToReturn); }
       public Task<string[]> GetChannelsAsync(string server) => Task.FromResult(ChannelsToReturn);

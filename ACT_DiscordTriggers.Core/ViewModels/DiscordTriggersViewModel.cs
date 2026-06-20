@@ -202,7 +202,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [ObservableProperty] private string downloadDoneText = "";
 
     // CPU threads (Advanced) — three discrete choices, same paired-bool pattern.
-    private int ttsThreads = 1;
+    private int ttsThreads = 4;
     public int TtsThreads {
       get => ttsThreads;
       set {
@@ -349,7 +349,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       CanLeave && (IsOnnx ? SelectedVoiceInstalled : !string.IsNullOrEmpty(TtsVoice));
 
     [RelayCommand(CanExecute = nameof(CanTest))]
-    private void Test() => SpeakText("Discord Triggers voice test.");
+    private async Task Test() {
+      // Push the current config first so the bridge synthesizes with exactly the
+      // voice/settings selected right now. Test is the manual "does this work?" path,
+      // so it shouldn't depend on a debounced push having already landed (e.g. right
+      // after a voice download); pushing here makes it self-sufficient.
+      await PushConfigNow().ConfigureAwait(true);
+      SpeakText("Discord Triggers voice test.");
+    }
 
     // Download and install the selected voice pack via OnnxDownloader (HttpClient +
     // SharpCompress extract + atomic move into ModelsDir/<DownloadId>/). Progress drives
@@ -374,6 +381,13 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
 
         RefreshInstallState();
         Log("Downloaded " + item.Name + ".");
+        // Re-push config now (not via the debounce) so the bridge re-validates the
+        // model files and loads the freshly-installed voice. The pre-download push
+        // left the bridge with "ONNX voice not ready"; this readies it for real ACT
+        // callouts straight after a download (Test pushes its own config separately).
+        // The bridge re-checks the files on every SetConfig, so the same descriptor
+        // flips it to ready once the pack is on disk.
+        await PushConfigNow().ConfigureAwait(true);
         // Keep a success confirmation in place so completion reads as "done", not a vanish.
         // It clears when the user picks another voice (see OnSelectedOnnxVoiceChanged).
         DownloadDoneText = item.Name + " is ready.";
@@ -620,6 +634,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // --- Debounced config pushes ------------------------------------------------
     private void ScheduleStatusPush() => Schedule(ref statusPushCts, StatusDebounceMs);
     private void ScheduleConfigPush() => Schedule(ref configPushCts, ConfigDebounceMs);
+
+    // Push the current config to the bridge immediately, dropping any pending
+    // debounced push so it can't fire a stale duplicate afterwards. SetConfigAsync
+    // no-ops while the bridge pipe is absent, so this is safe when disconnected.
+    private Task PushConfigNow() {
+      Cancel(configPushCts); configPushCts = null;
+      return discord.SetConfigAsync(ToSettings());
+    }
 
     private void Schedule(ref CancellationTokenSource slot, int delayMs) {
       if (suppressPush) return;
