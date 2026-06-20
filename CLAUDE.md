@@ -14,7 +14,7 @@ Bridge-only iteration (in `DiscordBridge-node/`):
 - `npm run bundle` — esbuild only (no staging/self-test)
 - `npm test` — JS suite (protocol, framing, op dispatch; plus a Windows-only lifecycle suite that spawns the real bridge). Independent of `dist/`. Lifecycle tests skip on non-Windows (Windows named pipes).
 
-C# tests (net48, xUnit — pinned to the 2.x line; 3.x dropped net48 support):
+C# tests (net48, xUnit v3 — `xunit.v3` builds the test project as an `.exe`, run under VSTest via `Microsoft.NET.Test.Sdk` + `xunit.runner.visualstudio` 3.x):
 ```
 dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
 ```

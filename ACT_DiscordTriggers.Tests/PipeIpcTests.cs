@@ -234,7 +234,7 @@ namespace ACT_DiscordTriggers.Tests {
                         await WriteFrameAsync(serverPipe, Hello(reqId, "v" + pv));
                     }
                 } catch { }
-            });
+            }, TestContext.Current.CancellationToken);
 
             const int N = 25;
             var tasks = new Task<BridgeResponse<HelloData>>[N];
@@ -258,8 +258,8 @@ namespace ACT_DiscordTriggers.Tests {
 
             byte[] garbage = System.Text.Encoding.UTF8.GetBytes("not valid json }}}");
             byte[] len = BitConverter.GetBytes(garbage.Length);
-            await serverPipe.WriteAsync(len, 0, 4);
-            await serverPipe.WriteAsync(garbage, 0, garbage.Length);
+            await serverPipe.WriteAsync(len, 0, 4, TestContext.Current.CancellationToken);
+            await serverPipe.WriteAsync(garbage, 0, garbage.Length, TestContext.Current.CancellationToken);
 
             var done = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             pipeClient.OnLog += (m, l) => done.TrySetResult(m);

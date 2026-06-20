@@ -4,13 +4,15 @@
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
+    <!-- xunit v3 test projects are executables, run via the VSTest adapter below. -->
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <!-- xunit 2.x line: xunit 2.9.x and xunit.runner.visualstudio 2.8.x both ship
-         net4x targets. xunit.runner.visualstudio 3.x dropped Framework support. -->
+    <!-- xunit v3 supports net472+; net48 satisfies it. Microsoft.NET.Test.Sdk +
+         xunit.runner.visualstudio 3.x keep tests running under VSTest (`dotnet test`). -->
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.6.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>

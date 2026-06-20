@@ -1,5 +1,3 @@
 {
-    "$schema": "https://xunit.net/schema/v2/xunit.runner.schema.json",
-    "shadowCopy": false,
-    "appDomain": "denied"
+    "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json"
 }
