@@ -20,6 +20,10 @@ namespace ACT_DiscordTriggers.Core.Tts {
     /// <summary>Piper-style locale code, e.g. <c>en_US</c>, <c>pt_BR</c>.</summary>
     [JsonPropertyName("locale")] public string Locale { get; set; } = "";
 
+    /// <summary>Friendly group label shown as the picker's section header
+    /// (language name + hyphenated locale, e.g. <c>Portuguese (pt-br)</c>).</summary>
+    [JsonPropertyName("localeName")] public string LocaleName { get; set; } = "";
+
     /// <summary>Human label for the dropdown (e.g. <c>Faber</c>, <c>Heart (female)</c>).</summary>
     [JsonPropertyName("displayName")] public string DisplayName { get; set; } = "";
 

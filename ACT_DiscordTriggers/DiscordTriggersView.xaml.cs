@@ -93,14 +93,14 @@ namespace ACT_DiscordTriggers {
     // grouping; these handlers do the live filter + selection. Kept in the view (not the
     // Core VM) so Core stays free of any WPF/CollectionView dependency.
 
-    // Context-aware match: every whitespace token must appear in locale/name/tier, so
-    // "pt faber", "en high", or "amy" all narrow the list.
+    // Context-aware match: every whitespace token must appear in the group label,
+    // locale, name, or tier, so "portuguese", "pt faber", "en high", or "amy" narrow it.
     private void OnnxVoiceFilter(object sender, FilterEventArgs e) {
       var query = VoiceSearchBox?.Text?.Trim();
       if (string.IsNullOrEmpty(query)) { e.Accepted = true; return; }
       var item = e.Item as OnnxVoiceItem;
       if (item == null) { e.Accepted = false; return; }
-      var hay = (item.Locale + " " + item.Name + " " + item.Tier).ToLowerInvariant();
+      var hay = (item.LocaleName + " " + item.Locale + " " + item.Name + " " + item.Tier).ToLowerInvariant();
       foreach (var token in query.ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)) {
         if (!hay.Contains(token)) { e.Accepted = false; return; }
       }

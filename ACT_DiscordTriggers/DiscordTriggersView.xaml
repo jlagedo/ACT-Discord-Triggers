@@ -26,7 +26,7 @@
                 Filter="OnnxVoiceFilter"
                 Source="{Binding OnnxVoices}">
                 <CollectionViewSource.GroupDescriptions>
-                    <PropertyGroupDescription PropertyName="Locale" />
+                    <PropertyGroupDescription PropertyName="LocaleName" />
                 </CollectionViewSource.GroupDescriptions>
             </CollectionViewSource>
 

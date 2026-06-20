@@ -29,8 +29,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     /// <summary>Quality tier (e.g. <c>medium</c>, <c>high</c>, <c>B-</c>) — used by search.</summary>
     public string Tier => Info.Quality;
 
-    /// <summary>Display locale (hyphenated, e.g. <c>pt-BR</c>) — the dropdown's group key.</summary>
+    /// <summary>Display locale (hyphenated, e.g. <c>pt-BR</c>) — used by search.</summary>
     public string Locale => Info.Locale.Replace('_', '-');
+
+    /// <summary>Friendly group label (e.g. <c>Portuguese (pt-br)</c>) — the dropdown's group key.</summary>
+    public string LocaleName => Info.LocaleName;
 
     /// <summary>Closed-picker label: locale · name (e.g. <c>en-US · Amy</c>).</summary>
     public string Label => Locale + " · " + Info.DisplayName;

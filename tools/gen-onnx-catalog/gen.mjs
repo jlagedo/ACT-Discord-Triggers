@@ -21,6 +21,20 @@ const VOICES_JSON_URL =
 const LOCALES = new Set([
   "en_US", "en_GB", "fr_FR", "de_DE", "es_ES", "es_MX", "pt_BR", "ru_RU",
 ]);
+// Friendly group label per locale, shown as the picker's section header
+// (language name + hyphenated lowercase locale, e.g. "Portuguese (pt-br)").
+const LOCALE_NAMES = {
+  en_US: "English (en-us)",
+  en_GB: "English (en-gb)",
+  fr_FR: "French (fr-fr)",
+  de_DE: "German (de-de)",
+  es_ES: "Spanish (es-es)",
+  es_MX: "Spanish (es-mx)",
+  pt_BR: "Portuguese (pt-br)",
+  ru_RU: "Russian (ru-ru)",
+};
+const localeName = (locale) =>
+  LOCALE_NAMES[locale] || `${locale} (${locale.replace("_", "-").toLowerCase()})`;
 // Only ship the 22.05 kHz tiers; x_low/low are 16 kHz and dropped.
 const QUALITIES = new Set(["medium", "high"]);
 
@@ -81,6 +95,7 @@ async function buildPiper() {
       id,
       family: "piper",
       locale,
+      localeName: localeName(locale),
       // Multi-speaker models expose only their default speaker (sid 0).
       displayName: titleCase(v.name),
       quality: v.quality,
@@ -98,6 +113,7 @@ function buildKokoro() {
     id: `kokoro-${k.sid}`,
     family: "kokoro",
     locale: k.locale,
+    localeName: localeName(k.locale),
     displayName: `${k.name} (${k.gender})`,
     quality: k.grade,
     sid: k.sid,
