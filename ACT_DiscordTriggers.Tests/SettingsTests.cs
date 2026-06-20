@@ -189,7 +189,7 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal("sapi", loaded.TtsEngine);
         Assert.Equal("piper", loaded.OnnxFamily);
         Assert.Equal("vits-piper-pt_BR-faber-medium", loaded.OnnxVoice);
-        Assert.Equal(1, loaded.TtsThreads);
+        Assert.Equal(4, loaded.TtsThreads);
         Assert.Equal("", loaded.ModelsDir);
         Assert.Equal(2, loaded.SchemaVersion);
         // The store rewrites the upgraded doc back to disk at v2.
@@ -294,7 +294,7 @@ namespace ACT_DiscordTriggers.Tests {
       Assert.Equal("sapi", doc.Root.Element("TtsEngine").Value);
       Assert.Equal("piper", doc.Root.Element("OnnxFamily").Value);
       Assert.Equal("vits-piper-pt_BR-faber-medium", doc.Root.Element("OnnxVoice").Value);
-      Assert.Equal("1", doc.Root.Element("TtsThreads").Value);
+      Assert.Equal("4", doc.Root.Element("TtsThreads").Value);
       Assert.NotNull(doc.Root.Element("ModelsDir"));
     }
 

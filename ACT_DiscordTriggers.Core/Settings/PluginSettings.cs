@@ -51,7 +51,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
     [JsonPropertyName("ttsEngine")] public string TtsEngine { get; set; } = "sapi";    // "sapi" | "onnx"
     [JsonPropertyName("onnxFamily")] public string OnnxFamily { get; set; } = "piper";  // "piper" | "kokoro"
     [JsonPropertyName("onnxVoice")] public string OnnxVoice { get; set; } = "vits-piper-pt_BR-faber-medium"; // catalog id
-    [JsonPropertyName("ttsThreads")] public int TtsThreads { get; set; } = 1;           // sherpa numThreads
+    [JsonPropertyName("ttsThreads")] public int TtsThreads { get; set; } = 4;           // sherpa numThreads
     [JsonPropertyName("modelsDir")] public string ModelsDir { get; set; } = "";         // empty ⇒ %APPDATA%\ACT_DiscordTriggers\models
 
     // --- Effects & leveling (interpreted by the bridge) ---

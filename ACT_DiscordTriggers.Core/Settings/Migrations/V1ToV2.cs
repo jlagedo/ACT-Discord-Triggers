@@ -19,7 +19,7 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
       AddIfMissing(root, "TtsEngine", "sapi");
       AddIfMissing(root, "OnnxFamily", "piper");
       AddIfMissing(root, "OnnxVoice", "vits-piper-pt_BR-faber-medium");
-      AddIfMissing(root, "TtsThreads", "1");
+      AddIfMissing(root, "TtsThreads", "4");
       AddIfMissing(root, "ModelsDir", "");
     }
 

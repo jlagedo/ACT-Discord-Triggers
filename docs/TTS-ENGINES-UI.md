@@ -74,7 +74,7 @@ Confirmed against `sherpa-onnx-node` 1.13.3 (the version benchmarked in the `she
 | Voice provisioning | **Download on demand** from the k2-fsa `tts-models` release; nothing bundled |
 | Models directory | user-configurable `ModelsDir`, default `%APPDATA%\ACT_DiscordTriggers\models` |
 | Default engine | **SAPI** (upgrading users see identical behavior) |
-| Default neural CPU usage | **1 thread** (gentlest while gaming; see Benchmark) |
+| Default neural CPU usage | **4 threads** (fastest wall-time; see Benchmark) |
 | Synthesis off-thread | **`generateAsync`** (libuv worker; non-blocking) |
 | **Wire surface** | only **`SpeakText { text }`** is new; voice/family/speed/threads/modelsDir all ride in the existing **`SetConfig`** (commands don't carry settings) |
 | Synthesis cache | **bridge-side**, keyed by the current synth config + text (see Wiring §e) |
@@ -259,8 +259,8 @@ Not in a channel                  →  [ ▶ Test ] (?)     ← greyed/disabled
 
 ```
 │ ▾ Advanced                                                   │
-│    CPU usage      ( ● Low · 1 thread ) ( Balanced · 2 ) ( Fast · 4 )│
-│                   ↳ Low is gentlest while gaming (recommended)│
+│    CPU usage      ( Low · 1 thread ) ( Balanced · 2 ) ( ● Fast · 4 )│
+│                   ↳ Fast is the default; Low is gentlest while gaming│
 │    Models folder  [ %APPDATA%\ACT_DiscordTriggers\models  ] [ Browse… ]│
 │                   ↳ where downloaded voices are stored       │
 ```
@@ -293,7 +293,7 @@ public string TtsEngine  { get; set; } = "sapi";    // "sapi" | "onnx"
 public string TtsVoice   { get; set; } = "";         // SAPI voice name (existing — kept)
 public string OnnxFamily { get; set; } = "piper";    // "piper" | "kokoro"  (Quality toggle)
 public string OnnxVoice  { get; set; } = "vits-piper-pt_BR-faber-medium"; // catalog id (piper) | speaker (kokoro)
-public int    TtsThreads { get; set; } = 1;          // sherpa numThreads (Advanced)
+public int    TtsThreads { get; set; } = 4;          // sherpa numThreads (Advanced)
 public string ModelsDir  { get; set; } = "";         // empty ⇒ %APPDATA%\ACT_DiscordTriggers\models
 // TtsVolume / TtsSpeed: existing. Volume applies to SAPI only; Speed applies to both.
 ```
