@@ -42,15 +42,14 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
-                        <Path
+                        <TextBlock
                             x:Name="star"
-                            Width="12"
-                            Height="12"
                             Margin="0,0,6,0"
                             VerticalAlignment="Center"
-                            Data="{StaticResource Icon.Star}"
-                            Fill="{StaticResource Accent}"
-                            Stretch="Uniform"
+                            FontFamily="{StaticResource IconFont}"
+                            FontSize="16"
+                            Foreground="{StaticResource Accent}"
+                            Text="{StaticResource Icon.Star}"
                             Visibility="Collapsed" />
                         <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
                         <TextBlock
@@ -60,13 +59,12 @@
                             Text="{Binding TierLabel}" />
                     </StackPanel>
                     <Grid Grid.Column="1" Margin="12,0,0,0">
-                        <Path
+                        <TextBlock
                             x:Name="check"
-                            Width="16"
-                            Height="16"
-                            Data="{StaticResource Icon.CheckCircle}"
-                            Fill="{StaticResource Accent}"
-                            Stretch="Uniform"
+                            FontFamily="{StaticResource IconFont}"
+                            FontSize="16"
+                            Foreground="{StaticResource Accent}"
+                            Text="{StaticResource Icon.CheckCircle}"
                             Visibility="Collapsed" />
                         <TextBlock
                             x:Name="size"
@@ -324,13 +322,12 @@
                                 Style="{StaticResource EngineChoiceCard}">
                                 <StackPanel>
                                     <StackPanel Orientation="Horizontal">
-                                        <Path
-                                            Width="18"
-                                            Height="18"
+                                        <TextBlock
                                             VerticalAlignment="Center"
-                                            Data="{StaticResource Icon.Desktop}"
-                                            Fill="{StaticResource TextSecondary}"
-                                            Stretch="Uniform" />
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="20"
+                                            Foreground="{StaticResource TextSecondary}"
+                                            Text="{StaticResource Icon.Desktop}" />
                                         <TextBlock
                                             Margin="9,0,0,0"
                                             VerticalAlignment="Center"
@@ -351,13 +348,12 @@
                                 Style="{StaticResource EngineChoiceCard}">
                                 <StackPanel>
                                     <StackPanel Orientation="Horizontal">
-                                        <Path
-                                            Width="18"
-                                            Height="18"
+                                        <TextBlock
                                             VerticalAlignment="Center"
-                                            Data="{StaticResource Icon.Sparkle}"
-                                            Fill="{StaticResource Accent}"
-                                            Stretch="Uniform" />
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="20"
+                                            Foreground="{StaticResource Accent}"
+                                            Text="{StaticResource Icon.Sparkle}" />
                                         <TextBlock
                                             Margin="9,0,0,0"
                                             VerticalAlignment="Center"
@@ -521,15 +517,14 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Path
+                                        <TextBlock
                                             Grid.Column="0"
-                                            Width="18"
-                                            Height="18"
                                             Margin="0,0,10,0"
                                             VerticalAlignment="Center"
-                                            Data="{StaticResource Icon.Download}"
-                                            Fill="{StaticResource Accent}"
-                                            Stretch="Uniform" />
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="16"
+                                            Foreground="{StaticResource Accent}"
+                                            Text="{StaticResource Icon.Download}" />
                                         <TextBlock
                                             Grid.Column="1"
                                             VerticalAlignment="Center"
@@ -554,14 +549,13 @@
                                     </StackPanel>
                                     <!--  Done: brief success confirmation before the strip collapses.  -->
                                     <StackPanel Orientation="Horizontal" Visibility="{Binding DownloadJustCompleted, Converter={StaticResource BoolToVis}}">
-                                        <Path
-                                            Width="18"
-                                            Height="18"
+                                        <TextBlock
                                             Margin="0,0,10,0"
                                             VerticalAlignment="Center"
-                                            Data="{StaticResource Icon.CheckCircle}"
-                                            Fill="{StaticResource StatusOnline}"
-                                            Stretch="Uniform" />
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="16"
+                                            Foreground="{StaticResource StatusOnline}"
+                                            Text="{StaticResource Icon.CheckCircle}" />
                                         <TextBlock
                                             VerticalAlignment="Center"
                                             Foreground="{StaticResource TextPrimary}"
@@ -751,13 +745,12 @@
 
                         <Border Style="{StaticResource InfoCallout}" Visibility="{Binding ShowHighQualityWarning, Converter={StaticResource BoolToVis}}">
                             <StackPanel Orientation="Horizontal">
-                                <Path
+                                <TextBlock
                                     Margin="0,1,10,0"
                                     VerticalAlignment="Top"
-                                    Data="{StaticResource Icon.Info}"
-                                    Fill="{StaticResource Accent}"
-                                    Stretch="Uniform"
-                                    Style="{StaticResource SettingsIcon}" />
+                                    Foreground="{StaticResource Accent}"
+                                    Style="{StaticResource IconGlyph}"
+                                    Text="{StaticResource Icon.Info}" />
                                 <TextBlock
                                     MaxWidth="460"
                                     Foreground="{StaticResource TextPrimary}"
@@ -808,14 +801,13 @@
 
                         <StackPanel Margin="0,0,0,4" HorizontalAlignment="Center">
                             <StackPanel Margin="0,3" Orientation="Horizontal">
-                                <Path
-                                    Width="18"
-                                    Height="18"
+                                <TextBlock
                                     Margin="0,0,9,0"
                                     VerticalAlignment="Center"
-                                    Data="{StaticResource Icon.Open}"
-                                    Fill="{StaticResource Accent}"
-                                    Stretch="Uniform" />
+                                    FontFamily="{StaticResource IconFont}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource Accent}"
+                                    Text="{StaticResource Icon.Open}" />
                                 <TextBlock VerticalAlignment="Center" Foreground="{StaticResource Accent}">
                                     <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers">
                                         <i:Interaction.Triggers>
@@ -828,14 +820,13 @@
                                 </TextBlock>
                             </StackPanel>
                             <StackPanel Margin="0,3" Orientation="Horizontal">
-                                <Path
-                                    Width="18"
-                                    Height="18"
+                                <TextBlock
                                     Margin="0,0,9,0"
                                     VerticalAlignment="Center"
-                                    Data="{StaticResource Icon.Bug}"
-                                    Fill="{StaticResource Accent}"
-                                    Stretch="Uniform" />
+                                    FontFamily="{StaticResource IconFont}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource Accent}"
+                                    Text="{StaticResource Icon.Bug}" />
                                 <TextBlock VerticalAlignment="Center" Foreground="{StaticResource Accent}">
                                     <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/issues/new">
                                         <i:Interaction.Triggers>
@@ -848,14 +839,13 @@
                                 </TextBlock>
                             </StackPanel>
                             <StackPanel Margin="0,3" Orientation="Horizontal">
-                                <Path
-                                    Width="18"
-                                    Height="18"
+                                <TextBlock
                                     Margin="0,0,9,0"
                                     VerticalAlignment="Center"
-                                    Data="{StaticResource Icon.Guide}"
-                                    Fill="{StaticResource Accent}"
-                                    Stretch="Uniform" />
+                                    FontFamily="{StaticResource IconFont}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource Accent}"
+                                    Text="{StaticResource Icon.Guide}" />
                                 <TextBlock VerticalAlignment="Center" Foreground="{StaticResource Accent}">
                                     <Hyperlink Foreground="{StaticResource Accent}" NavigateUri="https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide">
                                         <i:Interaction.Triggers>
@@ -885,14 +875,13 @@
                             HorizontalAlignment="Center"
                             Command="{Binding OpenLogFolderCommand}">
                             <StackPanel Orientation="Horizontal">
-                                <Path
-                                    Width="18"
-                                    Height="18"
+                                <TextBlock
                                     Margin="0,0,8,0"
                                     VerticalAlignment="Center"
-                                    Data="{StaticResource Icon.Folder}"
-                                    Fill="{StaticResource TextPrimary}"
-                                    Stretch="Uniform" />
+                                    FontFamily="{StaticResource IconFont}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource TextPrimary}"
+                                    Text="{StaticResource Icon.Folder}" />
                                 <TextBlock VerticalAlignment="Center" Text="Open log folder" />
                             </StackPanel>
                         </Button>
