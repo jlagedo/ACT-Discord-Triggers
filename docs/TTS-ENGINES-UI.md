@@ -65,7 +65,10 @@ Confirmed against `sherpa-onnx-node` 1.13.3 (the version benchmarked in the `she
 |---|---|
 | Engines exposed | **SAPI** + **ONNX**; under ONNX a **Quality** toggle picks **Piper** (fast, light) or **Kokoro** (natural, heavy) |
 | TTS lives in the UI | **New top-level "Text-to-Speech" nav section**; moved out of the Sound page |
-| First control | **Engine** picker (SAPI \| ONNX); the page reshapes on selection |
+| First control | **Engine choice-cards** (SAPI \| ONNX) side by side; picking one reshapes the page (the chosen card takes the accent fill + ✓). A 2-item dropdown for a page-defining choice was rejected |
+| Quality labels | **Fast** (Piper) \| **Natural** (Kokoro) — benefit-first; the engine name and CPU/size trade-off ride in the description line under the toggle |
+| Voice picker | **Searchable, locale-grouped flyout** — a field button opens a search box over a grouped, live-filtered list (the catalog is too long for a plain dropdown). Filtering lives in the view (code-behind) so Core stays WPF-free |
+| Audition | **No preview link** — an engine-specific external samples site is a maintenance liability (Piper-only, breaks if the site goes down), so it was dropped |
 | Voice/family state | two settings: `OnnxFamily` (`piper`\|`kokoro`) + `OnnxVoice` (the pick) — see Settings model |
 | **Provisioning owner** | **C# (.NET)** owns the curated catalog, install-state, and downloads — works with **no Discord connection** (the bridge is only alive while connected) |
 | Voice provisioning | **Download on demand** from the k2-fsa `tts-models` release; nothing bundled |
@@ -116,8 +119,9 @@ Real-time is comfortable for both (RTF < 1 everywhere). The deciding factor for 
 **Sources (single source of truth — the catalog is generated, not hand-maintained):**
 
 - **Piper manifest — `voices.json`** (`rhasspy/piper-samples`): every voice with `language`, `quality`, `num_speakers`, per-file sizes. The C# `OnnxCatalog` is **generated from it**, filtered to the locales above and to **`medium` + `high`** tiers. Piper's `x_low`/`low` are 16 kHz and are **dropped**. A small dev script regenerates the catalog so it never drifts from upstream.
-- **Audition — Piper sample player**: the UI links **"Preview voices ↗"** → `https://rhasspy.github.io/piper-samples/` so users hear a voice before committing to a download.
 - **Kokoro grades — `VOICES.md`** (`hexgrad/Kokoro-82M`): grades voices **A–F** by training-data quality. The Kokoro side is seeded from the **A/B-grade English** voices + the pt-BR trio.
+
+The UI carries **no external "preview/audition" link** — an engine-specific samples site (Piper-only, breaks if it goes down) isn't worth maintaining.
 
 **Curation policy:**
 
@@ -166,75 +170,72 @@ After:   General · Text-to-Speech · Sound · Information
 
 ```
 ┌─ Text-to-Speech ─────────────────────────────────────────────┐
-│ Engine   [ Windows (SAPI)                    ▼ ]              │
-│          ↳ System voices · offline · no download             │
-│                                                              │
-│ Voice    [ Microsoft Zira Desktop          ▼ ]  [ ▶ Test ] (?) │
-│                                                              │
+│ Engine                                                       │
+│ ┌────────────────────────┐ ┌────────────────────────┐       │
+│ │ ▦ Windows (SAPI)    ✓  │ │ ✦ ONNX — neural        │       │  ← choice-cards; SAPI selected
+│ │   Built-in voices.     │ │   Natural voices,      │       │    (accent fill + ✓ on the pick)
+│ │   Offline.             │ │   downloaded on pick.  │       │
+│ └────────────────────────┘ └────────────────────────┘       │
+│ Voice    [ Microsoft Zira Desktop          ▼ ]              │
 │ Volume   ──────────●───────────                              │
 │ Speed    ───────────●──────────                              │
+│ ▶ Test voice                              [ ▶ Test ] (?)     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-SAPI behaves exactly as today; the Engine row and Test button are the only additions. Voice list comes from `SpeechSynthesizer.GetInstalledVoices()` (as now). The `(?)` beside **Test** and its enable rule are shared by both engines — see **Test button** below.
+SAPI behaves exactly as today; the Engine cards and the Test card are the only additions. Voice list comes from `SpeechSynthesizer.GetInstalledVoices()` (as now). The `(?)` beside **Test** and its enable rule are shared by both engines — see **Test button** below.
 
 ### Engine = ONNX (voice already installed)
 
 ```
 ┌─ Text-to-Speech ─────────────────────────────────────────────┐
-│ Engine   [ ONNX — neural                     ▼ ]              │
-│                                                              │
-│ Quality  ( ● Piper · fast )   ( Kokoro · natural )           │   ← family toggle (OnnxFamily)
-│          ↳ ~150 ms/callout · light on CPU                    │
-│                                                              │
-│ Voice    [ pt-BR · Faber (male)            ▼ ]  [ ▶ Test ] (?) │   ← scoped to Piper
-│                                                              │
+│ Engine                                                       │
+│ ┌────────────────────────┐ ┌────────────────────────┐       │
+│ │ ▦ Windows (SAPI)       │ │ ✦ ONNX — neural     ✓  │       │  ← ONNX selected
+│ │   Built-in voices.     │ │   Natural voices…      │       │
+│ └────────────────────────┘ └────────────────────────┘       │
+│ Quality  [ Fast │ Natural ]                                  │  ← segmented (OnnxFamily)
+│          ↳ Piper — light on CPU, ~150 ms per callout.        │
+│ Voice    [ en-US · Amy                       ▼ ]            │  ← searchable grouped picker
 │ Speed    ───────────●──────────                              │
 │          ↳ Volume is set under Sound › Auto-level            │
-│                                                              │
+│ ▶ Test voice                              [ ▶ Test ] (?)     │
 │ ▸ Advanced  (CPU threads · models folder)                    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Selecting ONNX **folds in** the **Quality** toggle, the voice catalog, and the Advanced disclosure, and **hides the Volume slider** (neural loudness is the shared Auto-level on the Sound page). The Quality toggle (`OnnxFamily`) scopes the Voice list to that family and swaps the description line (Kokoro → ~0.7 s/callout · heavier · one 333 MB pack). Switching back to SAPI restores Volume and hides the ONNX-only fields.
+Selecting ONNX **folds in** the **Quality** toggle, the voice catalog, and the Advanced disclosure, and **hides the Volume slider** (neural loudness is the shared Auto-level on the Sound page). The Quality toggle (`OnnxFamily`) — **Fast** (Piper) / **Natural** (Kokoro) — scopes the Voice list to that family and swaps the description line (Natural → "Kokoro — most realistic; one 333 MB pack, heavier on CPU."). Switching back to SAPI restores Volume and hides the ONNX-only fields.
 
-### Voice dropdown open (ONNX) — scoped to the selected family, grouped by language
+### Voice picker (ONNX) — search box over a locale-grouped, filtered list
+
+The picker is a field button that opens a flyout with a search box on top of a grouped, live-filtered list (the catalog is too long for a plain dropdown). Search matches **locale, name, or tier** (e.g. `pt faber`, `en high`, `amy`).
 
 ```
-│ Voice    [ pt-BR · Faber (male)              ▲ ]              │      (Quality = Piper)
+│ Voice    [ en-US · Amy                        ▼ ]            │
 │        ┌──────────────────────────────────────────┐          │
-│        │  pt-BR                                    │          │
-│        │    ✓ Faber (male)                         │  ✓ = installed
-│        │      Jeff (male)            ⬇ 64 MB       │  ⬇ = needs download
-│        │  en-US                                    │          │
-│        │    ✓ Amy (female)                         │          │
-│        │      Ryan (male) · high     ⬇ 110 MB      │          │
-│        │  en-GB                                    │          │
-│        │      Alan (male)            ⬇ 64 MB       │          │
+│        │ 🔍 Search voices…                        │          │  ← type to filter
+│        │ pt-BR                                    │          │
+│        │   ★ Faber · medium                  ✓    │  ★ recommended · ✓ installed
+│        │     Jeff · medium               64 MB    │
+│        │ en-US                                    │          │
+│        │   ★ Amy · medium                    ✓    │
+│        │     Ryan · high                110 MB    │
 │        └──────────────────────────────────────────┘          │
 ```
 
-The list shows only the toggled family's voices (here Piper), grouped by language and tagged with quality tier; a **"Preview voices ↗"** link opens the Piper samples site to audition before downloading. Installed voices show `✓`; not-yet-downloaded show their size. Flipping the toggle to **Kokoro** shows its English voices (by grade) + the 3 pt-BR speakers — **not** a full mirror of Piper's locales (Kokoro is thin/absent for fr/de/es/ru). One 333 MB pack download unlocks every Kokoro speaker at once (so after that single download they're all `✓`).
+Rows are grouped by locale (locale is the group header; the row shows name · tier). Installed voices show `✓`; not-yet-downloaded show their size; `★` marks the locale's recommended pick (also pre-selected). Flipping to **Natural** (Kokoro) shows its English voices (by grade) + the 3 pt-BR speakers — **not** a full mirror of Piper's locales. One 333 MB pack download unlocks every Kokoro speaker at once.
 
-### Picked a voice that isn't downloaded yet
+### Voice not downloaded yet — the inline download strip
 
-```
-┌─ Text-to-Speech ─────────────────────────────────────────────┐
-│ Engine   [ ONNX — neural (Piper / Kokoro)    ▼ ]              │
-│ Voice    [ Piper · en-US · Ryan (male) high ▼ ] [ ▶ Test ] (?) │   ← Test disabled (not downloaded)
-│ Speed    ───────────●──────────                  (greyed)     │
-│                                                              │
-│ ⚠ This voice isn't downloaded yet.   [ Download · 110 MB ]   │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### During download
+The strip sits under the Voice picker and has three states:
 
 ```
-│ ⏬ Downloading Ryan (high)…   ▓▓▓▓▓▓▓▓░░░░░░░░  58 %           │
+needs download   ⚠ This voice isn't downloaded yet.        [ Download · 110 MB ]
+downloading      ⏬ Downloading Ryan… 58%   ▓▓▓▓▓▓▓▓░░░░░░░░
+done             ✓ Ryan is ready.    ← persists until another voice is picked
 ```
 
-When it completes: the warning row disappears, `Test` + sliders enable, the voice gains a `✓`. Progress is mirrored into the Debug Log.
+Test stays disabled until the voice is installed. The **success confirmation persists** (it clears only when another voice is picked) so a finished download isn't an abrupt vanish — large packs run for a while and the user may walk away; the picker's permanent `✓` is the lasting marker. **Kokoro** ⇒ one 333 MB pack download flips every Kokoro speaker to `✓` at once. Progress is mirrored into the Debug Log.
 
 ### Test button (both engines)
 
@@ -272,9 +273,9 @@ CPU usage maps to `sherpa-onnx` `numThreads` (`TtsThreads`). **Models folder** i
 Text-to-Speech page
    │
    ▼
-[Engine ▼] ─ SAPI ─► voices = installed Windows voices ─► ready (Test)
+[Engine cards] ─ SAPI ─► voices = installed Windows voices ─► ready (Test)
    │
-   └─ ONNX ─► [Quality: Piper | Kokoro] ─► [Voice ▼] ─► installed? ─ yes ─► ready (Test)
+   └─ ONNX ─► [Quality: Fast | Natural] ─► [Voice picker] ─► installed? ─ yes ─► ready (Test)
                                               │
                                               └─ no ─► [Download · NN MB] ─► progress ─► ready
                                                       (Kokoro ⇒ one 333 MB pack unlocks all)
@@ -318,7 +319,7 @@ public string ModelsDir  { get; set; } = "";         // empty ⇒ %APPDATA%\ACT_
 ### a. Populate the Voice list — entirely C#
 
 - **SAPI:** `SpeechSynthesizer.GetInstalledVoices()` (as today; feeds the existing `Voices` collection).
-- **ONNX:** the new **`OnnxCatalog`** (C#, Core; generated from `voices.json` — see Voice catalog) is a static list; the VM filters it by `OnnxFamily` (and locale), annotates each entry's `Installed` by scanning `ModelsDir`, and fills an `OnnxVoices` collection (with `✓` / `⬇` + size + quality tier). **No bridge round-trip** — this works whether or not Discord is connected. A **"Preview voices ↗"** link sits beside the list (opens the Piper samples site).
+- **ONNX:** the new **`OnnxCatalog`** (C#, Core; generated from `voices.json` — see Voice catalog) is a static list; the VM filters it by `OnnxFamily`, annotates each entry's `Installed` by scanning `ModelsDir`, and fills an `OnnxVoices` collection (each `OnnxVoiceItem` carries name/tier/locale + observable install-state). The view groups it by locale (a `CollectionViewSource`) and live-filters it from the picker's search box (a code-behind `Filter` predicate). **No bridge round-trip** — this works whether or not Discord is connected.
 
 ### b. Dispatch on speak (`DiscordTriggersViewModel.SpeakText`)
 
@@ -426,9 +427,9 @@ Ordered per the chosen sequence: **catalog → relocate UI → build ONNX UI (no
 ### 3. Build the ONNX UI from the catalog (no settings persistence yet)
 
 - **Goal:** the full new UI visually working against the catalog + in-memory VM state; selections deliberately **not** saved yet.
-- **Work:** Engine picker (SAPI \| ONNX) with folding; **Quality** toggle (Piper \| Kokoro); family-scoped voice dropdown bound to an `OnnxVoices` collection the VM fills from `OnnxCatalog` (`✓`/`⬇` + tier); **"Preview voices ↗"** link; Advanced disclosure (CPU threads + Models-folder field showing the default); **Test** button + `(?)` help popover with the in-channel gate. VM holds plain transient properties (`engine`/`family`/`voice`/`threads`/`modelsDir`) — no `PluginSettings` yet. Install-state via `OnnxCatalog.IsInstalled` against the default `ModelsDir`.
-- **Files:** `DiscordTriggersView.xaml`, VM additions, value converters.
-- **Done when:** you can flip Engine/Quality, watch the catalog populate with `✓`/`⬇`, open Preview, toggle Advanced — all visually correct; a restart loses the selection (expected — not wired yet).
+- **Work:** Engine **choice-cards** (SAPI \| ONNX) with folding; **Quality** segmented toggle (**Fast**/Piper \| **Natural**/Kokoro); **searchable, locale-grouped voice picker** (field button → flyout with a search box over a `CollectionViewSource`-grouped, live-filtered `OnnxVoices` list — filter in code-behind so Core stays WPF-free; `★`/`✓`/size rows); inline **download strip** (needs-download → progress → persistent success), simulated in-memory for this step; Advanced disclosure (CPU-usage segmented + Models-folder field with a working folder picker); **Test** card + `(?)` help popover with the in-channel gate. VM holds transient properties (`Engine`/`OnnxFamily`/`SelectedOnnxVoice`/`TtsThreads`/`ModelsDir`) — no `PluginSettings` yet — exposed as paired bools so the cards/segments two-way bind without a converter. `OnnxVoiceItem` wraps a catalog row with observable `Installed`.
+- **Files:** `DiscordTriggersView.xaml` (+`.cs`), `Theme.xaml` (new component styles + glyphs), `Core/ViewModels/DiscordTriggersViewModel.cs`, `Core/ViewModels/OnnxVoiceItem.cs`.
+- **Done when:** you can flip Engine/Quality, search the catalog, watch rows show `✓`/size, run a (simulated) download to completion, toggle Advanced — all visually correct; a restart loses the selection (expected — not wired yet). ✅ **Done** — committed `44cacb7`; full `check.ps1` green.
 
 ### 4. Set up settings (persist + migrate + push)
 
