@@ -20,6 +20,73 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
+            <!--  ONNX catalog grouped by locale + live-filtered by the picker's search box (OnnxVoiceFilter).  -->
+            <CollectionViewSource
+                x:Key="OnnxVoicesView"
+                Filter="OnnxVoiceFilter"
+                Source="{Binding OnnxVoices}">
+                <CollectionViewSource.GroupDescriptions>
+                    <PropertyGroupDescription PropertyName="Locale" />
+                </CollectionViewSource.GroupDescriptions>
+            </CollectionViewSource>
+
+            <!--
+                ONNX voice row: ★ recommended, the voice name with a muted tier
+                suffix, and install-state on the right — ✓ when on disk, the
+                download size when not. Locale is carried by the group header.
+            -->
+            <DataTemplate x:Key="OnnxVoiceItemTemplate">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal">
+                        <Path
+                            x:Name="star"
+                            Width="12"
+                            Height="12"
+                            Margin="0,0,6,0"
+                            VerticalAlignment="Center"
+                            Data="{StaticResource Icon.Star}"
+                            Fill="{StaticResource Accent}"
+                            Stretch="Uniform"
+                            Visibility="Collapsed" />
+                        <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                        <TextBlock
+                            Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Foreground="{StaticResource TextMuted}"
+                            Text="{Binding TierLabel}" />
+                    </StackPanel>
+                    <Grid Grid.Column="1" Margin="12,0,0,0">
+                        <Path
+                            x:Name="check"
+                            Width="16"
+                            Height="16"
+                            Data="{StaticResource Icon.CheckCircle}"
+                            Fill="{StaticResource Accent}"
+                            Stretch="Uniform"
+                            Visibility="Collapsed" />
+                        <TextBlock
+                            x:Name="size"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{StaticResource TextMuted}"
+                            Text="{Binding SizeText}" />
+                    </Grid>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Recommended}" Value="True">
+                        <Setter TargetName="star" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Installed}" Value="True">
+                        <Setter TargetName="check" Property="Visibility" Value="Visible" />
+                        <Setter TargetName="size" Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+
             <!--
                 Connection status indicator: a soft halo behind a solid dot, plus a label.
                 All three flip on the VM's IsConnected (red/"Disconnected" -> green/"Connected").
@@ -240,42 +307,379 @@
                 <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="640">
 
+                        <!--  Engine — the page's organizing choice; selecting one reshapes the body below.  -->
                         <TextBlock
                             Margin="2,0,0,8"
                             Style="{StaticResource SectionHeader}"
-                            Text="Text-to-speech" />
+                            Text="Engine" />
 
-                        <HeaderedContentControl
-                            Header="Voice"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Voice}">
-                            <ComboBox
-                                Width="220"
-                                ItemsSource="{Binding Voices}"
-                                SelectedItem="{Binding TtsVoice}" />
+                        <UniformGrid Columns="2">
+                            <RadioButton
+                                Margin="0,0,5,0"
+                                GroupName="engine"
+                                IsChecked="{Binding IsSapi, Mode=TwoWay}"
+                                Style="{StaticResource EngineChoiceCard}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path
+                                            Width="18"
+                                            Height="18"
+                                            VerticalAlignment="Center"
+                                            Data="{StaticResource Icon.Desktop}"
+                                            Fill="{StaticResource TextSecondary}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            Margin="9,0,0,0"
+                                            VerticalAlignment="Center"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="Windows (SAPI)" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Built-in system voices. Offline, nothing to download." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton
+                                Margin="5,0,0,0"
+                                GroupName="engine"
+                                IsChecked="{Binding IsOnnx, Mode=TwoWay}"
+                                Style="{StaticResource EngineChoiceCard}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Path
+                                            Width="18"
+                                            Height="18"
+                                            VerticalAlignment="Center"
+                                            Data="{StaticResource Icon.Sparkle}"
+                                            Fill="{StaticResource Accent}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            Margin="9,0,0,0"
+                                            VerticalAlignment="Center"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="ONNX — neural" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Natural voices, downloaded as you pick them." />
+                                </StackPanel>
+                            </RadioButton>
+                        </UniformGrid>
+
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="Voice" />
+
+                        <!--  SAPI body — today's controls, unchanged.  -->
+                        <StackPanel Visibility="{Binding IsSapi, Converter={StaticResource BoolToVis}}">
+                            <HeaderedContentControl
+                                Header="Voice"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Voice}">
+                                <ComboBox
+                                    Width="220"
+                                    ItemsSource="{Binding Voices}"
+                                    SelectedItem="{Binding TtsVoice}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl
+                                Header="{Binding TtsVolume, StringFormat='Volume: {0}'}"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Sound}">
+                                <Slider
+                                    Width="200"
+                                    Maximum="20"
+                                    Minimum="0"
+                                    Value="{Binding TtsVolume}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl
+                                Header="{Binding TtsSpeed, StringFormat='Speed: {0}'}"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Speed}">
+                                <Slider
+                                    Width="200"
+                                    Maximum="20"
+                                    Minimum="0"
+                                    Value="{Binding TtsSpeed}" />
+                            </HeaderedContentControl>
+                        </StackPanel>
+
+                        <!--  ONNX body — quality toggle, catalog dropdown, inline download, speed.  -->
+                        <StackPanel Visibility="{Binding IsOnnx, Converter={StaticResource BoolToVis}}">
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Sparkle}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Quality" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="{Binding QualityDescription}" />
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <Border Style="{StaticResource Segmented}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton
+                                            Content="Fast"
+                                            GroupName="quality"
+                                            IsChecked="{Binding IsPiper, Mode=TwoWay}"
+                                            Style="{StaticResource SegmentButton}" />
+                                        <RadioButton
+                                            Content="Natural"
+                                            GroupName="quality"
+                                            IsChecked="{Binding IsKokoro, Mode=TwoWay}"
+                                            Style="{StaticResource SegmentButton}" />
+                                    </StackPanel>
+                                </Border>
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl
+                                Header="Voice"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Voice}">
+                                <Grid Width="280">
+                                    <ToggleButton
+                                        x:Name="VoicePickerButton"
+                                        Checked="OnVoicePickerOpened"
+                                        Style="{StaticResource PickerButton}">
+                                        <TextBlock Text="{Binding SelectedOnnxVoice.Label, FallbackValue='Select a voice', TargetNullValue='Select a voice'}" />
+                                    </ToggleButton>
+                                    <Popup
+                                        AllowsTransparency="True"
+                                        Focusable="False"
+                                        IsOpen="{Binding IsChecked, ElementName=VoicePickerButton}"
+                                        Placement="Bottom"
+                                        PlacementTarget="{Binding ElementName=VoicePickerButton}"
+                                        PopupAnimation="Fade"
+                                        StaysOpen="False">
+                                        <Border
+                                            MinWidth="{Binding ActualWidth, ElementName=VoicePickerButton}"
+                                            MaxHeight="380"
+                                            Margin="0,4,0,6"
+                                            Background="{StaticResource Card}"
+                                            BorderBrush="{StaticResource CardBorder}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Effect="{StaticResource FlyoutShadow}">
+                                            <DockPanel Margin="6">
+                                                <Grid Margin="0,0,0,6" DockPanel.Dock="Top">
+                                                    <TextBox x:Name="VoiceSearchBox" TextChanged="OnVoiceSearchChanged" />
+                                                    <TextBlock
+                                                        Margin="15,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Foreground="{StaticResource TextMuted}"
+                                                        IsHitTestVisible="False"
+                                                        Text="Search voices…">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Text, ElementName=VoiceSearchBox}" Value="">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
+                                                <ListBox
+                                                    x:Name="VoiceList"
+                                                    ItemTemplate="{StaticResource OnnxVoiceItemTemplate}"
+                                                    ItemsSource="{Binding Source={StaticResource OnnxVoicesView}}"
+                                                    SelectionChanged="OnVoiceListSelectionChanged"
+                                                    Style="{StaticResource PickerList}">
+                                                    <ListBox.GroupStyle>
+                                                        <GroupStyle>
+                                                            <GroupStyle.HeaderTemplate>
+                                                                <DataTemplate>
+                                                                    <TextBlock
+                                                                        Margin="6,8,0,2"
+                                                                        FontSize="11"
+                                                                        FontWeight="SemiBold"
+                                                                        Foreground="{StaticResource TextMuted}"
+                                                                        Text="{Binding Name}" />
+                                                                </DataTemplate>
+                                                            </GroupStyle.HeaderTemplate>
+                                                        </GroupStyle>
+                                                    </ListBox.GroupStyle>
+                                                </ListBox>
+                                            </DockPanel>
+                                        </Border>
+                                    </Popup>
+                                </Grid>
+                            </HeaderedContentControl>
+
+                            <Border Style="{StaticResource InfoCallout}" Visibility="{Binding ShowDownloadStrip, Converter={StaticResource BoolToVis}}">
+                                <Grid>
+                                    <!--  Idle: needs-download notice + button.  -->
+                                    <Grid Visibility="{Binding DownloadButtonVisible, Converter={StaticResource BoolToVis}}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Path
+                                            Grid.Column="0"
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Data="{StaticResource Icon.Download}"
+                                            Fill="{StaticResource Accent}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="{Binding DownloadNoticeText}"
+                                            TextWrapping="Wrap" />
+                                        <Button
+                                            Grid.Column="2"
+                                            Margin="12,0,0,0"
+                                            Command="{Binding DownloadVoiceCommand}"
+                                            Content="{Binding DownloadButtonText}"
+                                            Style="{StaticResource PrimaryButton}" />
+                                    </Grid>
+                                    <!--  Downloading: status line + progress bar.  -->
+                                    <StackPanel Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Foreground="{StaticResource TextPrimary}" Text="{Binding DownloadStatusText}" />
+                                        <ProgressBar
+                                            Margin="0,8,0,0"
+                                            Maximum="100"
+                                            Style="{StaticResource ThinProgress}"
+                                            Value="{Binding DownloadProgress}" />
+                                    </StackPanel>
+                                    <!--  Done: brief success confirmation before the strip collapses.  -->
+                                    <StackPanel Orientation="Horizontal" Visibility="{Binding DownloadJustCompleted, Converter={StaticResource BoolToVis}}">
+                                        <Path
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Data="{StaticResource Icon.CheckCircle}"
+                                            Fill="{StaticResource StatusOnline}"
+                                            Stretch="Uniform" />
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="{Binding DownloadDoneText}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Speed}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="{Binding TtsSpeed, StringFormat='Speed: {0}'}" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="Volume is set under Sound › Auto-level." />
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <Slider
+                                    Width="200"
+                                    Maximum="20"
+                                    Minimum="0"
+                                    Value="{Binding TtsSpeed}" />
+                            </HeaderedContentControl>
+                        </StackPanel>
+
+                        <!--  Test — shared by both engines; gated on being in a voice channel with a ready voice.  -->
+                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.PlayCircle}">
+                            <HeaderedContentControl.Header>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource CardTitle}" Text="Test voice" />
+                                    <TextBlock Style="{StaticResource CardDesc}" Text="Plays a sample line through the bot." />
+                                </StackPanel>
+                            </HeaderedContentControl.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <Button
+                                    MinWidth="96"
+                                    Command="{Binding TestCommand}"
+                                    Content="▶ Test"
+                                    Style="{StaticResource PrimaryButton}" />
+                                <ToggleButton
+                                    x:Name="TestHelp"
+                                    Margin="6,0,0,0"
+                                    Style="{StaticResource HelpGlyphButton}" />
+                                <Popup
+                                    AllowsTransparency="True"
+                                    IsOpen="{Binding IsChecked, ElementName=TestHelp}"
+                                    Placement="Bottom"
+                                    PlacementTarget="{Binding ElementName=TestHelp}"
+                                    StaysOpen="False">
+                                    <Border
+                                        MaxWidth="260"
+                                        Margin="0,6,8,8"
+                                        Padding="12,10"
+                                        Background="{StaticResource Card}"
+                                        BorderBrush="{StaticResource CardBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Effect="{StaticResource FlyoutShadow}">
+                                        <TextBlock
+                                            Foreground="{StaticResource TextSecondary}"
+                                            Text="Test plays through the bot. Connect and join a voice channel on the General page first."
+                                            TextWrapping="Wrap" />
+                                    </Border>
+                                </Popup>
+                            </StackPanel>
                         </HeaderedContentControl>
 
-                        <HeaderedContentControl
-                            Header="{Binding TtsVolume, StringFormat='Volume: {0}'}"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Sound}">
-                            <Slider
-                                Width="200"
-                                Maximum="20"
-                                Minimum="0"
-                                Value="{Binding TtsVolume}" />
-                        </HeaderedContentControl>
+                        <!--  Advanced — ONNX-only, collapsed by default (CPU threads · models folder).  -->
+                        <StackPanel Visibility="{Binding IsOnnx, Converter={StaticResource BoolToVis}}">
+                            <ToggleButton
+                                Margin="0,10,0,0"
+                                Content="Advanced"
+                                IsChecked="{Binding IsAdvancedExpanded, Mode=TwoWay}"
+                                Style="{StaticResource DisclosureToggle}" />
 
-                        <HeaderedContentControl
-                            Header="{Binding TtsSpeed, StringFormat='Speed: {0}'}"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Speed}">
-                            <Slider
-                                Width="200"
-                                Maximum="20"
-                                Minimum="0"
-                                Value="{Binding TtsSpeed}" />
-                        </HeaderedContentControl>
+                            <StackPanel Margin="0,4,0,0" Visibility="{Binding IsAdvancedExpanded, Converter={StaticResource BoolToVis}}">
+                                <HeaderedContentControl Style="{StaticResource SettingsCard}">
+                                    <HeaderedContentControl.Header>
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CardTitle}" Text="CPU usage" />
+                                            <TextBlock Style="{StaticResource CardDesc}" Text="Low is gentlest while gaming." />
+                                        </StackPanel>
+                                    </HeaderedContentControl.Header>
+                                    <Border Style="{StaticResource Segmented}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton
+                                                Content="Low · 1"
+                                                GroupName="threads"
+                                                IsChecked="{Binding IsThreads1, Mode=TwoWay}"
+                                                Style="{StaticResource SegmentButton}" />
+                                            <RadioButton
+                                                Content="Balanced · 2"
+                                                GroupName="threads"
+                                                IsChecked="{Binding IsThreads2, Mode=TwoWay}"
+                                                Style="{StaticResource SegmentButton}" />
+                                            <RadioButton
+                                                Content="Fast · 4"
+                                                GroupName="threads"
+                                                IsChecked="{Binding IsThreads4, Mode=TwoWay}"
+                                                Style="{StaticResource SegmentButton}" />
+                                        </StackPanel>
+                                    </Border>
+                                </HeaderedContentControl>
+
+                                <HeaderedContentControl Style="{StaticResource SettingsCard}">
+                                    <HeaderedContentControl.Header>
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CardTitle}" Text="Models folder" />
+                                            <TextBlock Style="{StaticResource CardDesc}" Text="Where downloaded voices are stored." />
+                                        </StackPanel>
+                                    </HeaderedContentControl.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox
+                                            Width="240"
+                                            VerticalAlignment="Center"
+                                            Text="{Binding ModelsDir}" />
+                                        <Button
+                                            Margin="8,0,0,0"
+                                            Click="OnBrowseModelsFolder"
+                                            Content="Browse…" />
+                                    </StackPanel>
+                                </HeaderedContentControl>
+                            </StackPanel>
+                        </StackPanel>
 
                     </StackPanel>
                 </ScrollViewer>

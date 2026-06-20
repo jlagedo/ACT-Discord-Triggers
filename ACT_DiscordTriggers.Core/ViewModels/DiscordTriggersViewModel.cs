@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +11,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ACT_DiscordTriggers.Core.Ipc;
 using ACT_DiscordTriggers.Core.Settings;
+using ACT_DiscordTriggers.Core.Tts;
 
 namespace ACT_DiscordTriggers.Core.ViewModels {
   // UI-agnostic ViewModel: no WinForms, no ACT. Holds the settings-backed state,
@@ -33,6 +36,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public ObservableCollection<string> Servers { get; } = new ObservableCollection<string>();
     public ObservableCollection<string> Channels { get; } = new ObservableCollection<string>();
     public ObservableCollection<string> Voices { get; } = new ObservableCollection<string>();
+    public ObservableCollection<OnnxVoiceItem> OnnxVoices { get; } = new ObservableCollection<OnnxVoiceItem>();
     public ObservableCollection<LogEntry> LogEntries { get; } = new ObservableCollection<LogEntry>();
 
     // Raised when a channel is (re)joined/left so the view can swap ACT's
@@ -54,7 +58,10 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // is mapped to/from PluginSettings at the load/save boundary.
     [ObservableProperty] private string botToken = "";
     [ObservableProperty] private bool autoConnect;
-    [ObservableProperty] private string ttsVoice = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
+    private string ttsVoice = "";
 
     // Source-generated, side effect lives in the partial On…Changed hook.
     [ObservableProperty] private string botStatus = "Playing with ACT Triggers";
@@ -100,6 +107,108 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       set => SetClamped(ref audioQualityIndex, value, PluginSettings.AudioQualityIndexMin, PluginSettings.AudioQualityIndexMax, push: true, dependentLabel: nameof(ShowHighQualityWarning));
     }
 
+    // --- ONNX TTS (transient — step 3; not yet persisted/pushed) ----------------
+    // Engine and Quality are single-value choices exposed as paired bools so the
+    // choice-cards / segmented RadioButtons can two-way bind without a converter:
+    // checking one sets the backing string, which re-raises both bools.
+    private string engine = "sapi";   // "sapi" | "onnx"
+    public string Engine {
+      get => engine;
+      set {
+        if (!SetProperty(ref engine, value)) return;
+        OnPropertyChanged(nameof(IsOnnx));
+        OnPropertyChanged(nameof(IsSapi));
+        OnPropertyChanged(nameof(ShowDownloadPrompt));
+        OnPropertyChanged(nameof(ShowDownloadStrip));
+        OnPropertyChanged(nameof(DownloadButtonVisible));
+        TestCommand.NotifyCanExecuteChanged();
+      }
+    }
+    public bool IsOnnx { get => engine == "onnx"; set { if (value) Engine = "onnx"; } }
+    public bool IsSapi { get => engine == "sapi"; set { if (value) Engine = "sapi"; } }
+
+    private string onnxFamily = "piper";   // "piper" | "kokoro" (the Quality toggle)
+    public string OnnxFamily {
+      get => onnxFamily;
+      set {
+        if (!SetProperty(ref onnxFamily, value)) return;
+        OnPropertyChanged(nameof(IsPiper));
+        OnPropertyChanged(nameof(IsKokoro));
+        OnPropertyChanged(nameof(QualityDescription));
+        RebuildOnnxVoices(value);   // re-selects, which refreshes the download row
+      }
+    }
+    public bool IsPiper { get => onnxFamily == "piper"; set { if (value) OnnxFamily = "piper"; } }
+    public bool IsKokoro { get => onnxFamily == "kokoro"; set { if (value) OnnxFamily = "kokoro"; } }
+    public string QualityDescription => IsKokoro
+      ? "Kokoro — most realistic; one 333 MB pack, heavier on CPU."
+      : "Piper — light on CPU, ~150 ms per callout.";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
+    private OnnxVoiceItem selectedOnnxVoice;
+    partial void OnSelectedOnnxVoiceChanged(OnnxVoiceItem value) {
+      DownloadJustCompleted = false;   // a fresh pick clears the prior "ready" confirmation
+      OnPropertyChanged(nameof(SelectedVoiceInstalled));
+      OnPropertyChanged(nameof(ShowDownloadPrompt));
+      OnPropertyChanged(nameof(ShowDownloadStrip));
+      OnPropertyChanged(nameof(DownloadButtonVisible));
+      OnPropertyChanged(nameof(DownloadNoticeText));
+      OnPropertyChanged(nameof(DownloadButtonText));
+      OnPropertyChanged(nameof(DownloadStatusText));
+    }
+    public bool SelectedVoiceInstalled => SelectedOnnxVoice?.Installed == true;
+    // The strip shows for an ONNX voice that isn't on disk yet (the needs-download button
+    // when idle, the progress bar while downloading) and lingers briefly on a success
+    // confirmation after a download so completion isn't just an abrupt disappearance.
+    public bool ShowDownloadPrompt => IsOnnx && SelectedOnnxVoice != null && !SelectedOnnxVoice.Installed;
+    public bool ShowDownloadStrip => ShowDownloadPrompt || DownloadJustCompleted;
+    public bool DownloadButtonVisible => ShowDownloadPrompt && !IsDownloading;
+    public string DownloadNoticeText => IsKokoro
+      ? "One 333 MB pack unlocks every Kokoro voice."
+      : "This voice isn't downloaded yet.";
+    public string DownloadButtonText =>
+      "Download · " + (IsKokoro ? 333 : SelectedOnnxVoice?.Info.SizeMB ?? 0) + " MB";
+
+    // Simulated-download state (step 3 scaffold; replaced by the real downloader in step 5).
+    private readonly HashSet<string> simulatedInstalled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DownloadButtonVisible))]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadStrip))]
+    private bool isDownloading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DownloadStatusText))]
+    private double downloadProgress;
+
+    public string DownloadStatusText =>
+      "Downloading " + (SelectedOnnxVoice?.Name ?? "voice") + "… " + (int)DownloadProgress + "%";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadStrip))]
+    private bool downloadJustCompleted;
+
+    [ObservableProperty] private string downloadDoneText = "";
+
+    // CPU threads (Advanced) — three discrete choices, same paired-bool pattern.
+    private int ttsThreads = 1;
+    public int TtsThreads {
+      get => ttsThreads;
+      set {
+        if (!SetProperty(ref ttsThreads, value)) return;
+        OnPropertyChanged(nameof(IsThreads1));
+        OnPropertyChanged(nameof(IsThreads2));
+        OnPropertyChanged(nameof(IsThreads4));
+      }
+    }
+    public bool IsThreads1 { get => ttsThreads == 1; set { if (value) TtsThreads = 1; } }
+    public bool IsThreads2 { get => ttsThreads == 2; set { if (value) TtsThreads = 2; } }
+    public bool IsThreads4 { get => ttsThreads == 4; set { if (value) TtsThreads = 4; } }
+
+    [ObservableProperty] private string modelsDir = "";
+    [ObservableProperty] private bool isAdvancedExpanded;
+
     // --- Computed (presentation) ------------------------------------------------
     public string FxChanceLabel => "FX Chance: " + FxChance + "%";
     public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " dBFS";
@@ -126,6 +235,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LeaveCommand))]
+    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
     private bool canLeave;
 
     // --- Selection --------------------------------------------------------------
@@ -213,6 +323,65 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       }
     }
 
+    // --- Text-to-Speech page actions --------------------------------------------
+    // Test plays a sample through the bot, so it requires being in a voice channel
+    // (CanLeave) and a ready voice — a selected SAPI voice, or an installed ONNX one.
+    public bool CanTest =>
+      CanLeave && (IsOnnx ? SelectedVoiceInstalled : !string.IsNullOrEmpty(TtsVoice));
+
+    [RelayCommand(CanExecute = nameof(CanTest))]
+    private void Test() => SpeakText("Discord Triggers voice test.");
+
+    // Simulated download (the real HttpClient + extract + atomic move is step 5). Runs a
+    // progress ramp, then marks the pack installed in-memory so the row flips to ✓ and the
+    // strip clears. Kokoro shares one pack id across all speakers, so its whole family
+    // flips at once. Nothing is written to disk; installs reset on reload.
+    [RelayCommand]
+    private async Task DownloadVoice() {
+      var item = SelectedOnnxVoice;
+      if (item == null || IsDownloading) return;
+      IsDownloading = true;
+      DownloadJustCompleted = false;
+      DownloadProgress = 0;
+      Log("Downloading " + item.Name + "… (simulated)");
+      for (int p = 0; p <= 100; p += 4) {
+        DownloadProgress = p;
+        await Task.Delay(100);
+      }
+      simulatedInstalled.Add(item.Info.DownloadId);
+      foreach (var v in OnnxVoices)
+        if (string.Equals(v.Info.DownloadId, item.Info.DownloadId, StringComparison.OrdinalIgnoreCase))
+          v.Installed = true;
+      IsDownloading = false;
+      OnPropertyChanged(nameof(SelectedVoiceInstalled));
+      OnPropertyChanged(nameof(ShowDownloadPrompt));
+      OnPropertyChanged(nameof(ShowDownloadStrip));
+      OnPropertyChanged(nameof(DownloadButtonVisible));
+      TestCommand.NotifyCanExecuteChanged();
+      Log("Downloaded " + item.Name + ".");
+
+      // Keep a success confirmation in place so completion reads as "done", not a vanish.
+      // It clears when the user picks another voice (see OnSelectedOnnxVoiceChanged).
+      DownloadDoneText = item.Name + " is ready.";
+      DownloadJustCompleted = true;
+    }
+
+    // Refill OnnxVoices for the given family, annotating each with its on-disk state,
+    // then select the first installed voice, else the recommended default, else the
+    // first entry. The collection stays contiguous by locale (catalog order) so the
+    // view's CollectionViewSource groups it cleanly.
+    private void RebuildOnnxVoices(string family) {
+      OnnxVoices.Clear();
+      var dir = OnnxCatalog.ResolveModelsDir(ModelsDir);
+      foreach (var v in OnnxCatalog.ByFamily(family)) {
+        var installed = OnnxCatalog.IsInstalled(v, dir) || simulatedInstalled.Contains(v.DownloadId);
+        OnnxVoices.Add(new OnnxVoiceItem(v, installed));
+      }
+      SelectedOnnxVoice = OnnxVoices.FirstOrDefault(x => x.Installed)
+        ?? OnnxVoices.FirstOrDefault(x => x.Recommended)
+        ?? OnnxVoices.FirstOrDefault();
+    }
+
     // --- Information-page actions (bound from the WPF view) ---------------------
     // The Information tab's external links open via the view's XAML
     // (Microsoft.Xaml.Behaviors LaunchUriOrFileAction), so no URL command lives here.
@@ -250,6 +419,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       foreach (var v in discord.GetInstalledVoices()) Voices.Add(v);
       if (string.IsNullOrEmpty(TtsVoice) || !Voices.Contains(TtsVoice))
         TtsVoice = Voices.Count > 0 ? Voices[0] : "";
+
+      // ONNX catalog (transient until step 4): show the resolved default models dir
+      // and populate the family-scoped voice list with install-state.
+      ModelsDir = OnnxCatalog.ResolveModelsDir("");
+      RebuildOnnxVoices(OnnxFamily);
 
       if (AutoConnect) _ = ConnectAsync();
     }
