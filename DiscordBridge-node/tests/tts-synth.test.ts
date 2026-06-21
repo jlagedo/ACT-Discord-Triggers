@@ -11,9 +11,9 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import { OnnxTts } from '../src/tts.js';
-import { monoFloat32ToStereoInt16, resampleStereo16 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32, resampleStereoF32 } from '../src/discord-host.js';
 import {
-    synthSkip, modelDir, rms, rmsPcm16Stereo,
+    synthSkip, modelDir, rms,
     PIPER_PT_BR, PIPER_EN_US, KOKORO,
 } from './helpers/synth-fixtures.js';
 
@@ -84,17 +84,17 @@ test('Speed slider changes output length (slower => more samples)', skip, async 
         `expected slower clip clearly longer: slow=${slow.samples.length} fast=${fast.samples.length}`);
 });
 
-test('Synth output converts cleanly to the bridge 48k/16/stereo format', skip, async () => {
+test('Synth output converts cleanly to the bridge 48k float stereo format', skip, async () => {
     const dir = modelDir(PIPER_EN_US)!;
     const tts = new OnnxTts();
     tts.configure({ family: 'piper', modelDir: dir, sid: 0, lang: '', speedSlider: 10, threads: 1 });
     const audio = await tts.synth(EN_LINE);
     assert.ok(audio);
-    const stereoSrc = monoFloat32ToStereoInt16(audio.samples);
-    const final = resampleStereo16(stereoSrc, audio.sampleRate, 48000);
+    const stereoSrc = monoFloat32ToStereoF32(audio.samples);
+    const final = resampleStereoF32(stereoSrc, audio.sampleRate, 48000);
     // Duration is preserved within a frame or two of resampling rounding.
     const srcMs = (audio.samples.length / audio.sampleRate) * 1000;
-    const finalMs = (final.length / 4 / 48000) * 1000;
+    const finalMs = (final.length / 2 / 48000) * 1000;
     assert.ok(Math.abs(srcMs - finalMs) < 5, `duration drift ${srcMs}ms -> ${finalMs}ms`);
-    assert.ok(rmsPcm16Stereo(final) > SILENCE_FLOOR, `converted audio ~silent (rms=${rmsPcm16Stereo(final)})`);
+    assert.ok(rms(final) > SILENCE_FLOOR, `converted audio ~silent (rms=${rms(final)})`);
 });

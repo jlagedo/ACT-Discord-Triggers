@@ -98,11 +98,13 @@ Ship plain `node.exe bundle.js` (not Node SEA).
 
 ## Audio format constraint
 
-Discord voice is hard-wired to 48 kHz / 16-bit signed / stereo PCM end-to-end. It's pinned in several places — change all of them, don't add a one-off conversion step:
-- `DiscordClient.formatInfo` — C# TTS synthesis format.
+Discord voice is hard-wired to 48 kHz / stereo end-to-end; the wire frame and the Opus encoder input are 16-bit signed PCM. The sample rate / channel count is pinned in several places — change all of them, don't add a one-off conversion step:
+- `DiscordClient.formatInfo` — C# TTS synthesis format (48k/16/stereo).
 - the `48000/16/2` hard-coded in `DiscordClient`'s PCM sends, and the matching check in `pipe-server.ts`.
-- `discord-host.ts` — `TARGET_SAMPLE_RATE` + `resampleStereo16` (file decode/resample) and `StreamType.Raw`.
+- `discord-host.ts` — `TARGET_SAMPLE_RATE` + `resampleStereoF32` (file decode/resample) and `StreamType.Raw`.
 - `effects.ts` `SR`.
+
+Sample format: the bridge's whole interior pipeline (decode → resample → fx → normalize → declick → mix) works in **interleaved float32 stereo** — nominal [-1, 1] but allowed to exceed between stages so headroom is preserved (an fx tail or a hot mix sum is pulled back down, not clipped mid-chain). int16 lives only at the two edges, both via `audio-format.ts`: the `SpeakPcm` wire frame is widened on ingest (`int16ToFloat32`), and `PcmMixer` sums voices in float64 then performs the pipeline's single int16 quantization at its output (`floatToInt16`) right before the Opus encoder. The diagnostic WAV sink also converts float→int16 at its boundary. Don't reintroduce per-stage int16 round-trips; `floatToInt16` is the single quantization point and the natural home for future TPDF dither / a master limiter.
 
 ## Packaging & releases
 

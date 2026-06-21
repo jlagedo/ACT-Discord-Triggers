@@ -1,43 +1,43 @@
 // Declick ramps for trigger playback. A clip that starts or ends on a non-zero
-// sample steps against the mixer's digital silence — silence -> +12000 at the
-// onset, or +13000 -> silence at the tail — and that one-sample discontinuity
+// sample steps against the mixer's digital silence — silence -> +0.37 at the
+// onset, or +0.40 -> silence at the tail — and that one-sample discontinuity
 // is an audible click once Opus encodes it. The PcmMixer feeds one long-lived
 // AudioResource and switches to silence inline (it never push(null)s), so
 // @discordjs/voice's end-of-resource silence padding never runs to soften the
 // transition; the clip itself has to ramp.
 //
 // So fade each clip in from / out to zero over a few ms. Like normalize.ts this
-// is per-clip and offline: the whole 48 kHz / 16-bit / stereo buffer is in hand,
-// so we just scale the edge frames. The fade-in is deliberately shorter than the
-// fade-out — 2 ms is enough to kill an onset click (a click is a single-sample
-// jump) while preserving the attack/punch of percussive trigger SFX, whereas a
-// tail is decaying anyway and tolerates a longer 5 ms ramp.
+// is per-clip and offline: the whole 48 kHz interleaved float32 stereo buffer is
+// in hand, so we just scale the edge frames. The fade-in is deliberately shorter
+// than the fade-out — 2 ms is enough to kill an onset click (a click is a
+// single-sample jump) while preserving the attack/punch of percussive trigger
+// SFX, whereas a tail is decaying anyway and tolerates a longer 5 ms ramp.
 //
 // discord-host applies this in _enqueue, as the LAST per-clip transform (after
 // any random effect and normalize), so the final samples are guaranteed to reach
 // zero regardless of what those stages did to the level.
 
-const FRAME_BYTES = 4; // interleaved s16le stereo: L,R = 2 + 2 bytes
+const FRAME_SAMPLES = 2; // interleaved float32 stereo: L,R = 2 samples
 
 export const FADE_IN_FRAMES = 96;   // 2 ms at 48 kHz (short: preserves attack)
 export const FADE_OUT_FRAMES = 240; // 5 ms at 48 kHz
 
 // Linear fade-in on the first frames and/or fade-out on the last frames of an
-// interleaved s16le stereo buffer. Returns a NEW buffer; never mutates the input
-// (callers pass WavCache-shared buffers, so in-place editing would corrupt the
-// cache). Only the ramp regions are rewritten — the middle is copied verbatim.
+// interleaved float32 stereo buffer. Returns a NEW array; never mutates the
+// input (callers pass WavCache-shared buffers, so in-place editing would corrupt
+// the cache). Only the ramp regions are rewritten — the middle is copied verbatim.
 //
 // The streaming TTS path declicks the edges of a multi-chunk utterance: fade-in
 // on the first chunk only (declickIn) and fade-out on the last chunk only
 // (declickOut). Interior chunk boundaries are contiguous samples from one synth
 // pass, so they need no ramp — only the silence-facing onset and tail do.
-function applyRamp(pcm: Buffer, doIn: boolean, doOut: boolean): Buffer {
-    // Align to whole stereo frames; a stray trailing byte (malformed upstream)
-    // would otherwise let the ramp loop read one byte past the end. Matches the
-    // mixer's odd-byte tolerance.
-    const aligned = pcm.length & ~(FRAME_BYTES - 1);
-    const out = Buffer.from(pcm.subarray(0, aligned));
-    const totalFrames = aligned / FRAME_BYTES;
+function applyRamp(samples: Float32Array, doIn: boolean, doOut: boolean): Float32Array {
+    // Align to whole stereo frames; a stray trailing sample (malformed upstream)
+    // would otherwise leave a dangling mono sample. Matches the mixer's odd-byte
+    // tolerance.
+    const aligned = samples.length & ~(FRAME_SAMPLES - 1);
+    const out = samples.slice(0, aligned);
+    const totalFrames = aligned / FRAME_SAMPLES;
     if (totalFrames === 0) return out;
 
     // Clamp each ramp to the clip length so a sub-fade-length blip still ramps
@@ -48,23 +48,23 @@ function applyRamp(pcm: Buffer, doIn: boolean, doOut: boolean): Buffer {
     const fadeOutStart = totalFrames - fadeOutLen;
 
     for (let f = 0; f < totalFrames; f++) {
-        // Untouched middle: gain is exactly 1, leave the copied bytes as-is.
+        // Untouched middle: gain is exactly 1, leave the copied samples as-is.
         if (f >= fadeInLen && f < fadeOutStart) continue;
         const inGain = f < fadeInLen ? (f + 1) / fadeInLen : 1;
         const outGain = f >= fadeOutStart ? (totalFrames - f) / fadeOutLen : 1;
         const gain = inGain * outGain; // product covers clips short enough to overlap
-        const off = f * FRAME_BYTES;
-        out.writeInt16LE(Math.round(out.readInt16LE(off) * gain), off);
-        out.writeInt16LE(Math.round(out.readInt16LE(off + 2) * gain), off + 2);
+        const off = f * FRAME_SAMPLES;
+        out[off] = out[off]! * gain;
+        out[off + 1] = out[off + 1]! * gain;
     }
     return out;
 }
 
 // Fade both edges (the buffered one-shot path: SpeakPcm/SpeakFile/SpeakText).
-export function declick(pcm: Buffer): Buffer { return applyRamp(pcm, true, true); }
+export function declick(samples: Float32Array): Float32Array { return applyRamp(samples, true, true); }
 
 // Fade the onset only — the first chunk of a streamed utterance.
-export function declickIn(pcm: Buffer): Buffer { return applyRamp(pcm, true, false); }
+export function declickIn(samples: Float32Array): Float32Array { return applyRamp(samples, true, false); }
 
 // Fade the tail only — the final chunk of a streamed utterance.
-export function declickOut(pcm: Buffer): Buffer { return applyRamp(pcm, false, true); }
+export function declickOut(samples: Float32Array): Float32Array { return applyRamp(samples, false, true); }

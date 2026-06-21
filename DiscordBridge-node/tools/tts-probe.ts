@@ -10,7 +10,8 @@
 //        --speed 0..20 --threads N --text "..." --out <file.wav>
 
 import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
-import { monoFloat32ToStereoInt16, resampleStereo16 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32, resampleStereoF32 } from '../src/discord-host.js';
+import { floatToInt16 } from '../src/audio-format.js';
 import { writeWav16 } from '../src/wav-write.js';
 import { resolve } from 'node:path';
 import { arg } from './args.js';
@@ -50,9 +51,9 @@ async function main(): Promise<void> {
         return;
     }
 
-    const stereo = monoFloat32ToStereoInt16(audio.samples);
-    const final = resampleStereo16(stereo, audio.sampleRate, 48000);
-    writeWav16(out, final, { sampleRate: 48000, channels: 2 });
+    const stereo = monoFloat32ToStereoF32(audio.samples);
+    const final = resampleStereoF32(stereo, audio.sampleRate, 48000);
+    writeWav16(out, floatToInt16(final), { sampleRate: 48000, channels: 2 });
 
     const audioMs = (audio.samples.length / audio.sampleRate) * 1000;
     process.stdout.write(

@@ -27,7 +27,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
-import { monoFloat32ToStereoInt16, resampleStereo16 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32, resampleStereoF32 } from '../src/discord-host.js';
 import { measureLevel, linearToDb } from '../src/normalize.js';
 import { arg } from './args.js';
 
@@ -88,11 +88,11 @@ function isInstalled(v: Voice, root: string): boolean {
     try { return readdirSync(dir).some(n => n.toLowerCase().endsWith('.onnx')); } catch { return false; }
 }
 
-// RMS + peak in dBFS over the final 48k/16-bit/stereo buffer, measured with the
+// RMS + peak in dBFS over the final 48k float stereo buffer, measured with the
 // exact runtime math (normalize.ts measureLevel) so the numbers are directly
 // comparable to a normalize target and bakeable as-is.
-function measure(pcm: Buffer): { rmsDb: number; peakDb: number } {
-    const { rms, peak } = measureLevel(pcm);
+function measure(samples: Float32Array): { rmsDb: number; peakDb: number } {
+    const { rms, peak } = measureLevel(samples);
     return { rmsDb: linearToDb(rms), peakDb: linearToDb(peak) };
 }
 
@@ -126,8 +126,8 @@ async function measureVoice(v: Voice, root: string, threads: number, lines: stri
         const audio = await tts.synth(text);
         const genMs = Number(process.hrtime.bigint() - t0) / 1e6;
         if (!audio || audio.samples.length === 0) continue;
-        const stereo = monoFloat32ToStereoInt16(audio.samples);
-        const final = resampleStereo16(stereo, audio.sampleRate, 48000);
+        const stereo = monoFloat32ToStereoF32(audio.samples);
+        const final = resampleStereoF32(stereo, audio.sampleRate, 48000);
         const m = measure(final);
         per.push({ ...m, genMs, audioMs: (audio.samples.length / audio.sampleRate) * 1000 });
     }

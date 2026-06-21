@@ -1,41 +1,31 @@
 // Helpers around the `audio-decode` package. The bridge calls `decode()` (from
 // 'audio-decode') directly — it auto-detects the container (wav/mp3/ogg/flac/
 // opus/…) via `audio-type` and decodes to planar Float32 PCM, with each codec's
-// WASM inlined (no native bindings, nothing to stage). This module only adds
-// the float->int16 conversion (`*_PHASE1_SHIM`) and a startup warm-up. The
-// conversion exists because the rest of the pipeline (mixer, effects) works in
-// int16; it could be dropped if that ever moves to float32 end-to-end.
+// WASM inlined (no native bindings, nothing to stage). This module adds the
+// planar->interleaved downmix into the bridge's internal currency (interleaved
+// float32 stereo) and a startup warm-up. No int16 conversion happens here — the
+// whole interior pipeline is float; int16 lives only at the mixer's output.
 import decode from 'audio-decode';
 
 import * as log from './file-log.js';
 
-function floatToInt16(f: number): number {
-    // Match effects.ts: decode is int16/32768, so encode is round(f*32768),
-    // hard-clamped to the int16 range (no dither).
-    let s = Math.round(f * 32768);
-    if (s > 32767) s = 32767;
-    else if (s < -32768) s = -32768;
-    return s;
-}
-
-// TEMPORARY Phase-1 shim: planar Float32 channels -> interleaved 16-bit signed
-// LE stereo Buffer at the SOURCE sample rate (the caller resamples to 48k).
-// Downmix: mono duplicates L=R; stereo passes through; >2ch keeps the first two
-// channels (predictable; a proper fold-down matrix is out of scope here).
-// Deleted wholesale in Phase 3 — keep self-contained so removal is one place.
-export function planarFloatToInterleavedInt16Stereo_PHASE1_SHIM(channelData: Float32Array[]): Buffer {
+// Planar Float32 channels -> interleaved float32 stereo (L,R,L,R,…) at the SOURCE
+// sample rate (the caller resamples to 48k). Downmix: mono duplicates L=R; stereo
+// passes through; >2ch keeps the first two channels (predictable; a proper
+// fold-down matrix is out of scope here).
+export function planarFloatToInterleavedStereoF32(channelData: Float32Array[]): Float32Array {
     const ch = channelData.length;
-    if (ch === 0) return Buffer.alloc(0);
+    if (ch === 0) return new Float32Array(0);
     const L = channelData[0]!;
     const R = ch === 1 ? channelData[0]! : channelData[1]!;
     if (ch > 2) {
         log.warn(`decode: ${ch}-channel audio downmixed to stereo (first two channels)`);
     }
     const frames = Math.min(L.length, R.length);
-    const out = Buffer.allocUnsafe(frames * 4);
+    const out = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        out.writeInt16LE(floatToInt16(L[i]!), i * 4);
-        out.writeInt16LE(floatToInt16(R[i]!), i * 4 + 2);
+        out[i * 2] = L[i]!;
+        out[i * 2 + 1] = R[i]!;
     }
     return out;
 }

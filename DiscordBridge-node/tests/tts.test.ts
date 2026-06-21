@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import decode from 'audio-decode';
 
 import { parseTtsParams, sliderToSpeed, OnnxTts } from '../src/tts.js';
-import { monoFloat32ToStereoInt16 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32 } from '../src/discord-host.js';
 import { wavHeader16, writeWav16 } from '../src/wav-write.js';
 import { createSinkFromEnv } from '../src/audio-sink.js';
 
@@ -124,40 +124,38 @@ test('sliderToSpeed: a non-positive result degrades to 1.0', () => {
 });
 
 // ----------------------------------------------------------------------------
-// monoFloat32ToStereoInt16
+// monoFloat32ToStereoF32
 // ----------------------------------------------------------------------------
 
-test('monoFloat32ToStereoInt16: duplicates the channel and is 4 bytes/sample', () => {
+test('monoFloat32ToStereoF32: duplicates the channel into interleaved stereo', () => {
     const mono = Float32Array.from([0, 0.5, -0.5]);
-    const buf = monoFloat32ToStereoInt16(mono);
-    assert.equal(buf.length, mono.length * 4);
+    const buf = monoFloat32ToStereoF32(mono);
+    assert.equal(buf.length, mono.length * 2);
     for (let i = 0; i < mono.length; i++) {
-        const l = buf.readInt16LE(i * 4);
-        const r = buf.readInt16LE(i * 4 + 2);
-        assert.equal(l, r, `frame ${i}: L should equal R`);
+        assert.equal(buf[i * 2], buf[i * 2 + 1], `frame ${i}: L should equal R`);
     }
-    assert.equal(buf.readInt16LE(0), 0);
-    assert.equal(buf.readInt16LE(4), Math.round(0.5 * 0x7fff));
-    assert.equal(buf.readInt16LE(8), Math.round(-0.5 * 0x8000));
+    assert.equal(buf[0], 0);
+    assert.equal(buf[2], 0.5);
+    assert.equal(buf[4], -0.5);
 });
 
-test('monoFloat32ToStereoInt16: clamps out-of-range samples to full scale', () => {
+test('monoFloat32ToStereoF32: preserves out-of-range samples (the exit conversion clamps)', () => {
     const mono = Float32Array.from([2.0, -2.0]);
-    const buf = monoFloat32ToStereoInt16(mono);
-    assert.equal(buf.readInt16LE(0), 0x7fff);   // +full scale
-    assert.equal(buf.readInt16LE(4), -0x8000);  // -full scale
+    const buf = monoFloat32ToStereoF32(mono);
+    assert.equal(buf[0], 2.0);
+    assert.equal(buf[2], -2.0);
 });
 
-test('monoFloat32ToStereoInt16: gain factor scales before clamp (default 1 unchanged)', () => {
+test('monoFloat32ToStereoF32: gain factor scales the samples (default 1 unchanged)', () => {
     const mono = Float32Array.from([0.5]);
-    // Default gain leaves the sample at 0.5 * 0x7fff.
-    assert.equal(monoFloat32ToStereoInt16(mono).readInt16LE(0), Math.round(0.5 * 0x7fff));
+    // Default gain leaves the sample at 0.5.
+    assert.equal(monoFloat32ToStereoF32(mono)[0], 0.5);
     // gain 0.5 halves it; both channels carry the scaled value.
-    const half = monoFloat32ToStereoInt16(mono, 0.5);
-    assert.equal(half.readInt16LE(0), Math.round(0.25 * 0x7fff));
-    assert.equal(half.readInt16LE(2), Math.round(0.25 * 0x7fff));
-    // A boosting gain still clamps at full scale (no wrap/overflow).
-    assert.equal(monoFloat32ToStereoInt16(mono, 4).readInt16LE(0), 0x7fff);
+    const half = monoFloat32ToStereoF32(mono, 0.5);
+    assert.equal(half[0], 0.25);
+    assert.equal(half[1], 0.25);
+    // A boosting gain is applied without clamping (headroom preserved).
+    assert.equal(monoFloat32ToStereoF32(mono, 4)[0], 2.0);
 });
 
 // ----------------------------------------------------------------------------

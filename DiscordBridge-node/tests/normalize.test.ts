@@ -1,70 +1,63 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
-import { normalizePcm16 } from '../src/normalize.js';
+import { normalize } from '../src/normalize.js';
 
-// Build N stereo frames (16-bit LE) where every sample equals `value`. A constant
-// amplitude makes RMS == |value| / 32768, so the expected gain is easy to reason
+// Build N interleaved float32 stereo frames where every sample equals `value`. A
+// constant amplitude makes RMS == |value|, so the expected gain is easy to reason
 // about in the assertions below.
-function constStereo(frames: number, value: number): Buffer {
-    const buf = Buffer.alloc(frames * 4);
-    for (let i = 0; i < frames; i++) {
-        buf.writeInt16LE(value, i * 4);
-        buf.writeInt16LE(value, i * 4 + 2);
-    }
+function constStereo(frames: number, value: number): Float32Array {
+    const buf = new Float32Array(frames * 2);
+    buf.fill(value);
     return buf;
 }
 
-function maxAbs(pcm: Buffer): number {
+function maxAbs(samples: Float32Array): number {
     let m = 0;
-    for (let i = 0; i < pcm.length; i += 2) {
-        const a = Math.abs(pcm.readInt16LE(i));
+    for (let i = 0; i < samples.length; i++) {
+        const a = Math.abs(samples[i]!);
         if (a > m) m = a;
     }
     return m;
 }
 
-function rmsNorm(pcm: Buffer): number {
+function rmsNorm(samples: Float32Array): number {
     let sumSq = 0;
-    const n = pcm.length >>> 1;
-    for (let i = 0; i < n; i++) {
-        const s = pcm.readInt16LE(i * 2) / 32768;
-        sumSq += s * s;
-    }
-    return Math.sqrt(sumSq / n);
+    for (let i = 0; i < samples.length; i++) sumSq += samples[i]! * samples[i]!;
+    return Math.sqrt(sumSq / samples.length);
 }
 
 test('empty buffer is returned untouched', () => {
-    const empty = Buffer.alloc(0);
-    const r = normalizePcm16(empty, -20);
+    const empty = new Float32Array(0);
+    const r = normalize(empty, -20);
     assert.equal(r.applied, false);
     assert.equal(r.gain, 1);
-    assert.equal(r.pcm, empty);
+    assert.equal(r.samples, empty);
 });
 
 test('silence (all zeros) is left untouched, no divide-by-zero blowup', () => {
     const silence = constStereo(480, 0);
-    const r = normalizePcm16(silence, -20);
+    const r = normalize(silence, -20);
     assert.equal(r.applied, false);
     assert.equal(r.gain, 1);
-    assert.equal(r.pcm, silence);
+    assert.equal(r.samples, silence);
 });
 
 test('loud clip is attenuated toward target (gain < 1)', () => {
-    // Half-scale constant → RMS ≈ -6 dBFS, well above a -20 target.
-    const loud = constStereo(480, 16384);
-    const r = normalizePcm16(loud, -20);
+    // Half-scale constant → RMS = -6 dBFS, well above a -20 target.
+    const loud = constStereo(480, 0.5);
+    const r = normalize(loud, -20);
     assert.equal(r.applied, true);
     assert.ok(r.gain < 1, `expected attenuation, got gain=${r.gain}`);
     // RMS of the result should land near the -20 dBFS target (10^(-20/20)=0.1).
-    assert.ok(Math.abs(rmsNorm(r.pcm) - 0.1) < 0.01, `rms=${rmsNorm(r.pcm)}`);
-    assert.ok(maxAbs(r.pcm) <= 32767);
+    assert.ok(Math.abs(rmsNorm(r.samples) - 0.1) < 0.01, `rms=${rmsNorm(r.samples)}`);
+    assert.ok(maxAbs(r.samples) <= 1);
 });
 
 test('quiet clip is boosted but capped at +12 dB max boost', () => {
     // Very quiet constant → target wants ~+34 dB; the cap should bind first.
-    const quiet = constStereo(480, 64);
-    const r = normalizePcm16(quiet, -20);
+    const quiet = constStereo(480, 64 / 32768);
+    const r = normalize(quiet, -20);
     assert.equal(r.applied, true);
     const maxBoost = Math.pow(10, 12 / 20); // ≈ 3.981
     assert.ok(r.gain <= maxBoost + 1e-6, `gain ${r.gain} exceeded max boost ${maxBoost}`);
@@ -72,43 +65,43 @@ test('quiet clip is boosted but capped at +12 dB max boost', () => {
 });
 
 test('peak ceiling binds before max boost on a low-RMS, high-peak clip', () => {
-    // One full-ish peak frame in an otherwise-silent buffer: low RMS demands a big
-    // boost, but the peak ceiling (0.97) clamps the gain below the +12 dB cap.
+    // One peak frame in an otherwise-silent buffer: low RMS demands a big boost,
+    // but the peak ceiling (0.97) clamps the gain below the +12 dB cap.
     const buf = constStereo(100, 0);
-    buf.writeInt16LE(8192, 0);
-    buf.writeInt16LE(8192, 2);
-    const r = normalizePcm16(buf, -20);
+    buf[0] = 0.25;
+    buf[1] = 0.25;
+    const r = normalize(buf, -20);
     assert.equal(r.applied, true);
-    const peakNorm = 8192 / 32768;
+    const peakNorm = 0.25;
     const peakLimit = 0.97 / peakNorm;
     assert.ok(r.gain <= peakLimit + 1e-6, `gain ${r.gain} exceeded peak limit ${peakLimit}`);
     // No sample may clip after the boost.
-    assert.ok(maxAbs(r.pcm) <= 32767);
+    assert.ok(maxAbs(r.samples) <= 1);
 });
 
 test('near-target clip is left untouched (gain within unity epsilon)', () => {
-    // Constant chosen so RMS ≈ -20 dBFS already (0.1 * 32768 ≈ 3277).
-    const onTarget = constStereo(480, 3277);
-    const r = normalizePcm16(onTarget, -20);
+    // Constant chosen so RMS ≈ -20 dBFS already (0.1).
+    const onTarget = constStereo(480, 0.1);
+    const r = normalize(onTarget, -20);
     assert.equal(r.applied, false);
-    assert.equal(r.pcm, onTarget);
+    assert.equal(r.samples, onTarget);
 });
 
 test('output length always matches input length', () => {
-    const buf = constStereo(123, 9000);
-    const r = normalizePcm16(buf, -16);
-    assert.equal(r.pcm.length, buf.length);
+    const buf = constStereo(123, 0.27);
+    const r = normalize(buf, -16);
+    assert.equal(r.samples.length, buf.length);
 });
 
 test('known level skips measurement and matches measuring an equivalent clip', () => {
-    // A constant half-scale clip: RMS == peak == 16384/32768 = 0.5. Passing that
-    // as a known level must yield the identical gain to measuring it.
-    const loud = constStereo(480, 16384);
-    const measured = normalizePcm16(loud, -20);
-    const known = normalizePcm16(loud, -20, { rms: 0.5, peak: 0.5 });
+    // A constant half-scale clip: RMS == peak == 0.5. Passing that as a known
+    // level must yield the identical gain to measuring it.
+    const loud = constStereo(480, 0.5);
+    const measured = normalize(loud, -20);
+    const known = normalize(loud, -20, { rms: 0.5, peak: 0.5 });
     assert.equal(known.applied, measured.applied);
     assert.ok(Math.abs(known.gain - measured.gain) < 1e-9, `known=${known.gain} measured=${measured.gain}`);
-    assert.ok(Math.abs(rmsNorm(known.pcm) - 0.1) < 0.01);
+    assert.ok(Math.abs(rmsNorm(known.samples) - 0.1) < 0.01);
 });
 
 test('known level uses the supplied numbers, not the buffer contents', () => {
@@ -116,7 +109,7 @@ test('known level uses the supplied numbers, not the buffer contents', () => {
     // clamp: a tiny known rms with a high known peak limits the gain to the
     // ceiling/peak, proving the buffer was never scanned for level.
     const buf = constStereo(200, 0);
-    const r = normalizePcm16(buf, -20, { rms: 0.02, peak: 0.8 });
+    const r = normalize(buf, -20, { rms: 0.02, peak: 0.8 });
     assert.equal(r.applied, true);
     const peakLimit = 0.97 / 0.8;
     assert.ok(r.gain <= peakLimit + 1e-9, `gain ${r.gain} exceeded peak limit ${peakLimit}`);

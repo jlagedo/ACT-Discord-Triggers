@@ -21,9 +21,10 @@ import {
 } from '@discordjs/voice';
 import * as log from './file-log.js';
 import decode from 'audio-decode';
-import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
+import { planarFloatToInterleavedStereoF32 } from './audio-decode.js';
+import { int16ToFloat32, floatToInt16 } from './audio-format.js';
 import { applyRandomEffect } from './effects.js';
-import { normalizePcm16, computeGain, dbToLinear, type KnownLevel } from './normalize.js';
+import { normalize, computeGain, dbToLinear, type KnownLevel } from './normalize.js';
 import { declick, declickIn, declickOut } from './declick.js';
 import { StreamingResampler } from './stream-resampler.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
@@ -35,7 +36,7 @@ import { OnnxTts, parseTtsParams } from './tts.js';
 import { createSinkFromEnv, type AudioSink } from './audio-sink.js';
 
 const TARGET_SAMPLE_RATE = 48000;
-const TARGET_BITS = 16;
+const SAMPLES_PER_MS = TARGET_SAMPLE_RATE * 2 / 1000; // 96 float samples/ms (stereo)
 
 // Streaming TTS levels with a fixed gain from the voice's baked peak, which is
 // the loudest across the offline probe lines — a louder runtime callout can
@@ -53,38 +54,37 @@ const AUDIO_QUALITY_BITRATES = [48000, 96000, 128000];
 // turned into float PCM, so reject pathological input sizes up front.
 const MAX_DECODE_INPUT_BYTES = 64 * 1024 * 1024;
 
-// Linear-interpolation sample rate conversion for 16-bit signed LE stereo.
+// Linear-interpolation sample rate conversion for interleaved float32 stereo.
 // Quality is fine for short trigger sounds going through Opus at 48k; do not
 // reuse this for music/long-form audio without swapping to a polyphase filter.
 // Exported for unit tests.
-export function resampleStereo16(pcm: Buffer, srcRate: number, dstRate: number): Buffer {
-    if (srcRate === dstRate) return pcm;
-    const srcFrames = pcm.length >>> 2;
+export function resampleStereoF32(samples: Float32Array, srcRate: number, dstRate: number): Float32Array {
+    if (srcRate === dstRate) return samples;
+    const srcFrames = samples.length >>> 1;
     const ratio = dstRate / srcRate;
     const dstFrames = Math.max(1, Math.floor(srcFrames * ratio));
-    const out = Buffer.alloc(dstFrames * 4);
+    const out = new Float32Array(dstFrames * 2);
     const lastSrc = srcFrames - 1;
     for (let i = 0; i < dstFrames; i++) {
         const srcPos = i / ratio;
         const srcIdx = Math.floor(srcPos);
         const nextIdx = srcIdx < lastSrc ? srcIdx + 1 : lastSrc;
         const frac = srcPos - srcIdx;
-        const l1 = pcm.readInt16LE(srcIdx * 4);
-        const l2 = pcm.readInt16LE(nextIdx * 4);
-        const r1 = pcm.readInt16LE(srcIdx * 4 + 2);
-        const r2 = pcm.readInt16LE(nextIdx * 4 + 2);
-        out.writeInt16LE(Math.round(l1 + (l2 - l1) * frac), i * 4);
-        out.writeInt16LE(Math.round(r1 + (r2 - r1) * frac), i * 4 + 2);
+        const l1 = samples[srcIdx * 2]!;
+        const l2 = samples[nextIdx * 2]!;
+        const r1 = samples[srcIdx * 2 + 1]!;
+        const r2 = samples[nextIdx * 2 + 1]!;
+        out[i * 2] = l1 + (l2 - l1) * frac;
+        out[i * 2 + 1] = r1 + (r2 - r1) * frac;
     }
     return out;
 }
 
 // Read + decode a complete audio file (wav/mp3/ogg/flac) to the bridge's
-// 48k / 16-bit / stereo interleaved PCM. Throws with a user-facing message on
-// unreadable / unrecognized / undecodable input. Factored out of speakFile so
-// fixture tests can exercise decode without a Discord connection, and so Phase
-// 3 (float32 end-to-end) has a single clean swap point.
-export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
+// internal currency: 48k interleaved float32 stereo. Throws with a user-facing
+// message on unreadable / unrecognized / undecodable input. Factored out of
+// speakFile so fixture tests can exercise decode without a Discord connection.
+export async function decodeFileToFinalPcm(path: string): Promise<Float32Array> {
     let input: Buffer;
     try {
         input = await readFile(path);
@@ -113,7 +113,7 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
     // A corrupt/truncated-but-detected stream comes back empty (audio-decode
     // returns channelData:[] , sampleRate:0) rather than throwing — treat that
     // as an empty decode before validating the rate.
-    const stereoSrc = planarFloatToInterleavedInt16Stereo_PHASE1_SHIM(channelData);
+    const stereoSrc = planarFloatToInterleavedStereoF32(channelData);
     if (stereoSrc.length === 0) {
         throw new Error('Decoded audio is empty');
     }
@@ -121,25 +121,36 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
         throw new Error(`Decoded audio has an invalid sample rate (${sampleRate} Hz)`);
     }
 
-    const finalPcm = resampleStereo16(stereoSrc, sampleRate, TARGET_SAMPLE_RATE);
-    log.info(`SpeakFile decoded: srcRate=${sampleRate} ch=${channelData.length} outBytes=${finalPcm.length}`);
+    const finalPcm = resampleStereoF32(stereoSrc, sampleRate, TARGET_SAMPLE_RATE);
+    log.info(`SpeakFile decoded: srcRate=${sampleRate} ch=${channelData.length} outSamples=${finalPcm.length}`);
     return finalPcm;
 }
 
-// ONNX models output Float32 mono. Convert to the bridge's 16-bit signed LE stereo
-// (duplicating the channel) at the model's native rate; the caller resamples to
-// 48 kHz with resampleStereo16. An optional `gain` is folded in before the int16
-// clamp — the streaming path passes the voice's fixed baked-loudness gain here so
-// leveling needs no separate whole-buffer normalize pass. Exported for unit tests.
-export function monoFloat32ToStereoInt16(mono: Float32Array, gain = 1): Buffer {
-    const out = Buffer.alloc(mono.length * 4); // 2 channels * 2 bytes
+// ONNX models output Float32 mono. Convert to the bridge's interleaved float32
+// stereo (duplicating the channel) at the model's native rate; the caller
+// resamples to 48 kHz with resampleStereoF32. An optional `gain` is folded in
+// here — the streaming path passes the voice's fixed baked-loudness gain so
+// leveling needs no separate whole-buffer normalize pass. No clamp: headroom is
+// preserved through the chain and the mixer's exit conversion is the single
+// clamp point. Exported for unit tests.
+export function monoFloat32ToStereoF32(mono: Float32Array, gain = 1): Float32Array {
+    const out = new Float32Array(mono.length * 2);
     for (let i = 0; i < mono.length; i++) {
-        let s = mono[i]! * gain;
-        if (s > 1) s = 1; else if (s < -1) s = -1;
-        const v = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
-        out.writeInt16LE(v, i * 4);
-        out.writeInt16LE(v, i * 4 + 2);
+        const s = mono[i]! * gain;
+        out[i * 2] = s;
+        out[i * 2 + 1] = s;
     }
+    return out;
+}
+
+// Concatenate interleaved float32 parts into one buffer (the streaming sink
+// joins its per-chunk parts before the single int16 conversion for the WAV).
+function concatF32(parts: Float32Array[]): Float32Array {
+    let total = 0;
+    for (const p of parts) total += p.length;
+    const out = new Float32Array(total);
+    let off = 0;
+    for (const p of parts) { out.set(p, off); off += p.length; }
     return out;
 }
 
@@ -424,7 +435,9 @@ export class DiscordHost implements Host {
     speakPcm(pcmBuffer: Buffer, meta?: SpeakMeta): OpResult {
         const guard = this._guardPlayback();
         if (!guard.ok) return guard;
-        return this._enqueue('SpeakPcm', pcmBuffer, meta);
+        // The wire frame is s16le (validated by pipe-server); widen to the
+        // pipeline's float currency once here, at the ingest edge.
+        return this._enqueue('SpeakPcm', int16ToFloat32(pcmBuffer), meta);
     }
 
     // Enqueue a fully-prepared 48k/16/stereo buffer into the mixer and, when a
@@ -432,7 +445,7 @@ export class DiscordHost implements Host {
     // (this much was pure program time) plus a voice-RTT snapshot taken at the
     // exact moment of this trigger (#2). The mixer later logs enqueue->firstEmit
     // for the same reqId (#1), closing the gap between "queued" and "on the wire".
-    private _enqueue(kind: string, pcm: Buffer, meta?: SpeakMeta, baked?: KnownLevel, skipFx = false): OpResult {
+    private _enqueue(kind: string, pcm: Float32Array, meta?: SpeakMeta, baked?: KnownLevel, skipFx = false): OpResult {
         const reqId = meta?.reqId ?? 0;
         // Optional random sound effect. The bridge owns the whole decision: roll
         // the dice from the current config (randomFx + fxChance), then let
@@ -445,10 +458,10 @@ export class DiscordHost implements Host {
         if (!skipFx && this.config.randomFx && this._rollFx()) {
             try {
                 const fx = applyRandomEffect(buf);
-                buf = fx.pcm;
+                buf = fx.samples;
                 fxFired = true;
                 log.info(`fx reqId=${reqId} effect=${fx.name} ` +
-                    `inMs=${this._pcmDurationMs(pcm.length)} outMs=${this._pcmDurationMs(buf.length)}`);
+                    `inMs=${this._sampleDurationMs(pcm.length)} outMs=${this._sampleDurationMs(buf.length)}`);
             } catch (e) {
                 log.error('random effect failed; playing dry', e);
             }
@@ -465,9 +478,9 @@ export class DiscordHost implements Host {
             const targetDb = -Math.abs(this.config.normalizeTarget);
             const known = baked && !fxFired ? baked : undefined;
             try {
-                const norm = normalizePcm16(buf, targetDb, known);
+                const norm = normalize(buf, targetDb, known);
                 if (norm.applied) {
-                    buf = norm.pcm;
+                    buf = norm.samples;
                     log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${targetDb}dBFS`);
                 }
             } catch (e) {
@@ -484,7 +497,8 @@ export class DiscordHost implements Host {
         // records a live bot and captures audio in offline capture mode.
         if (this.sink) {
             try {
-                const path = this.sink.write(`${kind}-${reqId}`, buf);
+                // The sink writes a listenable s16le WAV; convert at this edge.
+                const path = this.sink.write(`${kind}-${reqId}`, floatToInt16(buf));
                 log.info(`audio sink: ${kind} reqId=${reqId} -> ${path}`);
             } catch (e) {
                 log.error('audio sink write failed', e);
@@ -499,15 +513,16 @@ export class DiscordHost implements Host {
         }
         if (meta) {
             const recvToEnqueue = (enqueueT - meta.recvT).toFixed(1);
-            log.info(`${kind} reqId=${reqId} pcmMs=${this._pcmDurationMs(buf.length)} ` +
+            log.info(`${kind} reqId=${reqId} pcmMs=${this._sampleDurationMs(buf.length)} ` +
                 `recv->enqueue=${recvToEnqueue}ms ${this._pingStr()}`);
         }
         return { ok: true, error: '' };
     }
 
-    // Bytes of 48k/16-bit/stereo PCM -> clip duration in ms (192 bytes per ms).
-    private _pcmDurationMs(bytes: number): number {
-        return Math.round(bytes / (TARGET_SAMPLE_RATE * 2 * (TARGET_BITS / 8) / 1000));
+    // Interleaved-float32-stereo sample count -> clip duration in ms (96 samples
+    // per ms: 48k * 2 channels / 1000).
+    private _sampleDurationMs(samples: number): number {
+        return Math.round(samples / SAMPLES_PER_MS);
     }
 
     // Roll the per-clip random-effect dice from config.fxChance (0..100).
@@ -560,7 +575,7 @@ export class DiscordHost implements Host {
             return { ok: false, error: `Audio file too large: ${size} bytes (max ${MAX_DECODE_INPUT_BYTES})` };
         }
 
-        let finalPcm: Buffer;
+        let finalPcm: Float32Array;
         try {
             finalPcm = await decodeFileToFinalPcm(path);
         } catch (e) {
@@ -601,9 +616,9 @@ export class DiscordHost implements Host {
             this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
             return { ok: false, error: 'ONNX synthesis produced no audio' };
         }
-        const finalPcm = resampleStereo16(
-            monoFloat32ToStereoInt16(audio.samples), audio.sampleRate, TARGET_SAMPLE_RATE);
-        log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outBytes=${finalPcm.length}`);
+        const finalPcm = resampleStereoF32(
+            monoFloat32ToStereoF32(audio.samples), audio.sampleRate, TARGET_SAMPLE_RATE);
+        log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outSamples=${finalPcm.length}`);
         return this._enqueue('SpeakText', finalPcm, meta, undefined, /*skipFx*/ true);
     }
 
@@ -630,12 +645,12 @@ export class DiscordHost implements Host {
         // This callout's own mixer voice. Each concurrent callout opens its own,
         // and the mixer sums them, so overlapping callouts play together.
         const handle: VoiceHandle | null = mixer ? mixer.openVoice({ id: reqId, enqueueT: performance.now() }) : null;
-        const sinkParts: Buffer[] = [];
+        const sinkParts: Float32Array[] = [];
         // Held in an object so its narrowing survives assignment inside `feed`
         // (a `let` assigned only in a closure gets pinned to its null init).
         const rs: { r: StreamingResampler | null } = { r: null };
-        let pending: Buffer | null = null; // last emitted buffer, held for tail declick
-        let isFirst = true;                // pending is also the first emitted buffer
+        let pending: Float32Array | null = null; // last emitted buffer, held for tail declick
+        let isFirst = true;                      // pending is also the first emitted buffer
         let streamedAny = false;
 
         // Emit the held `pending` buffer, declicking its onset (first of many) /
@@ -654,7 +669,7 @@ export class DiscordHost implements Host {
         };
         // Hand a freshly resampled buffer to the holdback: the previous pending is
         // now known not to be the last, so emit it and hold this one.
-        const consume = (out: Buffer): void => {
+        const consume = (out: Float32Array): void => {
             if (out.length === 0) return;
             flushPending(false);
             pending = out;
@@ -662,7 +677,7 @@ export class DiscordHost implements Host {
         // Convert one mono chunk -> stereo (gain folded) -> resampled 48k stereo.
         const feed = (samples: Float32Array, srcRate: number): void => {
             if (!rs.r) rs.r = new StreamingResampler(srcRate, TARGET_SAMPLE_RATE);
-            consume(rs.r.push(monoFloat32ToStereoInt16(samples, gain)));
+            consume(rs.r.push(monoFloat32ToStereoF32(samples, gain)));
         };
 
         let audio;
@@ -687,10 +702,10 @@ export class DiscordHost implements Host {
         if (mixer && handle) mixer.closeVoice(handle);
 
         // Capture the exact played audio as one WAV (preserves the sink contract).
+        // The parts are float; convert the concatenation once to s16le for the file.
         if (this.sink && sinkParts.length > 0) {
             try {
-                const full = Buffer.concat(sinkParts);
-                const path = this.sink.write(`SpeakText-${reqId}`, full);
+                const path = this.sink.write(`SpeakText-${reqId}`, floatToInt16(concatF32(sinkParts)));
                 log.info(`audio sink: SpeakText reqId=${reqId} -> ${path}`);
             } catch (e) {
                 log.error('audio sink write failed', e);

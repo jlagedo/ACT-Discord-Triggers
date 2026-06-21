@@ -4,16 +4,16 @@
 // each clip toward one target loudness so the user isn't reaching for the volume
 // knob between triggers.
 //
-// It's per-clip and offline: the whole 48 kHz / 16-bit / stereo buffer is in hand
-// before playback, so there's no streaming compressor to maintain — just measure
-// the clip, pick one gain, apply it. RMS (average energy) is the loudness proxy
-// because it tracks perceived volume far better than peak does; the peak is only
-// used as a brick-wall ceiling so a boost can never clip.
+// It's per-clip and offline: the whole 48 kHz interleaved float32 stereo buffer
+// is in hand before playback, so there's no streaming compressor to maintain —
+// just measure the clip, pick one gain, apply it. RMS (average energy) is the
+// loudness proxy because it tracks perceived volume far better than peak does;
+// the peak is only used as a brick-wall ceiling so a boost can never clip.
 //
 // discord-host applies this in _enqueue, AFTER any random effect, so the effect's
 // own level change is what gets corrected.
 
-export const FULL_SCALE = 32768; // |int16| range; 1.0 == 0 dBFS
+export const FULL_SCALE = 32768; // |int16| range; one LSB == 1 / FULL_SCALE
 
 // Leave a sliver of headroom under 0 dBFS. A gain that would push the loudest
 // sample past this is clamped down to it — the limiter that makes boosting safe.
@@ -33,9 +33,9 @@ const MIN_RMS = 1 / FULL_SCALE; // one LSB
 const UNITY_EPSILON = 0.01; // ≈ 0.086 dB
 
 export interface NormalizeResult {
-    pcm: Buffer;
+    samples: Float32Array;
     gain: number;     // linear gain actually applied (1 when not applied)
-    applied: boolean; // false → pcm is the input buffer, untouched
+    applied: boolean; // false → samples is the input buffer, untouched
 }
 
 // A pre-known loudness for the buffer, both linear and normalized to full scale
@@ -59,17 +59,17 @@ export function linearToDb(x: number): number {
     return x > 0 ? 20 * Math.log10(x) : -Infinity;
 }
 
-// Measure a 48k/16-bit/stereo PCM buffer's RMS and peak as linear fractions of
-// full scale (1.0 == 0 dBFS), both channels together (one coherent gain, not
-// per-channel balance). The same energy math normalizePcm16 levels with, exposed
-// so offline tooling bakes voice loudness from the exact runtime numbers.
-export function measureLevel(pcm: Buffer): { rms: number; peak: number } {
-    const sampleCount = pcm.length >>> 1; // int16 samples across L+R
+// Measure an interleaved float32 stereo buffer's RMS and peak as linear fractions
+// of full scale (1.0 == 0 dBFS), both channels together (one coherent gain, not
+// per-channel balance). The same energy math `normalize` levels with, exposed so
+// offline tooling bakes voice loudness from the exact runtime numbers.
+export function measureLevel(samples: Float32Array): { rms: number; peak: number } {
+    const sampleCount = samples.length; // float samples across L+R
     if (sampleCount === 0) return { rms: 0, peak: 0 };
     let sumSq = 0;
     let peak = 0;
     for (let i = 0; i < sampleCount; i++) {
-        const s = pcm.readInt16LE(i * 2) / FULL_SCALE;
+        const s = samples[i]!;
         sumSq += s * s;
         const a = s < 0 ? -s : s;
         if (a > peak) peak = a;
@@ -89,28 +89,27 @@ export function computeGain(rms: number, peak: number, targetDbfs: number): numb
     return Math.min(dbToLinear(targetDbfs) / rms, peakLimit, MAX_BOOST_LINEAR);
 }
 
-// Normalize a 48k/16-bit/stereo PCM buffer toward `targetDbfs` (a negative dBFS
-// value, e.g. -20). Measures RMS + peak across every sample (both channels
+// Normalize an interleaved float32 stereo buffer toward `targetDbfs` (a negative
+// dBFS value, e.g. -20). Measures RMS + peak across every sample (both channels
 // together — we want a single coherent gain, not per-channel balance changes),
 // then derives one gain bounded by the peak ceiling and the max-boost cap.
 // When `known` is supplied (a baked per-voice level), the measurement pass is
 // skipped and the gain is derived from it — same gain math, no buffer scan.
-export function normalizePcm16(pcm: Buffer, targetDbfs: number, known?: KnownLevel): NormalizeResult {
-    const sampleCount = pcm.length >>> 1; // int16 samples across L+R
-    if (sampleCount === 0) return { pcm, gain: 1, applied: false };
+// The result stays float (the peak ceiling already guarantees no sample exceeds
+// ~0.97); the single int16 conversion happens later at the mixer's output.
+export function normalize(samples: Float32Array, targetDbfs: number, known?: KnownLevel): NormalizeResult {
+    const sampleCount = samples.length; // float samples across L+R
+    if (sampleCount === 0) return { samples, gain: 1, applied: false };
 
-    const { rms, peak } = known ?? measureLevel(pcm);
-    if (rms < MIN_RMS || peak <= 0) return { pcm, gain: 1, applied: false };
+    const { rms, peak } = known ?? measureLevel(samples);
+    if (rms < MIN_RMS || peak <= 0) return { samples, gain: 1, applied: false };
 
     const gain = computeGain(rms, peak, targetDbfs);
-    if (Math.abs(gain - 1) < UNITY_EPSILON) return { pcm, gain: 1, applied: false };
+    if (Math.abs(gain - 1) < UNITY_EPSILON) return { samples, gain: 1, applied: false };
 
-    const out = Buffer.allocUnsafe(sampleCount * 2);
+    const out = new Float32Array(sampleCount);
     for (let i = 0; i < sampleCount; i++) {
-        let v = Math.round(pcm.readInt16LE(i * 2) * gain);
-        if (v > 32767) v = 32767;          // ceiling makes this rare, but a
-        else if (v < -32768) v = -32768;   // rounded peak can still graze it
-        out.writeInt16LE(v, i * 2);
+        out[i] = samples[i]! * gain;
     }
-    return { pcm: out, gain, applied: true };
+    return { samples: out, gain, applied: true };
 }

@@ -15,7 +15,8 @@
 //   --lang <espeak> --speed 0..20 --threads N --text "..." --out <file.wav>
 
 import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
-import { monoFloat32ToStereoInt16 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32 } from '../src/discord-host.js';
+import { floatToInt16 } from '../src/audio-format.js';
 import { StreamingResampler } from '../src/stream-resampler.js';
 import { writeWav16 } from '../src/wav-write.js';
 import { performance } from 'node:perf_hooks';
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
     await tts.synth('Ready.');
 
     const rs = { r: null as StreamingResampler | null };
-    const outParts: Buffer[] = [];
+    const outParts: Float32Array[] = [];
     let srcRate = 0;
     let count = 0;
     let totalSamples = 0;
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
         count++;
         totalSamples += samples.length;
         if (!rs.r) rs.r = new StreamingResampler(rate, 48000);
-        outParts.push(rs.r.push(monoFloat32ToStereoInt16(samples)));
+        outParts.push(rs.r.push(monoFloat32ToStereoF32(samples)));
     });
     if (rs.r) outParts.push(rs.r.flush());
     const genMs = performance.now() - t0;
@@ -80,8 +81,12 @@ async function main(): Promise<void> {
         return;
     }
 
-    const final = Buffer.concat(outParts);
-    writeWav16(out, final, { sampleRate: 48000, channels: 2 });
+    let total = 0;
+    for (const p of outParts) total += p.length;
+    const final = new Float32Array(total);
+    let off = 0;
+    for (const p of outParts) { final.set(p, off); off += p.length; }
+    writeWav16(out, floatToInt16(final), { sampleRate: 48000, channels: 2 });
 
     const audioMs = (totalSamples / srcRate) * 1000;
     const avgDelta = deltas.length ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;

@@ -1,13 +1,16 @@
 // Random sound-effects for trigger playback. When the plugin flags a SpeakPcm /
 // SpeakFile request (user opted in, RNG rolled a hit), discord-host runs the
-// fully-decoded 48 kHz / 16-bit / stereo PCM buffer through one randomly-chosen
-// effect from EFFECT_NAMES before handing it to the mixer. Picking the effect
-// AND its parameters here (not on the plugin side) keeps the whole DSP catalog
-// in one place — the wire only carries a single "apply a random effect" bit.
+// fully-decoded 48 kHz interleaved float32 stereo buffer through one randomly-
+// chosen effect from EFFECT_NAMES before handing it on. Picking the effect AND
+// its parameters here (not on the plugin side) keeps the whole DSP catalog in
+// one place — the wire only carries a single "apply a random effect" bit.
 //
-// Everything is pure int16/float math: no native deps, trivial CPU next to the
-// Opus encode that follows. Each effect randomizes its own parameters within a
-// tasteful range so two hits of the same effect don't sound identical.
+// Everything is pure float math: no native deps, trivial CPU next to the Opus
+// encode that follows. Output is left in float (it may run past ±1 — an echo
+// train or reverb tail summing hot — and the single int16 conversion at the
+// mixer's output handles the clamp), so no requantization happens here. Each
+// effect randomizes its own parameters within a tasteful range so two hits of
+// the same effect don't sound identical.
 //
 // The rng is injectable so the unit tests are deterministic; production passes
 // Math.random.
@@ -24,39 +27,32 @@ export const EFFECT_NAMES = [
 ] as const;
 export type EffectName = typeof EFFECT_NAMES[number];
 
-export interface EffectResult { pcm: Buffer; name: EffectName }
+export interface EffectResult { samples: Float32Array; name: EffectName }
 
 type Channels = readonly [Float32Array, Float32Array];
 type EffectFn = (L: Float32Array, R: Float32Array, rng: Rng) => Channels;
 
-// --- PCM <-> float helpers -------------------------------------------------
+// --- interleaved <-> planar helpers ----------------------------------------
 
-function decode(pcm: Buffer): Channels {
-    const frames = pcm.length >>> 2; // 4 bytes per stereo frame
+function deinterleave(samples: Float32Array): Channels {
+    const frames = samples.length >>> 1; // 2 samples per stereo frame
     const L = new Float32Array(frames);
     const R = new Float32Array(frames);
     for (let i = 0; i < frames; i++) {
-        L[i] = pcm.readInt16LE(i * 4) / 32768;
-        R[i] = pcm.readInt16LE(i * 4 + 2) / 32768;
+        L[i] = samples[i * 2]!;
+        R[i] = samples[i * 2 + 1]!;
     }
     return [L, R];
 }
 
-function encode(L: Float32Array, R: Float32Array): Buffer {
+function interleave(L: Float32Array, R: Float32Array): Float32Array {
     const frames = Math.min(L.length, R.length);
-    const out = Buffer.allocUnsafe(frames * 4);
+    const out = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        out.writeInt16LE(clamp16(L[i]!), i * 4);
-        out.writeInt16LE(clamp16(R[i]!), i * 4 + 2);
+        out[i * 2] = L[i]!;
+        out[i * 2 + 1] = R[i]!;
     }
     return out;
-}
-
-function clamp16(x: number): number {
-    let s = Math.round(x * 32768);
-    if (s > 32767) s = 32767;
-    else if (s < -32768) s = -32768;
-    return s;
 }
 
 function rangeOf(rng: Rng, min: number, max: number): number {
@@ -280,20 +276,21 @@ const EFFECTS: Record<EffectName, EffectFn> = {
     echo, reverb, flanger, chorus, tremolo, distortion, muffle, pitch,
 };
 
-// Apply a named effect to a 48k/16/stereo PCM buffer. Buffers too short to hold
-// a single stereo frame are returned untouched.
-export function applyEffect(name: EffectName, pcm: Buffer, rng: Rng = Math.random): Buffer {
-    if (pcm.length < 4) return pcm;
-    const [L, R] = decode(pcm);
+// Apply a named effect to a 48k interleaved float32 stereo buffer. Buffers too
+// short to hold a single stereo frame are returned untouched. Output stays float
+// (may exceed ±1) — the mixer's exit conversion is the single clamp point.
+export function applyEffect(name: EffectName, samples: Float32Array, rng: Rng = Math.random): Float32Array {
+    if (samples.length < 2) return samples;
+    const [L, R] = deinterleave(samples);
     const [oL, oR] = EFFECTS[name](L, R, rng);
-    return encode(oL, oR);
+    return interleave(oL, oR);
 }
 
-// Pick one effect at random and apply it; returns the processed buffer plus the
+// Pick one effect at random and apply it; returns the processed samples plus the
 // chosen effect name for logging/correlation.
-export function applyRandomEffect(pcm: Buffer, rng: Rng = Math.random): EffectResult {
+export function applyRandomEffect(samples: Float32Array, rng: Rng = Math.random): EffectResult {
     const name = EFFECT_NAMES[Math.floor(rng() * EFFECT_NAMES.length)] ?? 'echo';
-    return { pcm: applyEffect(name, pcm, rng), name };
+    return { samples: applyEffect(name, samples, rng), name };
 }
 
 // Deterministic PRNG for tests (mulberry32). Production uses Math.random.

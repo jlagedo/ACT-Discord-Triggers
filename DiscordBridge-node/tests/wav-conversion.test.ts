@@ -1,78 +1,77 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
-import { resampleStereo16 } from '../src/discord-host.js';
+import { resampleStereoF32 } from '../src/discord-host.js';
 
-function int16Buf(samples: number[]): Buffer {
-    const b = Buffer.alloc(samples.length * 2);
-    for (let i = 0; i < samples.length; i++) b.writeInt16LE(samples[i]!, i * 2);
-    return b;
+// Build interleaved float32 stereo from a flat sample list.
+function f32(samples: number[]): Float32Array {
+    return Float32Array.from(samples);
 }
 
-function readStereo(b: Buffer): Array<[number, number]> {
+function readStereo(s: Float32Array): Array<[number, number]> {
     const out: Array<[number, number]> = [];
-    for (let i = 0; i < b.length; i += 4) {
-        out.push([b.readInt16LE(i), b.readInt16LE(i + 2)]);
+    for (let i = 0; i < s.length; i += 2) {
+        out.push([s[i]!, s[i + 1]!]);
     }
     return out;
 }
 
-test('resampleStereo16: srcRate == dstRate returns input verbatim', () => {
-    const pcm = int16Buf([1, 2, 3, 4, 5, 6, 7, 8]); // 4 stereo frames
-    const out = resampleStereo16(pcm, 48000, 48000);
-    assert.equal(Buffer.compare(out, pcm), 0);
+test('resampleStereoF32: srcRate == dstRate returns input verbatim', () => {
+    const pcm = f32([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]); // 4 stereo frames
+    const out = resampleStereoF32(pcm, 48000, 48000);
+    assert.equal(out, pcm);
 });
 
-test('resampleStereo16: 44.1k → 48k stretches frame count by ratio', () => {
+test('resampleStereoF32: 44.1k → 48k stretches frame count by ratio', () => {
     // 441 input frames at 44.1k = 10 ms; expect ~480 frames at 48k.
     const frames = 441;
-    const pcm = Buffer.alloc(frames * 4);
+    const pcm = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        pcm.writeInt16LE(i, i * 4);
-        pcm.writeInt16LE(-i, i * 4 + 2);
+        pcm[i * 2] = i / frames;
+        pcm[i * 2 + 1] = -i / frames;
     }
-    const out = resampleStereo16(pcm, 44100, 48000);
-    const outFrames = out.length / 4;
+    const out = resampleStereoF32(pcm, 44100, 48000);
+    const outFrames = out.length / 2;
     assert.equal(outFrames, 480);
 });
 
-test('resampleStereo16: monotonic ramp stays monotonic after resample (no obvious aliasing)', () => {
-    // Linear ramp from 0..1000 across 1000 frames at 44.1k.
+test('resampleStereoF32: monotonic ramp stays monotonic after resample (no obvious aliasing)', () => {
+    // Linear ramp from 0..1 across 1000 frames at 44.1k.
     const frames = 1000;
-    const pcm = Buffer.alloc(frames * 4);
+    const pcm = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        pcm.writeInt16LE(i, i * 4);
-        pcm.writeInt16LE(i, i * 4 + 2);
+        pcm[i * 2] = i / frames;
+        pcm[i * 2 + 1] = i / frames;
     }
-    const out = resampleStereo16(pcm, 44100, 48000);
-    const outFrames = out.length / 4;
+    const out = resampleStereoF32(pcm, 44100, 48000);
+    const outFrames = out.length / 2;
     let prev = -1;
     for (let i = 0; i < outFrames; i++) {
-        const v = out.readInt16LE(i * 4);
+        const v = out[i * 2]!;
         // Ramp must never decrease (allow equal: trailing samples clamp to last src).
         assert.ok(v >= prev, `non-monotonic at frame ${i}: ${prev} → ${v}`);
         prev = v;
     }
 });
 
-test('resampleStereo16: 48k → 24k halves frame count and preserves channel separation', () => {
-    // 8 input frames; expect 4 output frames.
-    const pcm = int16Buf([
-        100, 200,
-        110, 210,
-        120, 220,
-        130, 230,
-        140, 240,
-        150, 250,
-        160, 260,
-        170, 270,
+test('resampleStereoF32: 48k → 24k halves frame count and preserves channel separation', () => {
+    // 8 input frames; expect 4 output frames. Left ramps 0.10..0.17, right 0.20..0.27.
+    const pcm = f32([
+        0.10, 0.20,
+        0.11, 0.21,
+        0.12, 0.22,
+        0.13, 0.23,
+        0.14, 0.24,
+        0.15, 0.25,
+        0.16, 0.26,
+        0.17, 0.27,
     ]);
-    const out = resampleStereo16(pcm, 48000, 24000);
+    const out = resampleStereoF32(pcm, 48000, 24000);
     const stereo = readStereo(out);
     assert.equal(stereo.length, 4);
     // Left ramp stays in left channel, right ramp stays in right channel.
     for (const [l, r] of stereo) {
         assert.ok(l < r, `expected L < R, got L=${l} R=${r}`);
-        assert.ok(r - l > 90 && r - l < 110, `expected ~100 channel separation, got ${r - l}`);
+        assert.ok(r - l > 0.09 && r - l < 0.11, `expected ~0.1 channel separation, got ${r - l}`);
     }
 });

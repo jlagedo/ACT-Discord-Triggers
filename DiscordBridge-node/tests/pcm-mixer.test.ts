@@ -3,17 +3,18 @@ import { strict as assert } from 'node:assert';
 
 import { PcmMixer } from '../src/pcm-mixer.js';
 
-const CHUNK_BYTES = 3840; // 960 samples * 2 channels * 2 bytes
+const CHUNK_BYTES = 3840; // 960 samples * 2 channels * 2 bytes (int16 output)
 
-function constStereo(int16Value: number, frames: number): Buffer {
-    const buf = Buffer.alloc(frames * 4);
-    for (let i = 0; i < frames; i++) {
-        buf.writeInt16LE(int16Value, i * 4);
-        buf.writeInt16LE(int16Value, i * 4 + 2);
-    }
+// Build a float32 interleaved stereo voice whose every sample maps to the int16
+// value `int16Value` at the mixer's output. value/32768 is exact in float32 for
+// |int16Value| < 2^24, so the output quantizes back to exactly int16Value.
+function constStereo(int16Value: number, frames: number): Float32Array {
+    const buf = new Float32Array(frames * 2);
+    buf.fill(int16Value / 32768);
     return buf;
 }
 
+// The mixer's output is an int16 Buffer; assertions read it as int16.
 function allSamplesEqual(buf: Buffer, expected: number): boolean {
     for (let i = 0; i < buf.length; i += 2) {
         if (buf.readInt16LE(i) !== expected) return false;
@@ -30,10 +31,9 @@ test('empty mixer emits one silence chunk', () => {
 
 test('single voice exactly one chunk long: output equals input', () => {
     const m = new PcmMixer();
-    const voice = constStereo(1234, 960);
-    m.addVoice(voice);
+    m.addVoice(constStereo(1234, 960));
     const chunk = m._mixOneChunk();
-    assert.equal(Buffer.compare(chunk, voice), 0);
+    assert.ok(allSamplesEqual(chunk, 1234));
     // Voice consumed; next chunk is silence.
     assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
 });
@@ -48,11 +48,10 @@ test('two voices sum sample-by-sample', () => {
 
 test('addVoice with latency meta mixes identically (instrumentation is side-effect-only)', () => {
     const m = new PcmMixer();
-    const voice = constStereo(4321, 960);
     // meta only drives the firstEmit log; it must not alter mixing output.
-    m.addVoice(voice, { id: 7, enqueueT: 0 });
+    m.addVoice(constStereo(4321, 960), { id: 7, enqueueT: 0 });
     const chunk = m._mixOneChunk();
-    assert.equal(Buffer.compare(chunk, voice), 0);
+    assert.ok(allSamplesEqual(chunk, 4321));
     assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
 });
 
@@ -74,7 +73,7 @@ test('negative saturation clips to -32768', () => {
 
 test('voice spanning 1.5 chunks: second chunk is half mixed, half silent', () => {
     const m = new PcmMixer();
-    // 1440 frames = 1.5 chunks of stereo s16le (1440 * 4 = 5760 bytes).
+    // 1440 frames = 1.5 chunks.
     m.addVoice(constStereo(500, 1440));
 
     const c1 = m._mixOneChunk();
@@ -120,26 +119,24 @@ test('independent per-voice cursors: longer voice survives shorter voice', () =>
     assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
 });
 
-test('addVoice tolerates trailing odd byte by truncating', () => {
+test('addVoice tolerates trailing odd sample by truncating', () => {
     const m = new PcmMixer();
-    // 960 frames worth (3840 bytes) plus one stray byte.
-    const stray = Buffer.concat([constStereo(1234, 960), Buffer.from([0xff])]);
+    // 960 frames worth plus one stray mono sample.
+    const stray = Float32Array.from([...constStereo(1234, 960), 0.5]);
     m.addVoice(stray);
     const chunk = m._mixOneChunk();
-    // The aligned 3840 bytes mix as if the stray byte didn't exist.
+    // The aligned frames mix as if the stray sample didn't exist.
     assert.ok(allSamplesEqual(chunk, 1234));
 });
 
-test('addVoice ignores buffer that has no aligned bytes', () => {
+test('addVoice ignores buffer that has no aligned samples', () => {
     const m = new PcmMixer();
-    m.addVoice(Buffer.from([0xff])); // 1 byte → truncates to 0
+    m.addVoice(Float32Array.from([0.5])); // 1 sample → truncates to 0
     assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
 });
 
 test('voice cap: 65th voice causes one FIFO drop, 64 survive', () => {
     const m = new PcmMixer();
-    // 64 voices fit; the 65th evicts the oldest. Use distinct sample values
-    // so we can prove order if we want to extend later.
     for (let i = 0; i < 64; i++) m.addVoice(constStereo(i + 1, 1));
     assert.equal(m.voiceCount, 64);
     const r = m.addVoice(constStereo(99, 1));
@@ -168,23 +165,23 @@ test('voice cap: FIFO eviction — oldest dropped, newest survives', () => {
 
 test('byte cap: large queued bytes evict oldest until under MAX_QUEUED_BYTES', () => {
     const m = new PcmMixer();
-    // 5 buffers of 8 MiB each = 40 MiB > 32 MiB cap. Adding the 5th should
-    // evict the 1st. We use real stereo s16 buffers (constStereo) so the
-    // cap math is on real consumed bytes.
-    const big = constStereo(1, 8 * 1024 * 1024 / 4); // 8 MiB worth of stereo s16
-    assert.equal(big.length, 8 * 1024 * 1024);
+    // 5 buffers of 16 MiB float each = 80 MiB > 64 MiB cap. Adding the 5th should
+    // evict the 1st. 16 MiB float = 2 Mi stereo frames (frames * 2 samples * 4 bytes).
+    const bigFrames = (16 * 1024 * 1024) / 8;
+    const big = constStereo(1, bigFrames);
+    assert.equal(big.length * 4, 16 * 1024 * 1024);
     for (let i = 0; i < 4; i++) {
         const r = m.addVoice(big);
         assert.equal(r.dropped, 0, `voice ${i + 1} should fit`);
     }
     const r5 = m.addVoice(big);
-    assert.equal(r5.dropped, 1, 'fifth 8 MiB voice should evict the first');
-    assert.ok(m.queuedBytes <= 32 * 1024 * 1024);
+    assert.equal(r5.dropped, 1, 'fifth 16 MiB voice should evict the first');
+    assert.ok(m.queuedBytes <= 64 * 1024 * 1024);
 });
 
 test('byte cap: a single oversized voice is preserved (never the only voice)', () => {
     const m = new PcmMixer();
-    const huge = constStereo(1, (40 * 1024 * 1024) / 4); // 40 MiB > cap
+    const huge = constStereo(1, (80 * 1024 * 1024) / 8); // 80 MiB > cap
     const r = m.addVoice(huge);
     assert.deepEqual(r, { dropped: 0 });
     assert.equal(m.voiceCount, 1);
@@ -192,8 +189,8 @@ test('byte cap: a single oversized voice is preserved (never the only voice)', (
 
 test('byte cap: queuedBytes decrements as chunks are consumed', () => {
     const m = new PcmMixer();
-    m.addVoice(constStereo(1, 960)); // exactly one chunk (3840 bytes)
-    assert.equal(m.queuedBytes, 3840);
+    m.addVoice(constStereo(1, 960)); // exactly one chunk (960 frames * 2 * 4 = 7680 float bytes)
+    assert.equal(m.queuedBytes, 7680);
     m._mixOneChunk();
     assert.equal(m.queuedBytes, 0);
 });
@@ -243,7 +240,7 @@ test('appendToVoice across a chunk boundary plays seamlessly (two halves == one 
     m.appendToVoice(h, constStereo(333, 480));
     m.appendToVoice(h, constStereo(333, 480));
     const chunk = m._mixOneChunk();
-    assert.equal(Buffer.compare(chunk, constStereo(333, 960)), 0);
+    assert.ok(allSamplesEqual(chunk, 333));
 });
 
 test('appendToVoice mid-chunk (partial then top-up) fills the same chunk', () => {
@@ -308,12 +305,12 @@ test('open voice is not evicted by a flood of one-shot voices', () => {
 test('queuedBytes tracks appends and drains; never negative across close', () => {
     const m = new PcmMixer();
     const h = m.openVoice();
-    m.appendToVoice(h, constStereo(1, 960)); // 3840 bytes
-    assert.equal(m.queuedBytes, 3840);
-    m.appendToVoice(h, constStereo(1, 960)); // +3840
+    m.appendToVoice(h, constStereo(1, 960)); // 7680 float bytes
     assert.equal(m.queuedBytes, 7680);
+    m.appendToVoice(h, constStereo(1, 960)); // +7680
+    assert.equal(m.queuedBytes, 15360);
     m._mixOneChunk(); // consume one chunk
-    assert.equal(m.queuedBytes, 3840);
+    assert.equal(m.queuedBytes, 7680);
     m.closeVoice(h);
     m._mixOneChunk(); // drain the rest
     assert.equal(m.queuedBytes, 0);

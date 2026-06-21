@@ -9,9 +9,9 @@ import { decodeFileToFinalPcm } from '../src/discord-host.js';
 
 // Real public-domain / CC0 clips (see fixtures/audio/README.md). They cover the
 // formats Triggernometry hands to PlaySoundMethod plus edge cases (8-bit PCM, a
-// truncated OGG). Output is always interleaved s16le stereo @48k regardless of
-// the source rate/channels/bit-depth, so length is a multiple of 4 and the
-// duration is preserved across decode + resample.
+// truncated OGG). Output is always interleaved float32 stereo @48k regardless of
+// the source rate/channels/bit-depth, so length (in samples) is a multiple of 2
+// and the duration is preserved across decode + resample.
 const FIX = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'audio');
 
 // expSeconds from the README; tolerance absorbs lossy-codec encoder padding.
@@ -31,8 +31,8 @@ for (const { file, expSeconds, note } of cases) {
     test(`decode fixture: ${file} (${note})`, async () => {
         const pcm = await decodeFileToFinalPcm(join(FIX, file));
         assert.ok(pcm.length > 0, 'non-empty');
-        assert.equal(pcm.length % 4, 0, 'interleaved s16le stereo (4 bytes/frame)');
-        const seconds = pcm.length / 4 / 48000;
+        assert.equal(pcm.length % 2, 0, 'interleaved float32 stereo (2 samples/frame)');
+        const seconds = pcm.length / 2 / 48000;
         const lo = expSeconds * 0.95 - 0.06;
         const hi = expSeconds * 1.05 + 0.06;
         assert.ok(seconds > lo && seconds < hi, `~${expSeconds}s expected, got ${seconds.toFixed(3)}s`);

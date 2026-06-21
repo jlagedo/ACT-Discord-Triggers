@@ -1,13 +1,14 @@
-// LRU cache of decoded + resampled PCM buffers, keyed by absolute path.
+// LRU cache of decoded + resampled audio buffers, keyed by absolute path.
 // mtime is captured at insert time; reads check it against the current file
 // stat so editing a sound effect in place invalidates the entry naturally.
+// Buffers are the pipeline's internal currency (interleaved float32 stereo).
 //
-// Sized for ACT trigger sounds: short clips (<2s typical, ~200 KB each at
-// 48k/16/stereo). 32 entries × ~200 KB ≈ 6 MB worst case, still trivial.
+// Sized for ACT trigger sounds: short clips (<2s typical, ~400 KB each at
+// 48k float stereo). 32 entries × ~400 KB ≈ 12 MB worst case, still trivial.
 
 export interface CachedWav {
     mtimeMs: number;
-    pcm: Buffer;
+    pcm: Float32Array;
 }
 
 export class WavCache {
@@ -18,9 +19,9 @@ export class WavCache {
         this.maxEntries = maxEntries;
     }
 
-    // Returns the cached PCM if (path, mtime) matches; null otherwise.
+    // Returns the cached samples if (path, mtime) matches; null otherwise.
     // On hit, promotes the entry to most-recently-used.
-    get(path: string, mtimeMs: number): Buffer | null {
+    get(path: string, mtimeMs: number): Float32Array | null {
         const entry = this.map.get(path);
         if (!entry) return null;
         if (entry.mtimeMs !== mtimeMs) {
@@ -33,7 +34,7 @@ export class WavCache {
         return entry.pcm;
     }
 
-    set(path: string, mtimeMs: number, pcm: Buffer): void {
+    set(path: string, mtimeMs: number, pcm: Float32Array): void {
         if (this.map.has(path)) this.map.delete(path);
         this.map.set(path, { mtimeMs, pcm });
         while (this.map.size > this.maxEntries) {
