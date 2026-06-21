@@ -1,19 +1,16 @@
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import { resampleStereoF32 } from '../src/discord-host.js';
+import { initResampler } from '../src/resample.js';
+
+// resampleStereoF32 is r8brain-backed; the module must be loaded first (mirrors
+// the bridge, which awaits initResampler() before BRIDGE_READY).
+before(async () => { await initResampler(); });
 
 // Build interleaved float32 stereo from a flat sample list.
 function f32(samples: number[]): Float32Array {
     return Float32Array.from(samples);
-}
-
-function readStereo(s: Float32Array): Array<[number, number]> {
-    const out: Array<[number, number]> = [];
-    for (let i = 0; i < s.length; i += 2) {
-        out.push([s[i]!, s[i + 1]!]);
-    }
-    return out;
 }
 
 test('resampleStereoF32: srcRate == dstRate returns input verbatim', () => {
@@ -22,56 +19,45 @@ test('resampleStereoF32: srcRate == dstRate returns input verbatim', () => {
     assert.equal(out, pcm);
 });
 
-test('resampleStereoF32: 44.1k → 48k stretches frame count by ratio', () => {
-    // 441 input frames at 44.1k = 10 ms; expect ~480 frames at 48k.
+test('resampleStereoF32: 44.1k → 48k stretches frame count by the exact ratio', () => {
+    // 441 input frames at 44.1k = 10 ms; expect exactly 480 frames at 48k.
     const frames = 441;
     const pcm = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        pcm[i * 2] = i / frames;
-        pcm[i * 2 + 1] = -i / frames;
+        pcm[i * 2] = 0.3 * Math.sin((2 * Math.PI * 1000 * i) / 44100);
+        pcm[i * 2 + 1] = pcm[i * 2]!;
     }
     const out = resampleStereoF32(pcm, 44100, 48000);
-    const outFrames = out.length / 2;
-    assert.equal(outFrames, 480);
+    assert.equal(out.length / 2, 480);
 });
 
-test('resampleStereoF32: monotonic ramp stays monotonic after resample (no obvious aliasing)', () => {
-    // Linear ramp from 0..1 across 1000 frames at 44.1k.
-    const frames = 1000;
+test('resampleStereoF32: 48k → 24k halves the frame count exactly', () => {
+    const frames = 480;
     const pcm = new Float32Array(frames * 2);
     for (let i = 0; i < frames; i++) {
-        pcm[i * 2] = i / frames;
-        pcm[i * 2 + 1] = i / frames;
+        pcm[i * 2] = 0.3 * Math.sin((2 * Math.PI * 1000 * i) / 48000);
+        pcm[i * 2 + 1] = pcm[i * 2]!;
+    }
+    const out = resampleStereoF32(pcm, 48000, 24000);
+    assert.equal(out.length / 2, 240);
+});
+
+test('resampleStereoF32: channels stay independent (constant L/R offset preserved)', () => {
+    // Right = Left + 0.1 (a constant DC offset between channels). A linear,
+    // per-channel resampler must keep that offset and never bleed one channel into
+    // the other. Checked in the interior, away from the filter's edge ramps.
+    const frames = 4000;
+    const pcm = new Float32Array(frames * 2);
+    for (let i = 0; i < frames; i++) {
+        const l = 0.3 * Math.sin((2 * Math.PI * 200 * i) / 44100);
+        pcm[i * 2] = l;
+        pcm[i * 2 + 1] = l + 0.1;
     }
     const out = resampleStereoF32(pcm, 44100, 48000);
     const outFrames = out.length / 2;
-    let prev = -1;
-    for (let i = 0; i < outFrames; i++) {
-        const v = out[i * 2]!;
-        // Ramp must never decrease (allow equal: trailing samples clamp to last src).
-        assert.ok(v >= prev, `non-monotonic at frame ${i}: ${prev} → ${v}`);
-        prev = v;
-    }
-});
-
-test('resampleStereoF32: 48k → 24k halves frame count and preserves channel separation', () => {
-    // 8 input frames; expect 4 output frames. Left ramps 0.10..0.17, right 0.20..0.27.
-    const pcm = f32([
-        0.10, 0.20,
-        0.11, 0.21,
-        0.12, 0.22,
-        0.13, 0.23,
-        0.14, 0.24,
-        0.15, 0.25,
-        0.16, 0.26,
-        0.17, 0.27,
-    ]);
-    const out = resampleStereoF32(pcm, 48000, 24000);
-    const stereo = readStereo(out);
-    assert.equal(stereo.length, 4);
-    // Left ramp stays in left channel, right ramp stays in right channel.
-    for (const [l, r] of stereo) {
-        assert.ok(l < r, `expected L < R, got L=${l} R=${r}`);
-        assert.ok(r - l > 0.09 && r - l < 0.11, `expected ~0.1 channel separation, got ${r - l}`);
+    const guard = 300; // skip edge transients
+    for (let i = guard; i < outFrames - guard; i++) {
+        const sep = out[i * 2 + 1]! - out[i * 2]!;
+        assert.ok(Math.abs(sep - 0.1) < 0.01, `channel separation drifted at ${i}: ${sep}`);
     }
 });

@@ -11,7 +11,8 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import { OnnxTts } from '../src/tts.js';
-import { monoFloat32ToStereoF32, resampleStereoF32 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32 } from '../src/discord-host.js';
+import { resampleMono, initResampler } from '../src/resample.js';
 import {
     synthSkip, modelDir, rms,
     PIPER_PT_BR, PIPER_EN_US, KOKORO,
@@ -90,8 +91,9 @@ test('Synth output converts cleanly to the bridge 48k float stereo format', skip
     tts.configure({ family: 'piper', modelDir: dir, sid: 0, lang: '', speedSlider: 10, threads: 1 });
     const audio = await tts.synth(EN_LINE);
     assert.ok(audio);
-    const stereoSrc = monoFloat32ToStereoF32(audio.samples);
-    const final = resampleStereoF32(stereoSrc, audio.sampleRate, 48000);
+    // Production order: resample the mono synth output, then duplicate to stereo.
+    await initResampler();
+    const final = monoFloat32ToStereoF32(resampleMono(audio.samples, audio.sampleRate, 48000));
     // Duration is preserved within a frame or two of resampling rounding.
     const srcMs = (audio.samples.length / audio.sampleRate) * 1000;
     const finalMs = (final.length / 2 / 48000) * 1000;

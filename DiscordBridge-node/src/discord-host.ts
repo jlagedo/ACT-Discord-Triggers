@@ -26,7 +26,7 @@ import { int16ToFloat32, floatToInt16 } from './audio-format.js';
 import { applyRandomEffect } from './effects.js';
 import { normalize, computeGain, dbToLinear, type KnownLevel } from './normalize.js';
 import { declick, declickIn, declickOut } from './declick.js';
-import { StreamingResampler } from './stream-resampler.js';
+import { MonoStreamResampler, resampleMono, resampleStereoF32 } from './resample.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer, type VoiceHandle } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
@@ -54,31 +54,10 @@ const AUDIO_QUALITY_BITRATES = [48000, 96000, 128000];
 // turned into float PCM, so reject pathological input sizes up front.
 const MAX_DECODE_INPUT_BYTES = 64 * 1024 * 1024;
 
-// Linear-interpolation sample rate conversion for interleaved float32 stereo.
-// Quality is fine for short trigger sounds going through Opus at 48k; do not
-// reuse this for music/long-form audio without swapping to a polyphase filter.
-// Exported for unit tests.
-export function resampleStereoF32(samples: Float32Array, srcRate: number, dstRate: number): Float32Array {
-    if (srcRate === dstRate) return samples;
-    const srcFrames = samples.length >>> 1;
-    const ratio = dstRate / srcRate;
-    const dstFrames = Math.max(1, Math.floor(srcFrames * ratio));
-    const out = new Float32Array(dstFrames * 2);
-    const lastSrc = srcFrames - 1;
-    for (let i = 0; i < dstFrames; i++) {
-        const srcPos = i / ratio;
-        const srcIdx = Math.floor(srcPos);
-        const nextIdx = srcIdx < lastSrc ? srcIdx + 1 : lastSrc;
-        const frac = srcPos - srcIdx;
-        const l1 = samples[srcIdx * 2]!;
-        const l2 = samples[nextIdx * 2]!;
-        const r1 = samples[srcIdx * 2 + 1]!;
-        const r2 = samples[nextIdx * 2 + 1]!;
-        out[i * 2] = l1 + (l2 - l1) * frac;
-        out[i * 2 + 1] = r1 + (r2 - r1) * frac;
-    }
-    return out;
-}
+// resampleStereoF32 (high-quality r8brain conversion for interleaved float32
+// stereo) is re-exported so existing import sites (tests, tools) keep their
+// specifier; the implementation lives in resample.ts.
+export { resampleStereoF32 };
 
 // Read + decode a complete audio file (wav/mp3/ogg/flac) to the bridge's
 // internal currency: 48k interleaved float32 stereo. Throws with a user-facing
@@ -126,13 +105,12 @@ export async function decodeFileToFinalPcm(path: string): Promise<Float32Array> 
     return finalPcm;
 }
 
-// ONNX models output Float32 mono. Convert to the bridge's interleaved float32
-// stereo (duplicating the channel) at the model's native rate; the caller
-// resamples to 48 kHz with resampleStereoF32. An optional `gain` is folded in
-// here — the streaming path passes the voice's fixed baked-loudness gain so
-// leveling needs no separate whole-buffer normalize pass. No clamp: headroom is
-// preserved through the chain and the mixer's exit conversion is the single
-// clamp point. Exported for unit tests.
+// ONNX models output Float32 mono. The mono buffer is resampled to 48 kHz first
+// (resampleMono / MonoStreamResampler), then this duplicates it to the bridge's
+// interleaved float32 stereo. An optional `gain` is folded in here — the streaming
+// path passes the voice's fixed baked-loudness gain so leveling needs no separate
+// whole-buffer normalize pass. No clamp: headroom is preserved through the chain
+// and the mixer's exit conversion is the single clamp point. Exported for unit tests.
 export function monoFloat32ToStereoF32(mono: Float32Array, gain = 1): Float32Array {
     const out = new Float32Array(mono.length * 2);
     for (let i = 0; i < mono.length; i++) {
@@ -631,8 +609,10 @@ export class DiscordHost implements Host {
             this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
             return;
         }
-        const finalPcm = resampleStereoF32(
-            monoFloat32ToStereoF32(audio.samples), audio.sampleRate, TARGET_SAMPLE_RATE);
+        // Resample the mono synth output once, then duplicate to stereo (half the
+        // resampling work of converting two identical channels).
+        const finalPcm = monoFloat32ToStereoF32(
+            resampleMono(audio.samples, audio.sampleRate, TARGET_SAMPLE_RATE));
         log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outSamples=${finalPcm.length}`);
         this._enqueue('SpeakText', finalPcm, meta, undefined, /*skipFx*/ true);
     }
@@ -663,7 +643,7 @@ export class DiscordHost implements Host {
         const sinkParts: Float32Array[] = [];
         // Held in an object so its narrowing survives assignment inside `feed`
         // (a `let` assigned only in a closure gets pinned to its null init).
-        const rs: { r: StreamingResampler | null } = { r: null };
+        const rs: { r: MonoStreamResampler | null } = { r: null };
         let pending: Float32Array | null = null; // last emitted buffer, held for tail declick
         let isFirst = true;                      // pending is also the first emitted buffer
         let streamedAny = false;
@@ -689,10 +669,11 @@ export class DiscordHost implements Host {
             flushPending(false);
             pending = out;
         };
-        // Convert one mono chunk -> stereo (gain folded) -> resampled 48k stereo.
+        // Resample one mono chunk to 48k (cross-chunk continuous), then duplicate
+        // to stereo with the baked gain folded in.
         const feed = (samples: Float32Array, srcRate: number): void => {
-            if (!rs.r) rs.r = new StreamingResampler(srcRate, TARGET_SAMPLE_RATE);
-            consume(rs.r.push(monoFloat32ToStereoF32(samples, gain)));
+            if (!rs.r) rs.r = new MonoStreamResampler(srcRate, TARGET_SAMPLE_RATE);
+            consume(monoFloat32ToStereoF32(rs.r.push(samples), gain));
         };
 
         let audio;
@@ -712,7 +693,7 @@ export class DiscordHost implements Host {
             feed(audio.samples, audio.sampleRate);
         }
         // Drain the resampler tail and emit the final (declick-out) buffer.
-        if (rs.r) consume(rs.r.flush());
+        if (rs.r) consume(monoFloat32ToStereoF32(rs.r.flush(), gain));
         flushPending(true);
         if (mixer && handle) mixer.closeVoice(handle);
 

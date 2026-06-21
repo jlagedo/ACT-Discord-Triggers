@@ -68,6 +68,12 @@ await esbuild.build({
         // bundle. Staged into dist/node_modules by build.ps1 $externals.
         'sherpa-onnx-node',
         'sherpa-onnx-win-x64',
+        // High-quality resampler: ESM package whose .wasm is a SEPARATE file located
+        // at runtime via `new URL("r8brain.wasm", import.meta.url)`. It must stay
+        // external (not inlined) and loaded as on-disk ESM (dynamic import in
+        // resample.ts) so import.meta.url resolves to the staged file. Staged into
+        // dist/node_modules by build.ps1 $externals.
+        'r8brain-wasm',
     ],
     minify: false,
     sourcemap: false,

@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -6,6 +6,11 @@ import { writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { decodeFileToFinalPcm } from '../src/discord-host.js';
+import { initResampler } from '../src/resample.js';
+
+// decodeFileToFinalPcm resamples to 48k via the r8brain WASM module; load it
+// first (the real bridge does this before BRIDGE_READY).
+before(async () => { await initResampler(); });
 
 // Real public-domain / CC0 clips (see fixtures/audio/README.md). They cover the
 // formats Triggernometry hands to PlaySoundMethod plus edge cases (8-bit PCM, a

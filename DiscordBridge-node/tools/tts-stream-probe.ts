@@ -5,7 +5,7 @@
 // single utterance (so playback can start early), or emit it all at the end?
 //
 // It also assembles the streamed chunks through the exact bridge streaming path
-// (monoFloat32ToStereoInt16 + StreamingResampler) and writes a WAV, so you can
+// (MonoStreamResampler -> monoFloat32ToStereoF32) and writes a WAV, so you can
 // confirm the streamed-and-resampled audio is clean.
 //
 //   npm run tts:stream-probe -- --model "E:\ai\vits-piper-en_US-amy-medium" --text "Stack."
@@ -17,7 +17,7 @@
 import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
 import { monoFloat32ToStereoF32 } from '../src/discord-host.js';
 import { floatToInt16 } from '../src/audio-format.js';
-import { StreamingResampler } from '../src/stream-resampler.js';
+import { MonoStreamResampler, initResampler } from '../src/resample.js';
 import { writeWav16 } from '../src/wav-write.js';
 import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
@@ -50,8 +50,9 @@ async function main(): Promise<void> {
     }
     // Warm-up so the timing reflects steady-state, not the cold model load.
     await tts.synth('Ready.');
+    await initResampler();
 
-    const rs = { r: null as StreamingResampler | null };
+    const rs = { r: null as MonoStreamResampler | null };
     const outParts: Float32Array[] = [];
     let srcRate = 0;
     let count = 0;
@@ -69,10 +70,10 @@ async function main(): Promise<void> {
         lastT = now;
         count++;
         totalSamples += samples.length;
-        if (!rs.r) rs.r = new StreamingResampler(rate, 48000);
-        outParts.push(rs.r.push(monoFloat32ToStereoF32(samples)));
+        if (!rs.r) rs.r = new MonoStreamResampler(rate, 48000);
+        outParts.push(monoFloat32ToStereoF32(rs.r.push(samples)));
     });
-    if (rs.r) outParts.push(rs.r.flush());
+    if (rs.r) outParts.push(monoFloat32ToStereoF32(rs.r.flush()));
     const genMs = performance.now() - t0;
 
     if (count === 0) {

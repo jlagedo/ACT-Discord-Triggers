@@ -1,311 +1,277 @@
-# Audio Pipeline — Format Widening & Pro-Audio Rework
+# Audio Pipeline — Current State & Pro-Audio Roadmap
 
-Design + phased plan for two related goals:
+How the bridge's audio pipeline works today, and the ranked work left to take it
+from "clean" to genuinely pro-grade for the realtime path.
 
-1. **Play more than `.wav`** — accept MP3/OGG/FLAC/etc. so Triggernometry (and
-   any ACT trigger) sounds route to Discord regardless of source format.
-2. **Sound as good as the chain allows** — tune the Opus encoder, then move the
-   internal pipeline to float32 end-to-end so mixing and effects stop
-   round-tripping through 16-bit.
+This is a **node-bridge-only** document. The C# side just hands the bridge PCM
+(`SpeakPcm`), a file path (`SpeakFile`), or text (`SpeakText`); the bridge owns
+every decode/DSP/mix/encode decision below.
 
 Legend — **Effort**: S (days) · M (1–2 weeks) · L (multi-week / architectural).
 **Status**: 🔵 planned · 🟡 in progress · 🟢 done · ⚪ idea.
 
-> Supersedes ROADMAP item **#4 "Extra audio formats"**. That entry described
-> doing the work plugin-side via NAudio `MediaFoundationReader` with "no bridge
-> changes". We are instead doing it **bridge-side** (the bridge already owns
-> file decode), unifying *all* formats — including WAV — on one decoder.
+---
+
+## Format invariants (hard-wired)
+
+Discord voice is 48 kHz / stereo end-to-end; the Opus encoder input is 16-bit
+signed PCM. That pins the sample rate / channel count in several places — change
+all of them together, never add a one-off conversion:
+
+- `DiscordClient.formatInfo` (C# TTS synthesis format, 48k/16/stereo).
+- the `48000/16/2` in `DiscordClient`'s PCM sends + the matching check in
+  `pipe-server.ts`.
+- `discord-host.ts` — `TARGET_SAMPLE_RATE` + `StreamType.Raw`; the 48k resample
+  target in `resample.ts`.
+- `effects.ts` `SR`.
+
+**Sample format:** the interior pipeline (decode → resample → fx → normalize →
+declick → mix) is **interleaved float32 stereo**, nominal [-1, 1] but allowed to
+exceed it *between* stages so headroom is preserved (an fx tail or a hot mix sum
+is pulled back down later, not clipped mid-chain). int16 lives only at the two
+edges, both in `audio-format.ts`:
+
+- **ingest:** the `SpeakPcm` wire frame arrives s16le and is widened once
+  (`int16ToFloat32`).
+- **exit:** `PcmMixer` sums voices in float64 and performs the pipeline's single
+  int16 quantization at its output (`floatToInt16`) right before the Opus encoder.
+
+`floatToInt16` is the single quantization point and the natural home for a future
+master limiter (see Roadmap P1.2). Don't reintroduce per-stage int16 round-trips.
 
 ---
 
-## Background — why this is needed
-
-- **The trigger handoff is format-limited.** Triggernometry's audio actions
-  hand a file path to ACT's `PlaySoundMethod`, which the plugin hijacks and
-  forwards to the bridge as a path (`SpeakFileRequest`). Triggernometry's file
-  picker explicitly offers `*.wav;*.mp3` (and "All files"), so users routinely
-  pick MP3/OGG. (Routing only reaches us when Triggernometry's audio routing is
-  set to **ACT** — not its default; see README guidance.)
-- **The bridge is WAV-only and strict.** `discord-host.ts` `speakFile` decodes
-  with the `wav` package (a RIFF *demuxer*, not a codec) and hard-rejects
-  anything that isn't uncompressed 16-bit PCM, mono/stereo, ≤192 kHz. MP3/OGG/
-  FLAC have **no decode path at all** — they fail with `{ok:false,error}`, which
-  is silent to the player and easy to misread as "the plugin is broken".
-- **DSP already runs, but at 16-bit.** `effects.ts` decodes int16 → float32,
-  applies an effect, then `clamp16`s back to int16 (hard clip, no dither). The
-  mixer then sums in int32 and clamps to int16 again. A single effected trigger
-  hits **three** quantization points before Opus. Chaining DSP compounds it.
-- **Opus is untuned.** `createAudioResource(mixer, {inputType: StreamType.Raw})`
-  sets no bitrate / signal type / complexity — we run `@discordjs/voice`
-  defaults. This is the single highest-leverage, lowest-effort quality knob and
-  it is currently untouched.
-
----
-
-## Decisions (locked)
-
-- **Unify on one decoder for every format, WAV included.** Replace the
-  `wav`-package path with `audio-decode` (audiojs) for all files. One code path,
-  less bespoke code, consistent float output. Trade-off accepted: the common
-  WAV case now goes through WASM instead of the lightweight `wav` reader.
-- **`audio-decode` (audiojs) umbrella is the decoder.** Most active (MIT,
-  ~490k weekly downloads), pure JS/WASM — no native bindings, no `ffmpeg.exe`.
-  We call the umbrella `decode(buf)` directly: it auto-detects the container via
-  `audio-type` and dispatches to the right codec, so the bridge owns **no** sniff
-  /dispatch logic of its own. esbuild folds the package's static
-  `() => import('@audio/decode-*')` thunks into the bundle (WASM inlined), so it
-  bundles with **no externals/staging** (Branch A) — cost is bundle size (~3.6 →
-  9.0 MB, all ~13 codecs inlined). We gain mp3/ogg/flac/wav **plus** opus/m4a/
-  aac/webm/etc. for free. (Earlier draft used the four per-codec subpackages +
-  a hand-rolled `sniffCodec`; dropped in favor of letting the package own it.
-  Runner-up library: `eshaz/wasm-audio-decoders`, same lineage/license.)
-- **Final stage stays int16.** `StreamType.Raw` = `s16le`; Opus input is int16
-  by definition. Float work is purely *internal*; we quantize **once** at the
-  master-bus output.
-- **Float internally is justified by the effects requirement.** With a real DSP
-  chain + multi-source mixing, float32 throughout (one dithered quantization at
-  the end) is correct, not gold-plating — it removes losses that exist today.
-- **Internal processing is float32 at 48 kHz — NOT a higher internal rate.** We
-  move the bus to float32 (Phase 3a) but keep the sample rate at 48 kHz; we do
-  **not** run DSP at 96 kHz and downsample. Oversampling only helps *nonlinear*
-  DSP (it tames harmonics that would alias), and of our eight effects only
-  `distortion` (a `tanh` waveshaper) meaningfully qualifies — `pitch` is an
-  anti-aliasing problem fixed by the resampler, and the other six are linear /
-  low-frequency-modulated. Combined with band-limited sources (≤22 kHz) and a
-  lossy 48 kHz Opus sink, a global 2× rate (extra SRC pass + 2× CPU/memory, paid
-  per clip on first fire) isn't justified. **Global 96 kHz is parked as a
-  future-maybe** (see Open questions); the cheaper alternative, if ever wanted,
-  is *local* oversampling around the nonlinear effect, not a global rate change.
-- **Effects are paid per-fire, never per-chunk.** `applyRandomEffect` randomizes
-  the effect *and* its parameters each firing, so the result is uncacheable. The
-  axis that matters is **per-fire (enqueue) vs per-chunk (real-time `_read`)**:
-  render the effect once per trigger at enqueue, on a cached decoded+resampled
-  dry clip; the 20 ms mixer loop stays trivial (sum → limiter → dither).
-- **IPC/protocol unchanged for formats.** Phase 1 is bridge-only — no C# change,
-  no wire change. Only Phase 2 (Opus config) touches the protocol.
-
----
-
-## Target architecture (end state, after Phase 3)
+## Current signal chain
 
 ```
-audio-decode → Float32 (native rate, N channels)
-   → downmix to stereo
-   → cache the deterministic prefix:  decode + SRC-to-48k  (keyed by path+mtime)
-   ── per fire (enqueue, off the real-time loop) ──
-   → random effect (float) · gain / normalize (float)
-   → addVoice (float32 voice)
-   ── real-time mix (_read, every 20 ms) ──
-   → sum voices in Float32 (headroom ~-6 dBFS)
-   → master bus: soft/true-peak limiter
-   → TPDF dither → quantize s16le      ← the ONLY quantization in the chain
-   → Opus (tuned: bitrate — signal/complexity not reachable via prism, see Phase 2)
+ingest                          per-clip (_enqueue)           mix bus              encode
+──────────────────────────      ─────────────────────────     ────────────────     ──────
+SpeakPcm  s16→f32 ───────┐
+SpeakFile decode→resample├──▶ FX → normalize → declick ──▶  PcmMixer sum       ──▶ Opus
+SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64) → s16      (bitrate)
 ```
 
-Heavy decode/DSP has a documented relief valve: offload to a `worker_thread`
-(the WASM decoders ship worker support) if a long/heavy clip ever blocks the
-single main thread and starves `_read`.
+**Ingest → 48k float stereo**
+- `SpeakPcm`: `int16ToFloat32` at the wire edge (`discord-host.ts` `speakPcm`).
+- `SpeakFile`: `audio-decode` (WASM, auto-detects wav/mp3/ogg/flac/opus/m4a/…) →
+  `planarFloatToInterleavedStereoF32` downmix → `resampleStereoF32` (r8brain, true
+  stereo) to 48k. Decoded+resampled buffers are cached by path+mtime (`WavCache`),
+  so resample is paid once per file on first fire.
+- `SpeakText` (ONNX/sherpa): mono float → resampled to 48k → `monoFloat32ToStereoF32`.
+  Streams chunk-by-chunk through `MonoStreamResampler` (r8brain, cross-chunk
+  continuous) so audio starts before synthesis finishes; baked per-voice loudness
+  folds a fixed gain into the mono→stereo step so leveling needs no whole-buffer
+  scan. (The resampler runs on mono — half the work of two identical channels.)
+
+**Per-clip processing** (`_enqueue`, off the realtime loop, once per fire):
+- **Random FX** (`effects.ts`) — opt-in, dice-rolled per clip; applied to
+  `SpeakPcm`/`SpeakFile` only (TTS is skipped). Output stays float, may run hot.
+- **Normalize** (`normalize.ts`) — per-clip RMS auto-level toward a dBFS target,
+  bounded by a peak ceiling (no clip) and a max-boost cap (don't amplify silence).
+  Runs *after* FX so the effect's own level change is what gets corrected.
+- **Declick** (`declick.ts`) — short linear fade in (2 ms) / out (5 ms) so edge
+  samples ramp from/to zero instead of stepping against the mixer's silence.
+
+**Realtime mix** (`pcm-mixer.ts` `_read`, every 20 ms):
+- Sum all active voices into a float64 accumulator; quantize once via
+  `floatToInt16` (round + **hard clamp**). Pull-based: every `_read` emits exactly
+  one 20 ms chunk, silence when idle — the player never ends, which is how
+  concurrent callouts overlap (each opens its own mixer voice). FIFO eviction caps
+  worst-case memory; open streaming voices are pinned against eviction.
+
+**Encode**
+- One long-lived `AudioResource` (`StreamType.Raw`) fed by the mixer; prism's Opus
+  encoder. Only **bitrate** is set, from the quality tier (Low/Med/High →
+  48k/96k/128k, `audio-quality.ts`). Signal type and complexity are not reachable
+  through prism's public API (see Roadmap P3).
 
 ---
 
-## Phase 1 — Unified decode via `audio-decode` 🟢 — Effort: S–M
+## Good practices already in place
 
-> **Done** — shipped on `feature/audio-p1-formats` (merged to `master`).
-> `speakFile` calls the `audio-decode` umbrella `decode(buf)` directly — it
-> auto-detects the format (wav/mp3/ogg/flac + opus/m4a/aac/…), so the bridge
-> keeps no sniff/dispatch code. WASM is inlined, so esbuild bundles it with
-> **no** externals/staging (Branch A; bundle ~9 MB). Warm-up (wav/mp3/oga/flac,
-> concurrent) runs before `BRIDGE_READY`, so the build self-test gates the codec
-> WASM. A temporary float32 → int16 shim (also downmixing to stereo) feeds the
-> existing int16 tail; it's removed in Phase 3.
-
-**Goal:** accept MP3/OGG/FLAC/WAV/etc.; ship. Bridge-only.
-
-**Design**
-
-- Replace the `wav`-package decode in `speakFile` with the `audio-decode`
-  umbrella `decode(buf)`. It owns format detection (`audio-type`) and dispatch,
-  so all formats — including `.wav` — flow through one call with no bridge-side
-  sniffing.
-- `decode()` returns float32 planar at the file's native rate. Phase 1 adds a
-  **temporary float32 → int16 shim** (which also downmixes mono/>2ch → stereo)
-  so the existing int16 tail (`shim → resampleStereo16 → mixer`) is reused
-  unchanged. The shim is explicitly throwaway — deleted in Phase 3 (the old
-  `upmixMonoToStereo16` helper was removed; the shim subsumes it).
-- Keep the graceful `{ok:false,error}` contract; extend messages
-  ("unsupported / corrupt audio"). Warm the WASM decoder at init so the first
-  trigger doesn't eat module-load latency.
-
-**Gotchas**
-
-- **Non-48k is now the common case.** MP3 is usually 44.1k → the existing
-  *linear-interpolation* `resampleStereo16` runs on a non-integer ratio (its
-  weakest case). Acceptable to ship; **QA Phase 1 specifically on 44.1k MP3s** —
-  if it sounds rough, that's the trigger to pull the high-quality resampler
-  (Phase 3b) forward.
-- **Packaging is the #1 risk** (CLAUDE.md rule): WASM codecs must appear in
-  **both** `esbuild.config.mjs` `external:` *and* `build.ps1` `$externals`,
-  staged into `dist/node_modules/`, with `BRIDGE_READY` still asserted by the
-  self-test. npm hoisting scatters transitive deps — audit both lists. Import
-  only needed codecs (mp3, ogg/vorbis, flac, maybe m4a/aac) to keep
-  `node_modules` lean.
-
-**Tests / ship criteria**
-
-- Small mp3/ogg/flac fixtures + decode unit tests; flip the existing
-  "WAV rejection" assertions in `pipe-server.test.ts`.
-- Integration test: `speakFile` accepts an mp3 against the built bridge.
-- `build.ps1 -Zip` self-test green; manual smoke in a live channel.
+- **One float currency, single quantization point.** No per-stage int16 round-trips.
+- **Headroom preserved between stages.** Hot fx tails / mix sums are pulled back,
+  not clipped mid-chain.
+- **float64 mix accumulator.** Summation precision loss is a non-issue.
+- **Cross-chunk-continuous streaming resampler.** Concatenated streamed output is
+  sample-identical to resampling the whole utterance at once — no per-chunk seam click.
+- **Declick edges.** No onset/tail clicks from stepping against digital silence.
+- **Pull-based mixer that degrades to silence.** A mix error or underrun emits a
+  silent frame instead of tearing down the resource.
+- **Off-thread synth.** sherpa `generateAsync` runs on a libuv worker; the 20 ms
+  frame delivery and Discord keepalives keep running during synthesis.
+- **Decode/resample cache** keyed by path+mtime; edits invalidate naturally.
 
 ---
 
-## Phase 2 — Opus quality config 🟢 — Effort: S–M
+## Roadmap — ranked by perceived-quality impact
 
-> **Done** — shipped on `feature/audio-quality-bitrate` (merged to `master`,
-> released as `v2.1.0-pre.1`). The spike confirmed prism exposes **only**
-> `resource.encoder.setBitrate` through a supported public API; Opus **signal
-> type and complexity are not reachable** without reaching into opusscript
-> internals, so we shipped **bitrate-only** (the design's documented degrade
-> path) and put the others out of scope (see `src/audio-quality.ts`).
-> What shipped:
-> - New `SetAudioQuality` op (bitrate, bits/sec) in `Protocol.cs` + `protocol.ts`
->   + `pipe-server` dispatch; **`PROTOCOL_VERSION` bumped 3 → 4**; both test
->     suites extended (`ProtocolTests.cs`, `protocol.test.ts`, `pipe-server.test.ts`).
-> - Config pushed C# → bridge exactly like `SetNormalization`: on (re)join after
->   `createAudioResource` (holding `resource.encoder`) and re-applied on change.
-> - UI dropdown **Low / Medium / High → 48k / 96k / 128k**, default Medium; an
->   inline warning on High (may exceed an unboosted channel's cap). Bitrate is
->   clamped to prism's `[16000, 128000]` on both sides; default `96000` matches
->   between C# and the bridge.
->
-> Deviation from the original sketch: presets are bitrate-only and named
-> Low/Medium/High (not Voice/Balanced/High with signal=music), and the clamp is
-> prism's `[16000, 128000]` rather than Discord's per-channel 64–384 kbps cap
-> (Discord still enforces its own channel cap on top).
+The architecture is sound; the items below are about the **DSP quality** inside it.
 
-**Goal:** expose an audio-quality setting in the plugin UI; ship. Highest
-audible ROI per effort — but mostly *plumbing*, not audio.
+### P1 — biggest wins
 
-**Design**
+#### 1. High-quality resampler 🟢 — Effort: M
+**Linear interpolation replaced with a polyphase / windowed-sinc resampler.**
 
-- **Spike first:** confirm the encoder handle is reachable. `resource.encoder`
-  (prism-media Opus) should exist with `StreamType.Raw`. `setBitrate` is
-  reliable; **signal type (music) and complexity require an Opus CTL** — verify
-  prism exposes it cleanly *before* committing the UI, so we don't ship a
-  "quality" control that only moves bitrate. (Open question, below.)
-- **Presets, not a raw kbps slider:** `Voice / Balanced / High` → fixed
-  `{bitrate, signal, complexity}`. Discord clamps bitrate to the channel max
-  (boost-tier dependent, 64–384 kbps), so "High = up to channel max" is honest.
-- **Config plumbing** mirrors the existing `SetNormalization` op (config pushed
-  C# → bridge). New `SetAudioQuality` op (or fields on `JoinChannel`): update
-  `Protocol.cs` **and** `protocol.ts` + `pipe-server` dispatch; bump
-  `PROTOCOL_VERSION` if the shape is incompatible; extend `ProtocolTests.cs` and
-  `tests/protocol.test.ts`. Apply on (re)join after `createAudioResource`;
-  re-apply on change.
-- Plugin UI: a dropdown on the config tab with a sensible default (e.g.
-  Balanced ≈ 96 kbps, signal=music).
+The former `resampleStereoF32` and `StreamingResampler` were both linear
+interpolation, sitting in the path of **every** file and **all** TTS (Piper
+22.05k→48k, Kokoro 24k→48k — ~2× upsampling on every callout):
 
-**Tests / ship criteria**
+- **Upsampling:** linear interp is a weak triangular lowpass — dulls the top
+  octave *and* leaves spectral images above the source Nyquist (≈11 kHz for
+  Piper). TTS ended up both muffled and slightly grainy.
+- **Downsampling** (96k/88.2k sources): no anti-alias pre-filter → HF folds back
+  as aliasing.
+- 44.1k→48k (the common MP3 ratio) is linear interp's worst non-integer case.
 
-- Unit tests assert the `setBitrate`/CTL calls fire with preset values; protocol
-  round-trip tests both sides. Audible validation is a manual A/B in a live
-  channel.
+This was the single change that most audibly lifts quality.
+
+**Library: `r8brain-wasm`** — r8brain-free-src (Aleksey Vaneev / Voxengo, MIT)
+compiled to WebAssembly, vendored at `github.com/jlagedo/r8brain-wasm` (pinned by
+commit SHA in `package.json`; `dist/` is committed, so no build step). Validated:
+SINAD **184–238 dB** (vs linear's ~9–30), streaming output sample-identical to a
+whole-buffer resample, 500–2000× realtime, ~18 ms first-output latency at the
+streaming settings. All resampling lives in **`src/resample.ts`**:
+
+- `resampleStereoF32(samples, src, dst)` — file path; **true stereo** (one
+  `Resampler` per channel, since file L≠R), `transBand 2.0` (full passband;
+  latency irrelevant — files are decoded/resampled once and cached).
+- `resampleMono(mono, src, dst)` — buffered TTS / probe; one `Resampler`,
+  `transBand 2.0`. The mono synth output is resampled, then duplicated to stereo
+  (half the work of converting two identical channels).
+- `MonoStreamResampler` — streaming TTS; `transBand 6.0` (shorter filter → ~18 ms
+  first-output latency, well inside the send buffer; speech sits inside the
+  resulting ~10 kHz+ passband). r8brain keeps cross-chunk continuity internally,
+  so `push()`/`flush()` concatenated output is sample-exact. `flush()` drains the
+  latency tail to exactly `floor(totalIn · ratio)` samples (the length contract
+  the duration math + WAV sink depend on).
+
+`R24` resolution throughout (136 dB+ headroom over the 16-bit Opus sink). r8brain
+is mono-per-object and works in float64, so `resample.ts` owns the
+de-interleave / channel-split and the float32↔float64 conversion at its edges; the
+pipeline currency stays interleaved float32 stereo. `initResampler()` instantiates
+the WASM module once at bridge startup (alongside `warmupDecoders`, before
+`BRIDGE_READY`), so the sync resample functions can assume it's loaded.
+
+*Rejected:* `@alexanderolsen/libsamplerate-js` (its wrapper hardwires
+`end_of_input=0`, so the streaming tail never flushes), `node-soxr` (native +
+LGPL, breaks no-native/single-`node.exe`), `wasm-audio-resampler` (dormant).
+
+#### 2. Master limiter on the mix bus 🔵 — Effort: M
+**A real limiter before `floatToInt16`, replacing the hard clamp.**
+
+The mixer sums voices straight and the only ceiling is the hard clamp in
+`floatToInt16`. Each voice normalizes up to a ~0.97 peak, so **two overlapping
+callouts can sum to ~1.94 → brick-wall clip.** Overlap is a designed feature (each
+callout opens its own voice), so this is the normal multi-trigger case, not an edge.
+Hard clipping is the harshest limiting — broadband harmonics that then alias and
+waste Opus bits.
+
+Put a limiter on the float64 bus (`acc`) before quantization: lookahead (a few ms,
+buffered across 20 ms chunks), soft knee, fast attack / ~50–100 ms release.
+`floatToInt16`'s own comment nominates it as the limiter's home. Minimum viable: a
+`tanh` soft-clip on the bus removes the worst harshness in a few lines; the
+lookahead limiter is the pro version. Fold true-peak detection (P2.4) into it.
+
+### P2 — pro-level correctness
+
+#### 3. K-weighted (LUFS) loudness 🔵 — Effort: S–M
+**Measure loudness with ITU-R BS.1770 K-weighting instead of broadband RMS.**
+
+`measureLevel` / `computeGain` (`normalize.ts`) use plain RMS. RMS over-weights
+low frequencies, so a bass-heavy SFX and a speech callout normalized to the same
+RMS won't *sound* equally loud — exactly the consistency problem normalize exists
+to solve. K-weighting (a ~1.5 kHz high-shelf + ~100 Hz high-pass before the
+mean-square, ~10 lines of biquad) makes auto-leveling perceptually uniform across
+the varied trigger library. Baked per-voice TTS levels need re-measuring under the
+new metric.
+
+#### 4. True-peak ceiling 🔵 — Effort: S (with P1.2)
+**Account for inter-sample peaks instead of sample peak.**
+
+`PEAK_CEILING = 0.97` leaves only −0.26 dBFS. After Opus decode + the listener's
+DAC reconstruction, inter-sample peaks routinely exceed sample peak by up to ~+3 dB
+→ downstream clipping invisible in the samples. Cheap mitigation: drop the ceiling
+to ≈ **−1.5 dBFS (0.84)**. Proper: oversampled true-peak detection (BS.1770-4, 4×)
+inside the bus limiter.
+
+#### 5. Anti-alias the nonlinear effects 🔵 — Effort: M
+**Oversample `distortion` and `pitch`.**
+
+`distortion` (tanh waveshaper, `effects.ts`) and `pitch` (linear-resample) both
+generate content above Nyquist that folds back as inharmonic aliasing. For a "pro"
+FX catalog, oversample the nonlinearity 4–8× → process → band-limit down. Prefer
+**local** oversampling around the nonlinear effect over a global rate change. Lower
+priority — FX are opt-in novelty — but the difference between lo-fi on purpose and
+lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
+
+### P3 — polish
+
+- **6. Equal-power declick fade** 🔵 — Effort: S. A linear ramp has a slope
+  discontinuity at the ramp ends that can still tick faintly. A raised-cosine /
+  half-Hann ramp is smoother for the same 2/5 ms — a one-line gain-formula change.
+- **7. DC-blocking high-pass on ingest** 🔵 — Effort: S. A 1-pole HPF at ~20 Hz is
+  standard hygiene — removes DC bias that wastes headroom and clicks on edges.
+- **8. Proper >2-channel fold-down** ⚪ — Effort: S. `planarFloatToInterleavedStereoF32`
+  keeps the first two channels, so a 5.1 source loses its center (dialogue). A
+  Lo/Ro matrix (`L + 0.707·C + 0.707·Ls`…) is correct; rare for ACT sounds.
+- **9. Opus encoder tuning** ⚪ — Effort: S. If reachable, set signal type = VOICE
+  and complexity = 10 for TTS-dominated output. Currently bitrate-only: prism
+  exposes only `setBitrate` publicly; signal/complexity need opusscript internals.
+  Re-check against the current prism surface — free quality if it ever opens up.
+
+### Explicitly not planned
+
+- **TPDF dither before Opus.** 16-bit quantization noise (~−96 dBFS) sits far
+  below the noise Opus immediately adds at 48–128 kbps; dithering before a lossy
+  codec spends effort on noise the codec masks. The straight round + clamp in
+  `floatToInt16` is correct — add the *limiter* before it (P1.2), not dither.
+- **Global oversampling (96 kHz internal).** Only `distortion` clearly benefits,
+  sources are ≤22 kHz band-limited, and the sink is lossy 48 kHz Opus. If ever
+  revisited, prefer local oversampling around the nonlinear effect (P2.5).
 
 ---
 
-## Phase 3 — Float32 end-to-end (pro pipeline) 🔵 — Effort: L
+## Suggested sequencing
 
-**Goal:** one float bus from decode to the master output; a single dithered
-quantization before Opus. Split into two shippable sub-phases.
+1. **Master limiter** (P1.2) — self-contained, immediate audible benefit, kills
+   overlap clipping; build it to host true-peak (P2.4).
+2. **High-quality resampler** (P1.1) 🟢 — touches every callout, biggest single
+   win; done. Lives in `resample.ts`: `resampleStereoF32` (file, true stereo) +
+   `MonoStreamResampler` (streaming TTS, mono).
+3. **K-weighted loudness** (P2.3) + re-bake voice levels.
+4. **Cosine declick + DC-block** (P3.6/7) — cheap polish, bundle together.
+5. **FX anti-aliasing / Opus CTLs** (P2.5 / P3.9) as time allows.
 
-**3a — Float master bus**
-
-- Mixer (`pcm-mixer.ts`) sums in **Float32** (replacing the int32 accumulator),
-  runs with headroom, then **soft/true-peak limiter** → **TPDF dither** →
-  `s16le`. Removes the mixer's hard-clip.
-- `effects.ts`: drop the per-effect int16 `decode`/`encode` round-trip; operate
-  directly on float bus buffers. Net code *reduction* in the DSP path.
-- Delete Phase 1's float→int16 shim — decoded float rides straight into the bus.
-- Revisit `MAX_QUEUED_BYTES` (float voices are 2× int16). Rewrite the
-  `pcm-mixer` tests (the int32-sum / hard-clamp contract changes); add limiter +
-  dither tests.
-
-**3b — High-quality resampler** — **library decided: `@alexanderolsen/libsamplerate-js`**
-
-- Replace linear-interp `resampleStereo16` with **`@alexanderolsen/libsamplerate-js`**
-  (`ConverterType.SRC_SINC_BEST_QUALITY`), operating on interleaved float32.
-  **This is half the "pro" —** float everywhere with a linear resampler still
-  leaves an audible weak stage, and 44.1k→48k (the common MP3 case) is linear
-  interp's worst ratio.
-- **Packaging is the easy path here, unlike Phase 1.** The lib inlines its WASM
-  as a single base64 blob (no separate `.wasm`, no `fs`/`fetch`/`__dirname`/
-  `locateFile`), so esbuild folds it into `bundle.js` with **no externals/
-  staging** (Branch A, same as `audio-decode`). Cost: ~+2 MB bundle. See the
-  resolved Open question for the full review (Node-version fit, licensing).
-- Resample is paid **once per file, on its first fire**, then cached (keyed by
-  path+mtime) — at enqueue, off the realtime `_read` loop, so it adds first-fire
-  latency for that one clip but never glitches already-playing audio. Reuse one
-  `SRC` instance for the common 44.1k→48k config; `create()` is async (await at
-  init / warm alongside the decoder). For an unusually long clip, the
-  `worker_thread` relief valve still applies.
-- **Also fix `effects.ts` `pitch` here.** Its naive linear-interp resample has no
-  anti-alias filter, so pitching up aliases / down images — route it through the
-  same sinc resampler instead of raising the global rate.
-
-**Why last:** biggest blast radius, zero external surface, and it depends on the
-format work (Phase 1) being in place to be worth it.
+P1.1 + P1.2 together move the realtime path from clean-amateur to pro-grade.
 
 ---
 
 ## Risk register
 
-| Risk | Phase | Mitigation |
-|------|-------|------------|
-| WASM externals break the bundle / self-test | 1 | Sync both externals lists; keep `BRIDGE_READY` assert; import only needed codecs. (3b's `libsamplerate-js` inlines its WASM — no externals, exempt.) |
-| Linear resampler audible on 44.1k MP3 | 1 | QA on 44.1k; pull 3b forward if needed |
-| ~~Opus signal/complexity CTL not reachable via prism~~ (materialized) | 2 | ✅ Resolved: not reachable via prism's public API; shipped **bitrate-only** as planned |
-| Heavy per-fire DSP blocks the single thread → mixer underrun | 3 | Keep render fast; `worker_thread` offload as relief valve |
-| Float voices 2× memory vs int16 | 3 | Recompute `MAX_QUEUED_BYTES`; clips are short |
-| Protocol drift (C# vs TS) | 2 | Update both sides + version bump + tests, per CLAUDE.md |
-
-## Open questions
-
-- ~~Exact `@discordjs/voice` / prism-media API to set Opus **signal type** and
-  **complexity** (not just bitrate).~~ **Resolved (Phase 2):** prism exposes only
-  `setBitrate` publicly; signal/complexity would require reaching into opusscript
-  internals, so they're out of scope and Phase 2 shipped bitrate-only.
-- ~~Resampler library choice for 3b (soxr vs libsamplerate WASM): quality vs
-  bundle size vs maintenance.~~ **Resolved: `@alexanderolsen/libsamplerate-js`
-  (`SINC_BEST_QUALITY`).** Reviewed v2.1.2: MIT (libsamplerate itself BSD-2 —
-  add the notice), **no `engines` constraint**, env-detects Node via
-  `process.versions.node` (no version gate) → clean on our Node 24; no native
-  build (prebuilt WASM, no node-gyp). **WASM is inlined** (single base64 blob,
-  no `fs`/`fetch`/`__dirname`) → esbuild bundles with **zero externals/staging**
-  (Branch A); ships `.d.ts`; ~+2 MB bundle. API: `await create(2, inRate, 48000,
-  {converterType})` → `src.simple(interleavedF32)`. *Rejected:* `node-soxr`
-  (native + LGPL, breaks the no-native/single-`node.exe` rules), `wasm-audio-
-  resampler` (soxr, dormant since 2020), brand-new single-author/low-adoption
-  libs (`@eliware/resampler`). *Caveat:* the npm `resampler` keyword space is
-  polluted with typosquat spam copying libsamplerate-js's description — pin the
-  scoped name `@alexanderolsen/libsamplerate-js`.
-- **(Future-maybe ⚪) Global oversampling.** Run internal DSP at 2× (96 kHz) and
-  downsample to 48k. Parked, not planned: only `distortion` (tanh) clearly
-  benefits, sources are ≤22 kHz band-limited, and the sink is lossy 48 kHz Opus.
-  If ever revisited, prefer **local** oversampling around the nonlinear effect
-  (upsample → `tanh` → ½-band downsample) over a global rate change. (See the
-  locked decision "Internal processing is float32 at 48 kHz".)
-- WAV unification perf: confirm routing the common WAV case through WASM decode
-  doesn't regress first-trigger latency (warm-start should cover it).
+| Risk | Item | Mitigation |
+|------|------|-----------|
+| Heavy per-fire DSP blocks the single thread → mixer underrun | P1.1 | r8brain runs 500–2000× realtime; resample at enqueue not `_read`; `worker_thread` relief valve |
+| Limiter adds latency to the realtime path | P1.2 | Lookahead is a few ms, buffered across 20 ms chunks; far inside the existing send buffer |
+| Re-baking voice levels under LUFS drifts existing loudness | P2.3 | Re-measure all catalog voices in one pass with the new metric |
+| r8brain `.wasm` not inlined → unstaged/unloaded at runtime | P1.1 | Pin SHA in `package.json`; esbuild `external` + `build.ps1 $externals` must agree; `initResampler()` before `BRIDGE_READY` makes the self-test the gate |
+| Protocol drift (C# vs TS) if any item adds an op | any | Update both sides + version bump + tests, per CLAUDE.md |
 
 ---
 
 ## Carry-forward architecture rules (from CLAUDE.md)
 
 - Output is hard-wired **48 kHz / 16-bit signed / stereo PCM** to Opus; float is
-  internal only, quantized once at the master bus.
-- Wire protocol lives in **two places** (`Protocol.cs` + `protocol.ts` +
+  internal only, quantized once at the master bus (`floatToInt16`).
+- The wire protocol lives in **two places** (`Protocol.cs` + `protocol.ts` +
   `pipe-server` dispatch); new ops update both, bump `PROTOCOL_VERSION` on
-  incompatible changes, and extend both test suites.
-- esbuild `external:` and `build.ps1 $externals` **must agree**; staged WASM goes
-  in `dist/node_modules/`; never weaken the build self-test.
+  incompatible changes, and extend both `ProtocolTests.cs` and `protocol.test.ts`.
+  Adding a config field is additive (no version bump).
+- esbuild `external:` and `build.ps1 $externals` **must agree**; staged native/WASM
+  goes in `dist/node_modules/`; never weaken the build self-test. `audio-decode`
+  inlines its WASM (no externals, exempt). **`r8brain-wasm` does NOT inline** — its
+  `r8brain.wasm` is a separate file located at runtime via
+  `new URL('r8brain.wasm', import.meta.url)`, so it must stay external + staged
+  (`dist/node_modules/r8brain-wasm/`) and be loaded as on-disk ESM (a genuine
+  dynamic `import()` in `resample.ts`) for `import.meta.url` to resolve the file.
 - Don't reintroduce a launcher process; keep the single-`node.exe` lifecycle.

@@ -1,11 +1,16 @@
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { PcmMixer } from '../src/pcm-mixer.js';
 import { decodeFileToFinalPcm } from '../src/discord-host.js';
+import { initResampler } from '../src/resample.js';
 import { declick, declickIn, declickOut, FADE_IN_FRAMES, FADE_OUT_FRAMES } from '../src/declick.js';
+
+// decodeFileToFinalPcm resamples to 48k via the r8brain WASM module; load it
+// first (the real bridge does this before BRIDGE_READY).
+before(async () => { await initResampler(); });
 
 // Fix verification for the "subtle click at the start/end of a sound" artifact.
 //

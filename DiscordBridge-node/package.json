@@ -20,6 +20,7 @@
     "discord.js": "^14.26.4",
     "libsodium-wrappers": "^0.8.4",
     "opusscript": "^0.1.1",
+    "r8brain-wasm": "github:jlagedo/r8brain-wasm#cafc8fe",
     "sherpa-onnx-node": "^1.13.3"
   },
   "devDependencies": {
