@@ -48,6 +48,19 @@ namespace ACT_DiscordTriggers.Core.Tts {
     /// <summary>Approximate on-disk model size in MB, shown beside not-yet-installed voices.</summary>
     [JsonPropertyName("sizeMB")] public int SizeMB { get; set; }
 
+    /// <summary>Baked mean output loudness in dBFS (a negative value), measured
+    /// offline by <c>tools/tts-rms.ts</c>. Neural-TTS loudness is text-independent
+    /// per voice, so the bridge can level a clip to the user's target with this
+    /// fixed value instead of scanning the whole buffer — the precondition for
+    /// streaming. 0 means "unmeasured": the bridge then falls back to a runtime
+    /// RMS measure.</summary>
+    [JsonPropertyName("rmsDbfs")] public double RmsDbfs { get; set; }
+
+    /// <summary>Baked loudest peak in dBFS (a negative value) observed across the
+    /// measured lines. Used as the anti-clip ceiling when deriving the fixed
+    /// normalize gain, so a boost can never push a real sample past full scale.</summary>
+    [JsonPropertyName("peakDbfs")] public double PeakDbfs { get; set; }
+
     /// <summary>Flags a sensible default for the locale so undecided users have a pick.</summary>
     [JsonPropertyName("recommended")] public bool Recommended { get; set; }
   }

@@ -9,11 +9,23 @@
 // Run:  node tools/gen-onnx-catalog/gen.mjs
 // No dependencies — Node 18+ (built-in fetch). Network access required.
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const SCHEMA_VERSION = 1;
+
+// Per-voice baked loudness (rms/peak dBFS), measured offline by
+// DiscordBridge-node/tools/tts-rms.ts and checked in as rms-baked.json. A voice
+// present here gets fixed-gain leveling (and is streaming-ready); one absent
+// keeps 0 (the unmeasured sentinel) and the bridge levels it by a runtime RMS
+// measure. Re-measure more voices, refresh rms-baked.json, and regenerate.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const BAKED = JSON.parse(readFileSync(join(HERE, "rms-baked.json"), "utf8")).voices;
+const bakedFor = (id) => ({
+  rmsDbfs: BAKED[id]?.rmsDbfs ?? 0,
+  peakDbfs: BAKED[id]?.peakDbfs ?? 0,
+});
 const VOICES_JSON_URL =
   "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json";
 
@@ -37,6 +49,14 @@ const localeName = (locale) =>
   LOCALE_NAMES[locale] || `${locale} (${locale.replace("_", "-").toLowerCase()})`;
 // Only ship the 22.05 kHz tiers; x_low/low are 16 kHz and dropped.
 const QUALITIES = new Set(["medium", "high"]);
+
+// Piper keys present in the rhasspy manifest but NOT published as a k2-fsa
+// `tts-models` release asset. The plugin downloads from
+// `…/tts-models/<id>.tar.bz2`, so listing one would offer a voice that 404s for
+// the user. k2-fsa never converted the MLS (multi-speaker LibriVox) voices.
+const EXCLUDE_KEYS = new Set([
+  "fr_FR-mls-medium", "de_DE-mls-medium",
+]);
 
 // A few sensible defaults flagged per language so undecided users have a pick.
 const RECOMMENDED_PIPER = new Set([
@@ -95,6 +115,7 @@ async function buildPiper() {
   for (const v of Object.values(manifest)) {
     const locale = v.language.code;
     if (!LOCALES.has(locale) || !QUALITIES.has(v.quality)) continue;
+    if (EXCLUDE_KEYS.has(v.key)) continue; // not downloadable from k2-fsa
     const id = `vits-piper-${v.key}`; // matches the k2-fsa tts-models release name
     rows.push({
       id,
@@ -109,6 +130,7 @@ async function buildPiper() {
       lang: "",
       downloadId: id,
       sizeMB: onnxSizeMB(v.files),
+      ...bakedFor(id),
       recommended: RECOMMENDED_PIPER.has(v.key),
     });
   }
@@ -127,6 +149,7 @@ function buildKokoro() {
     lang: KOKORO_LANG[k.locale] ?? "",
     downloadId: KOKORO_PACK,
     sizeMB: KOKORO_PACK_MB,
+    ...bakedFor(`kokoro-${k.sid}`),
     recommended: !!k.recommended,
   }));
 }

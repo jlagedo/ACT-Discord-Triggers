@@ -1,0 +1,257 @@
+{
+  "note": "Per-voice baked loudness, measured by tools/tts-rms.ts over varied callout lines. rmsDbfs = mean RMS; peakDbfs = loudest peak observed (gain ceiling). Voices absent here fall back to the family default in gen.mjs.",
+  "voices": {
+    "kokoro-1": {
+      "rmsDbfs": -18.8,
+      "peakDbfs": -1.6
+    },
+    "kokoro-14": {
+      "rmsDbfs": -20.3,
+      "peakDbfs": -0.7
+    },
+    "kokoro-16": {
+      "rmsDbfs": -24.3,
+      "peakDbfs": -7.5
+    },
+    "kokoro-18": {
+      "rmsDbfs": -19.2,
+      "peakDbfs": -0.2
+    },
+    "kokoro-2": {
+      "rmsDbfs": -23.3,
+      "peakDbfs": -5.5
+    },
+    "kokoro-21": {
+      "rmsDbfs": -22.1,
+      "peakDbfs": -4.1
+    },
+    "kokoro-22": {
+      "rmsDbfs": -19.5,
+      "peakDbfs": -2.1
+    },
+    "kokoro-25": {
+      "rmsDbfs": -24.4,
+      "peakDbfs": -4.9
+    },
+    "kokoro-26": {
+      "rmsDbfs": -21.9,
+      "peakDbfs": -4.7
+    },
+    "kokoro-3": {
+      "rmsDbfs": -23.9,
+      "peakDbfs": -5.8
+    },
+    "kokoro-42": {
+      "rmsDbfs": -25,
+      "peakDbfs": -4.3
+    },
+    "kokoro-43": {
+      "rmsDbfs": -24.2,
+      "peakDbfs": -5.2
+    },
+    "kokoro-44": {
+      "rmsDbfs": -24.3,
+      "peakDbfs": -4.3
+    },
+    "kokoro-5": {
+      "rmsDbfs": -19.8,
+      "peakDbfs": -3.2
+    },
+    "kokoro-6": {
+      "rmsDbfs": -22.1,
+      "peakDbfs": -1.9
+    },
+    "kokoro-9": {
+      "rmsDbfs": -22,
+      "peakDbfs": -1.7
+    },
+    "vits-piper-de_DE-thorsten_emotional-medium": {
+      "rmsDbfs": -20.3,
+      "peakDbfs": -4
+    },
+    "vits-piper-de_DE-thorsten-high": {
+      "rmsDbfs": -24.4,
+      "peakDbfs": -6
+    },
+    "vits-piper-de_DE-thorsten-medium": {
+      "rmsDbfs": -23.9,
+      "peakDbfs": -6.9
+    },
+    "vits-piper-en_GB-alan-medium": {
+      "rmsDbfs": -19,
+      "peakDbfs": -0.8
+    },
+    "vits-piper-en_GB-alba-medium": {
+      "rmsDbfs": -26.1,
+      "peakDbfs": -7.9
+    },
+    "vits-piper-en_GB-aru-medium": {
+      "rmsDbfs": -36.2,
+      "peakDbfs": -17.8
+    },
+    "vits-piper-en_GB-cori-high": {
+      "rmsDbfs": -28.3,
+      "peakDbfs": -7.6
+    },
+    "vits-piper-en_GB-cori-medium": {
+      "rmsDbfs": -27.3,
+      "peakDbfs": -8.3
+    },
+    "vits-piper-en_GB-jenny_dioco-medium": {
+      "rmsDbfs": -24.7,
+      "peakDbfs": -9.6
+    },
+    "vits-piper-en_GB-northern_english_male-medium": {
+      "rmsDbfs": -20.4,
+      "peakDbfs": -0.9
+    },
+    "vits-piper-en_GB-semaine-medium": {
+      "rmsDbfs": -30.7,
+      "peakDbfs": -7.3
+    },
+    "vits-piper-en_GB-vctk-medium": {
+      "rmsDbfs": -25.2,
+      "peakDbfs": -5.3
+    },
+    "vits-piper-en_US-amy-medium": {
+      "rmsDbfs": -22,
+      "peakDbfs": -2.8
+    },
+    "vits-piper-en_US-arctic-medium": {
+      "rmsDbfs": -21.7,
+      "peakDbfs": -3.9
+    },
+    "vits-piper-en_US-bryce-medium": {
+      "rmsDbfs": -24,
+      "peakDbfs": -3.9
+    },
+    "vits-piper-en_US-hfc_female-medium": {
+      "rmsDbfs": -26.4,
+      "peakDbfs": -7.5
+    },
+    "vits-piper-en_US-hfc_male-medium": {
+      "rmsDbfs": -27.5,
+      "peakDbfs": -7
+    },
+    "vits-piper-en_US-joe-medium": {
+      "rmsDbfs": -23.7,
+      "peakDbfs": -3
+    },
+    "vits-piper-en_US-john-medium": {
+      "rmsDbfs": -29.4,
+      "peakDbfs": -8
+    },
+    "vits-piper-en_US-kristin-medium": {
+      "rmsDbfs": -23.4,
+      "peakDbfs": -5.8
+    },
+    "vits-piper-en_US-kusal-medium": {
+      "rmsDbfs": -23.3,
+      "peakDbfs": -0.5
+    },
+    "vits-piper-en_US-l2arctic-medium": {
+      "rmsDbfs": -19.8,
+      "peakDbfs": -2.7
+    },
+    "vits-piper-en_US-lessac-high": {
+      "rmsDbfs": -20.1,
+      "peakDbfs": -3.1
+    },
+    "vits-piper-en_US-lessac-medium": {
+      "rmsDbfs": -21.2,
+      "peakDbfs": -2.7
+    },
+    "vits-piper-en_US-libritts_r-medium": {
+      "rmsDbfs": -20,
+      "peakDbfs": -1.2
+    },
+    "vits-piper-en_US-libritts-high": {
+      "rmsDbfs": -25.6,
+      "peakDbfs": -4.8
+    },
+    "vits-piper-en_US-ljspeech-high": {
+      "rmsDbfs": -23.5,
+      "peakDbfs": -3.2
+    },
+    "vits-piper-en_US-ljspeech-medium": {
+      "rmsDbfs": -25.8,
+      "peakDbfs": -6
+    },
+    "vits-piper-en_US-norman-medium": {
+      "rmsDbfs": -25.6,
+      "peakDbfs": -5.4
+    },
+    "vits-piper-en_US-reza_ibrahim-medium": {
+      "rmsDbfs": -22.2,
+      "peakDbfs": -2.6
+    },
+    "vits-piper-en_US-ryan-high": {
+      "rmsDbfs": -19.6,
+      "peakDbfs": -4.6
+    },
+    "vits-piper-en_US-ryan-medium": {
+      "rmsDbfs": -20.1,
+      "peakDbfs": -4.2
+    },
+    "vits-piper-en_US-sam-medium": {
+      "rmsDbfs": -22.3,
+      "peakDbfs": -2.2
+    },
+    "vits-piper-es_ES-davefx-medium": {
+      "rmsDbfs": -15.8,
+      "peakDbfs": 0
+    },
+    "vits-piper-es_ES-sharvard-medium": {
+      "rmsDbfs": -23.9,
+      "peakDbfs": -3.8
+    },
+    "vits-piper-es_MX-ald-medium": {
+      "rmsDbfs": -18.1,
+      "peakDbfs": -1.2
+    },
+    "vits-piper-es_MX-claude-high": {
+      "rmsDbfs": -21.3,
+      "peakDbfs": -4.8
+    },
+    "vits-piper-fr_FR-siwis-medium": {
+      "rmsDbfs": -21.8,
+      "peakDbfs": -3.8
+    },
+    "vits-piper-fr_FR-tom-medium": {
+      "rmsDbfs": -31.3,
+      "peakDbfs": -6.6
+    },
+    "vits-piper-fr_FR-upmc-medium": {
+      "rmsDbfs": -26.4,
+      "peakDbfs": -8.2
+    },
+    "vits-piper-pt_BR-cadu-medium": {
+      "rmsDbfs": -24.9,
+      "peakDbfs": -3.2
+    },
+    "vits-piper-pt_BR-faber-medium": {
+      "rmsDbfs": -22.7,
+      "peakDbfs": -3.5
+    },
+    "vits-piper-pt_BR-jeff-medium": {
+      "rmsDbfs": -24.3,
+      "peakDbfs": -3.7
+    },
+    "vits-piper-ru_RU-denis-medium": {
+      "rmsDbfs": -22,
+      "peakDbfs": -3.4
+    },
+    "vits-piper-ru_RU-dmitri-medium": {
+      "rmsDbfs": -24.4,
+      "peakDbfs": -3.6
+    },
+    "vits-piper-ru_RU-irina-medium": {
+      "rmsDbfs": -27.2,
+      "peakDbfs": -4.9
+    },
+    "vits-piper-ru_RU-ruslan-medium": {
+      "rmsDbfs": -23.3,
+      "peakDbfs": -3.8
+    }
+  }
+}

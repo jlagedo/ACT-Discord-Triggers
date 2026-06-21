@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as log from './file-log.js';
+import { dbToLinear } from './normalize.js';
 import type { OpResult } from './pipe-server.js';
 
 // The raw Float32 mono samples + rate a synth produces. Also the shape
@@ -61,11 +62,25 @@ export interface OnnxSynthConfig {
     lang: string;       // espeak-ng voice id; '' = the model's own / lexicon
     speedSlider: number; // raw UI slider 0..20
     threads: number;
+    // Baked per-voice loudness in dBFS (negative), from the catalog. Present only
+    // when measured; absent → the host levels by a runtime RMS measure instead.
+    rmsDbfs?: number;
+    peakDbfs?: number;
 }
+
+// Baked loudness as linear fractions of full scale (1.0 == 0 dBFS), the shape
+// normalizePcm16's KnownLevel expects. null when the voice is unmeasured.
+export interface BakedLevel { rms: number; peak: number }
 
 function toInt(v: string | undefined, fallback: number): number {
     const n = Number(v);
     return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+// Parse a baked dBFS field; undefined unless it's a real (negative) dBFS value.
+function toDbfs(v: string | undefined): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) && n < 0 ? n : undefined;
 }
 
 // Parse the SetConfig `ttsParams` bag into a synth descriptor, or null when no
@@ -75,6 +90,8 @@ export function parseTtsParams(raw: Record<string, string> | undefined): OnnxSyn
     if (!raw || raw['engine'] !== 'onnx') return null;
     const modelDir = raw['modelDir'] ?? '';
     if (!modelDir) return null;
+    const rmsDbfs = toDbfs(raw['rms']);
+    const peakDbfs = toDbfs(raw['peak']);
     return {
         family: raw['family'] === 'kokoro' ? 'kokoro' : 'piper',
         modelDir,
@@ -82,6 +99,10 @@ export function parseTtsParams(raw: Record<string, string> | undefined): OnnxSyn
         lang: raw['lang'] ?? '',
         speedSlider: toInt(raw['speed'], 10),
         threads: toInt(raw['threads'], 1),
+        // Spread so the keys are absent (not explicitly undefined) when a voice is
+        // unmeasured — exactOptionalPropertyTypes forbids assigning undefined.
+        ...(rmsDbfs !== undefined ? { rmsDbfs } : {}),
+        ...(peakDbfs !== undefined ? { peakDbfs } : {}),
     };
 }
 
@@ -119,16 +140,33 @@ export class OnnxTts {
         return `${this.desc.family} sid=${this.desc.sid} lang='${this.desc.lang}'`;
     }
 
+    // The current voice's baked loudness as linear full-scale fractions, or null
+    // when the voice is unmeasured (the host then levels by a runtime measure).
+    bakedLevel(): BakedLevel | null {
+        const r = this.desc?.rmsDbfs;
+        const p = this.desc?.peakDbfs;
+        if (r === undefined || p === undefined) return null;
+        return { rms: dbToLinear(r), peak: dbToLinear(p) };
+    }
+
     // Synthesize text to the model's raw Float32 mono samples + rate, or null when
     // no voice is ready or synthesis fails / yields nothing. Off the event loop:
     // generateAsync dispatches to a libuv worker, so the mixer's 20 ms frame
-    // delivery and Discord keepalives keep running during synthesis.
-    async synth(text: string): Promise<OnnxAudio | null> {
+    // delivery and Discord keepalives keep running during synthesis. Overlapping
+    // callouts each call synth independently and stream into their own mixer
+    // voice, so they synthesize and play concurrently.
+    async synth(
+        text: string,
+        onChunk?: (samples: Float32Array, sampleRate: number) => void,
+    ): Promise<OnnxAudio | null> {
         if (!this.ready || !this.desc) return null;
         if (!text || text.trim().length === 0) return null;
         try {
             const tts = this._ensureModel(this.desc);
             const sherpa = loadSherpa();
+            // The instance rate is known before generation runs, so streaming
+            // consumers can build their resampler from the first chunk.
+            const modelRate = tts.sampleRate;
             const gcOpts: GenerationConfigOpts = {
                 sid: this.desc.sid,
                 speed: sliderToSpeed(this.desc.speedSlider),
@@ -140,15 +178,24 @@ export class OnnxTts {
             const result = await tts.generateAsync({
                 text,
                 generationConfig: gc,
+                // onProgress is marshaled to the main thread. A streaming consumer
+                // reads each chunk synchronously (the mixer copies it out before we
+                // return), so it gets the sherpa-owned view directly — no copy, no
+                // accumulation. Without a consumer we copy each chunk and keep them
+                // for the buffered return (the "no audio" guard + non-streaming callers).
                 onProgress: (info) => {
                     const s = info?.samples;
-                    if (s?.length) chunks.push(Float32Array.from(s));
+                    if (s?.length) {
+                        if (onChunk) onChunk(s, modelRate);
+                        else chunks.push(Float32Array.from(s));
+                    }
                     return 1;
                 },
             });
 
             // The resolved value is the full audio for non-streaming TTS; the
-            // accumulated onProgress chunks are the fallback if it isn't populated.
+            // accumulated onProgress chunks are the fallback if it isn't populated
+            // (only collected when no streaming consumer drained them already).
             let samples: Float32Array | null = null;
             if (result?.samples?.length) samples = Float32Array.from(result.samples);
             else if (chunks.length) samples = concatFloat32(chunks);

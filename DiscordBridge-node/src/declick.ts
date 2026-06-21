@@ -22,11 +22,16 @@ const FRAME_BYTES = 4; // interleaved s16le stereo: L,R = 2 + 2 bytes
 export const FADE_IN_FRAMES = 96;   // 2 ms at 48 kHz (short: preserves attack)
 export const FADE_OUT_FRAMES = 240; // 5 ms at 48 kHz
 
-// Linear fade-in on the first frames and fade-out on the last frames of an
+// Linear fade-in on the first frames and/or fade-out on the last frames of an
 // interleaved s16le stereo buffer. Returns a NEW buffer; never mutates the input
 // (callers pass WavCache-shared buffers, so in-place editing would corrupt the
 // cache). Only the ramp regions are rewritten — the middle is copied verbatim.
-export function declick(pcm: Buffer): Buffer {
+//
+// The streaming TTS path declicks the edges of a multi-chunk utterance: fade-in
+// on the first chunk only (declickIn) and fade-out on the last chunk only
+// (declickOut). Interior chunk boundaries are contiguous samples from one synth
+// pass, so they need no ramp — only the silence-facing onset and tail do.
+function applyRamp(pcm: Buffer, doIn: boolean, doOut: boolean): Buffer {
     // Align to whole stereo frames; a stray trailing byte (malformed upstream)
     // would otherwise let the ramp loop read one byte past the end. Matches the
     // mixer's odd-byte tolerance.
@@ -36,9 +41,10 @@ export function declick(pcm: Buffer): Buffer {
     if (totalFrames === 0) return out;
 
     // Clamp each ramp to the clip length so a sub-fade-length blip still ramps
-    // (over its whole self) instead of indexing past the buffer.
-    const fadeInLen = Math.min(FADE_IN_FRAMES, totalFrames);
-    const fadeOutLen = Math.min(FADE_OUT_FRAMES, totalFrames);
+    // (over its whole self) instead of indexing past the buffer. A disabled side
+    // has length 0, so its region is empty and its gain stays 1.
+    const fadeInLen = doIn ? Math.min(FADE_IN_FRAMES, totalFrames) : 0;
+    const fadeOutLen = doOut ? Math.min(FADE_OUT_FRAMES, totalFrames) : 0;
     const fadeOutStart = totalFrames - fadeOutLen;
 
     for (let f = 0; f < totalFrames; f++) {
@@ -53,3 +59,12 @@ export function declick(pcm: Buffer): Buffer {
     }
     return out;
 }
+
+// Fade both edges (the buffered one-shot path: SpeakPcm/SpeakFile/SpeakText).
+export function declick(pcm: Buffer): Buffer { return applyRamp(pcm, true, true); }
+
+// Fade the onset only — the first chunk of a streamed utterance.
+export function declickIn(pcm: Buffer): Buffer { return applyRamp(pcm, true, false); }
+
+// Fade the tail only — the final chunk of a streamed utterance.
+export function declickOut(pcm: Buffer): Buffer { return applyRamp(pcm, false, true); }

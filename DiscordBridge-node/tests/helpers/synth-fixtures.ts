@@ -4,13 +4,13 @@
 // addon and the downloaded voice models. They auto-skip when either is absent,
 // so `npm test` stays green everywhere and runs the real path only on a machine
 // that has both. Point ACT_DT_MODELS_DIR at a models root to override the
-// default (the sibling sherpa-onnx-test repo used during engine evaluation).
+// default local voice store.
 
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEFAULT_MODELS_DIR = 'E:\\dev\\sherpa-onnx-test\\models';
+const DEFAULT_MODELS_DIR = 'E:\\ai';
 
 // Reference model directory names (== catalog downloadIds).
 export const PIPER_PT_BR = 'vits-piper-pt_BR-faber-medium';

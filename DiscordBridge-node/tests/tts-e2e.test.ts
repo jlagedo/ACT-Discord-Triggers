@@ -28,6 +28,12 @@ function piperParams(dir: string): Record<string, string> {
     return { engine: 'onnx', family: 'piper', modelDir: dir, sid: '0', lang: '', speed: '10', threads: '1' };
 }
 
+// Baked rms/peak present => the bridge takes the STREAMING path (leveling with a
+// fixed gain, audio fed to the mixer/sink chunk-by-chunk) even with normalize on.
+function piperParamsBaked(dir: string): Record<string, string> {
+    return { ...piperParams(dir), rms: '-23', peak: '-3' };
+}
+
 // Kokoro pt-BR (pf_dora, sid 42) — drives the baked espeak `lang` ('pt-br') over
 // the wire and through the kokoro synth path (different from Piper's).
 function kokoroPtParams(dir: string): Record<string, string> {
@@ -71,6 +77,32 @@ test('SpeakText through the bridge writes a non-silent 48k/stereo WAV', skip, as
             assert.ok(channelData[0]!.length > 48000 * 0.5, 'captured clip too short');
 
             // Re-read as raw PCM (after the 44-byte WAV header) to confirm real signal.
+            const pcm = readFileSync(join(sinkDir, wavs[0]!)).subarray(44);
+            assert.ok(rmsPcm16Stereo(pcm) > 0.01, `captured audio ~silent (rms=${rmsPcm16Stereo(pcm)})`);
+        });
+    } finally {
+        rmSync(sinkDir, { recursive: true, force: true });
+    }
+});
+
+test('SpeakText streams a baked voice chunk-by-chunk to a non-silent 48k/stereo WAV', skip, async () => {
+    const sinkDir = mkdtempSync(join(tmpdir(), 'act-e2e-'));
+    try {
+        await withBridge('onnx-stream', sinkDir, async (client) => {
+            // Baked rms/peak => streaming path (resampler + holdback declick + sink
+            // accumulation). The sink contract must still be exactly one WAV.
+            const cfg = await client.send(Op.SetConfig, { config: {}, ttsParams: piperParamsBaked(modelDir(PIPER_EN_US)!) });
+            assert.equal(cfg['ok'], true);
+
+            const spoke = await client.send(Op.SpeakText, { text: LINE });
+            assert.equal(spoke['op'], Op.Result);
+            assert.equal(spoke['ok'], true, `SpeakText failed: ${String(spoke['error'])}`);
+
+            const wavs = readdirSync(sinkDir).filter((f) => f.endsWith('.wav'));
+            assert.equal(wavs.length, 1, `expected one captured WAV, got ${wavs.join(',')}`);
+            const { sampleRate, channelData } = await decode(readFileSync(join(sinkDir, wavs[0]!)));
+            assert.equal(sampleRate, 48000, 'capture must be at the bridge target rate');
+            assert.ok(channelData[0]!.length > 48000 * 0.5, 'captured clip too short');
             const pcm = readFileSync(join(sinkDir, wavs[0]!)).subarray(44);
             assert.ok(rmsPcm16Stereo(pcm) > 0.01, `captured audio ~silent (rms=${rmsPcm16Stereo(pcm)})`);
         });

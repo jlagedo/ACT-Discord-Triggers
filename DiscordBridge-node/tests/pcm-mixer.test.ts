@@ -207,6 +207,132 @@ test('clear() resets queuedBytes', () => {
     assert.equal(m.voiceCount, 0);
 });
 
+// ----------------------------------------------------------------------------
+// Open (streaming) voices: openVoice / appendToVoice / closeVoice
+// ----------------------------------------------------------------------------
+
+test('open voice survives while drained, plays appended audio, drops after close', () => {
+    const m = new PcmMixer();
+    const h = m.openVoice({ id: 1, enqueueT: 0 });
+    // No audio yet: mixer emits silence but keeps the open voice alive.
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
+    assert.equal(m.voiceCount, 1);
+
+    // Append one chunk worth; it plays.
+    m.appendToVoice(h, constStereo(500, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 500));
+    // Drained but still open → silence, voice retained.
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
+    assert.equal(m.voiceCount, 1);
+
+    // More audio arrives after a drain gap; still plays on the same voice.
+    m.appendToVoice(h, constStereo(700, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 700));
+
+    // Close: once drained it is compacted out.
+    m.closeVoice(h);
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
+    assert.equal(m.voiceCount, 0);
+});
+
+test('appendToVoice across a chunk boundary plays seamlessly (two halves == one full)', () => {
+    // Append two 480-frame halves of a 960-frame voice; the first chunk must mix
+    // exactly the same as a single 960-frame addVoice would.
+    const m = new PcmMixer();
+    const h = m.openVoice();
+    m.appendToVoice(h, constStereo(333, 480));
+    m.appendToVoice(h, constStereo(333, 480));
+    const chunk = m._mixOneChunk();
+    assert.equal(Buffer.compare(chunk, constStereo(333, 960)), 0);
+});
+
+test('appendToVoice mid-chunk (partial then top-up) fills the same chunk', () => {
+    const m = new PcmMixer();
+    const h = m.openVoice();
+    m.appendToVoice(h, constStereo(111, 480)); // half a chunk
+    m.appendToVoice(h, constStereo(111, 480)); // top up to a full chunk before _read
+    const c = m._mixOneChunk();
+    assert.ok(allSamplesEqual(c, 111));
+});
+
+test('two concurrent open voices mix (sum) and drain independently', () => {
+    // Models overlapping callouts: two streaming voices open at once, fed on
+    // interleaved schedules, must sum sample-by-sample and close independently.
+    const m = new PcmMixer();
+    const a = m.openVoice({ id: 1, enqueueT: 0 });
+    const b = m.openVoice({ id: 2, enqueueT: 0 });
+    assert.equal(m.voiceCount, 2);
+
+    m.appendToVoice(a, constStereo(100, 960));
+    m.appendToVoice(b, constStereo(200, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 300)); // both contribute
+
+    // A is starved this round but still open; B gets more → only B plays.
+    m.appendToVoice(b, constStereo(200, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 200));
+
+    // A resumes; B starved → only A.
+    m.appendToVoice(a, constStereo(100, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 100));
+
+    // Close A; B keeps playing its remaining audio independently.
+    m.closeVoice(a);
+    m.appendToVoice(b, constStereo(200, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 200));
+    m.closeVoice(b);
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
+    assert.equal(m.voiceCount, 0);
+});
+
+test('open and one-shot voices coexist and sum', () => {
+    // A streaming callout overlapping a fully-buffered SpeakFile/SpeakPcm voice.
+    const m = new PcmMixer();
+    const stream = m.openVoice({ id: 1, enqueueT: 0 });
+    m.appendToVoice(stream, constStereo(100, 960));
+    m.addVoice(constStereo(50, 960)); // a one-shot voice in parallel
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 150));
+});
+
+test('open voice is not evicted by a flood of one-shot voices', () => {
+    const m = new PcmMixer();
+    const h = m.openVoice({ id: 42, enqueueT: 0 });
+    m.appendToVoice(h, constStereo(1000, 1)); // 1 stereo frame at sample[0]
+    // Flood well past the 64-voice cap with one-shot voices.
+    for (let i = 0; i < 200; i++) m.addVoice(constStereo(1, 1));
+    assert.ok(m.voiceCount <= 64);
+    // The open voice must still be present and contribute its 1000 to sample[0].
+    const chunk = m._mixOneChunk();
+    assert.ok(chunk.readInt16LE(0) >= 1000, `open voice survived: sample0=${chunk.readInt16LE(0)}`);
+});
+
+test('queuedBytes tracks appends and drains; never negative across close', () => {
+    const m = new PcmMixer();
+    const h = m.openVoice();
+    m.appendToVoice(h, constStereo(1, 960)); // 3840 bytes
+    assert.equal(m.queuedBytes, 3840);
+    m.appendToVoice(h, constStereo(1, 960)); // +3840
+    assert.equal(m.queuedBytes, 7680);
+    m._mixOneChunk(); // consume one chunk
+    assert.equal(m.queuedBytes, 3840);
+    m.closeVoice(h);
+    m._mixOneChunk(); // drain the rest
+    assert.equal(m.queuedBytes, 0);
+    assert.ok(m.queuedBytes >= 0);
+});
+
+test('appendToVoice on a closed/drained handle is a safe no-op', () => {
+    const m = new PcmMixer();
+    const h = m.openVoice();
+    m.appendToVoice(h, constStereo(5, 960));
+    m.closeVoice(h);
+    m._mixOneChunk(); // drains + compacts the voice out
+    assert.equal(m.voiceCount, 0);
+    // Handle is stale now; appending must not throw or resurrect a voice.
+    const r = m.appendToVoice(h, constStereo(9, 960));
+    assert.deepEqual(r, { dropped: 0 });
+    assert.equal(m.voiceCount, 0);
+});
+
 test('Readable plumbing: _read pushes one chunk per call', async () => {
     const m = new PcmMixer();
     m.addVoice(constStereo(42, 960 * 3)); // 3 chunks long

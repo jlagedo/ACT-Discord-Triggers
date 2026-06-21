@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "bundle": "node esbuild.config.mjs",
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
-    "tts:probe": "node --import tsx tools/tts-probe.ts"
+    "tts:probe": "node --import tsx tools/tts-probe.ts",
+    "tts:rms": "node --import tsx tools/tts-rms.ts",
+    "tts:stream-probe": "node --import tsx tools/tts-stream-probe.ts"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",

@@ -23,10 +23,11 @@ import * as log from './file-log.js';
 import decode from 'audio-decode';
 import { planarFloatToInterleavedInt16Stereo_PHASE1_SHIM } from './audio-decode.js';
 import { applyRandomEffect } from './effects.js';
-import { normalizePcm16 } from './normalize.js';
-import { declick } from './declick.js';
+import { normalizePcm16, computeGain, dbToLinear, type KnownLevel } from './normalize.js';
+import { declick, declickIn, declickOut } from './declick.js';
+import { StreamingResampler } from './stream-resampler.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
-import { PcmMixer } from './pcm-mixer.js';
+import { PcmMixer, type VoiceHandle } from './pcm-mixer.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
 import { DEFAULT_CONFIG_VIEW, type BridgeConfigView, type LogLevel } from './protocol.js';
 import { WavCache } from './wav-cache.js';
@@ -35,6 +36,14 @@ import { createSinkFromEnv, type AudioSink } from './audio-sink.js';
 
 const TARGET_SAMPLE_RATE = 48000;
 const TARGET_BITS = 16;
+
+// Streaming TTS levels with a fixed gain from the voice's baked peak, which is
+// the loudest across the offline probe lines — a louder runtime callout can
+// exceed it. Inflate the baked peak by this headroom before deriving the gain so
+// a boost can't clip a hotter-than-measured transient; a near-full-scale voice
+// just lands a touch under target instead of clipping over it. The buffered path
+// measures each clip's real peak and needs no headroom.
+const STREAM_PEAK_SAFETY_DB = 3;
 
 // Maps the plugin's audio-quality tier (config.audioQualityIndex) to an Opus
 // bitrate. Owned here so retuning the tiers never touches the wire contract.
@@ -119,11 +128,13 @@ export async function decodeFileToFinalPcm(path: string): Promise<Buffer> {
 
 // ONNX models output Float32 mono. Convert to the bridge's 16-bit signed LE stereo
 // (duplicating the channel) at the model's native rate; the caller resamples to
-// 48 kHz with resampleStereo16. Exported for unit tests.
-export function monoFloat32ToStereoInt16(mono: Float32Array): Buffer {
+// 48 kHz with resampleStereo16. An optional `gain` is folded in before the int16
+// clamp — the streaming path passes the voice's fixed baked-loudness gain here so
+// leveling needs no separate whole-buffer normalize pass. Exported for unit tests.
+export function monoFloat32ToStereoInt16(mono: Float32Array, gain = 1): Buffer {
     const out = Buffer.alloc(mono.length * 4); // 2 channels * 2 bytes
     for (let i = 0; i < mono.length; i++) {
-        let s = mono[i]!;
+        let s = mono[i]! * gain;
         if (s > 1) s = 1; else if (s < -1) s = -1;
         const v = Math.round(s < 0 ? s * 0x8000 : s * 0x7fff);
         out.writeInt16LE(v, i * 4);
@@ -421,18 +432,21 @@ export class DiscordHost implements Host {
     // (this much was pure program time) plus a voice-RTT snapshot taken at the
     // exact moment of this trigger (#2). The mixer later logs enqueue->firstEmit
     // for the same reqId (#1), closing the gap between "queued" and "on the wire".
-    private _enqueue(kind: string, pcm: Buffer, meta?: SpeakMeta): OpResult {
+    private _enqueue(kind: string, pcm: Buffer, meta?: SpeakMeta, baked?: KnownLevel, skipFx = false): OpResult {
         const reqId = meta?.reqId ?? 0;
         // Optional random sound effect. The bridge owns the whole decision: roll
         // the dice from the current config (randomFx + fxChance), then let
         // applyRandomEffect pick which effect. Applied on the complete buffer
         // before it enters the mixer, so the recv->enqueue stamp below includes
-        // the DSP time as the program cost it is.
+        // the DSP time as the program cost it is. skipFx is set for spoken
+        // callouts — FX is not applied to TTS (and would block streaming anyway).
         let buf = pcm;
-        if (this.config.randomFx && this._rollFx()) {
+        let fxFired = false;
+        if (!skipFx && this.config.randomFx && this._rollFx()) {
             try {
                 const fx = applyRandomEffect(buf);
                 buf = fx.pcm;
+                fxFired = true;
                 log.info(`fx reqId=${reqId} effect=${fx.name} ` +
                     `inMs=${this._pcmDurationMs(pcm.length)} outMs=${this._pcmDurationMs(buf.length)}`);
             } catch (e) {
@@ -443,10 +457,15 @@ export class DiscordHost implements Host {
         // correct — a distortion hit that came out hot, or an echo tail that
         // dropped the average, both land near the target loudness. The config
         // carries a positive magnitude; negate it to a dBFS RMS target.
+        //
+        // For neural-TTS clips the caller passes the voice's baked level, letting
+        // normalize skip its whole-buffer scan — but only when no effect ran, since
+        // an effect relevels the clip and invalidates the baked numbers.
         if (this.config.normalize) {
             const targetDb = -Math.abs(this.config.normalizeTarget);
+            const known = baked && !fxFired ? baked : undefined;
             try {
-                const norm = normalizePcm16(buf, targetDb);
+                const norm = normalizePcm16(buf, targetDb, known);
                 if (norm.applied) {
                     buf = norm.pcm;
                     log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${targetDb}dBFS`);
@@ -552,10 +571,12 @@ export class DiscordHost implements Host {
         return this._enqueue('SpeakFile', finalPcm, meta);
     }
 
-    // ONNX TTS: synthesize the text with the voice learned from SetConfig, convert
-    // the model's Float32 mono output to 48k/16/stereo, then rejoin the same
-    // fx/normalize/declick path as SpeakPcm/SpeakFile via _enqueue. A not-ready or
-    // empty-synthesis case logs + skips so a bad voice never drops the connection.
+    // ONNX TTS: synthesize the text with the voice learned from SetConfig and play
+    // it. Streams chunk-by-chunk (audio starts before synthesis finishes) whenever
+    // leveling needs no whole-buffer scan — i.e. normalize is off, or the voice is
+    // baked (all catalog voices are). Random FX is not applied to spoken callouts.
+    // The buffered path is the fallback for the rare unmeasured-voice + normalize
+    // case. A not-ready/empty case logs + skips so a bad voice never drops the bot.
     async speakText(text: string, meta?: SpeakMeta): Promise<OpResult> {
         const guard = this._guardPlayback();
         if (!guard.ok) return guard;
@@ -563,6 +584,13 @@ export class DiscordHost implements Host {
             this._sendLog('Warn', 'ONNX voice not ready; skipped this callout.');
             return { ok: false, error: 'ONNX voice not ready' };
         }
+        const baked = this.onnxTts.bakedLevel();
+        if (!this.config.normalize || baked) {
+            return this._streamSpeakText(text, meta, baked);
+        }
+
+        // Fallback: unmeasured voice with normalize on — must measure the whole
+        // buffer, so synthesize fully first. Still skips FX (skipFx) for TTS.
         let audio;
         try {
             audio = await this.onnxTts.synth(text);
@@ -573,10 +601,123 @@ export class DiscordHost implements Host {
             this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
             return { ok: false, error: 'ONNX synthesis produced no audio' };
         }
-        const stereoSrc = monoFloat32ToStereoInt16(audio.samples);
-        const finalPcm = resampleStereo16(stereoSrc, audio.sampleRate, TARGET_SAMPLE_RATE);
+        const finalPcm = resampleStereo16(
+            monoFloat32ToStereoInt16(audio.samples), audio.sampleRate, TARGET_SAMPLE_RATE);
         log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outBytes=${finalPcm.length}`);
-        return this._enqueue('SpeakText', finalPcm, meta);
+        return this._enqueue('SpeakText', finalPcm, meta, undefined, /*skipFx*/ true);
+    }
+
+    // Streaming TTS: feed sherpa's onProgress chunks into an open mixer voice as
+    // they're synthesized, so audio starts after the first chunk instead of the
+    // whole utterance. Each chunk is converted (with the fixed baked gain folded
+    // in), resampled with cross-chunk continuity, and edge-declicked via a
+    // one-chunk holdback (fade-in on the first emitted buffer, fade-out on the
+    // last). The complete clip is also captured to the WAV sink as one file.
+    private async _streamSpeakText(text: string, meta: SpeakMeta | undefined, baked: KnownLevel | null): Promise<OpResult> {
+        const reqId = meta?.reqId ?? 0;
+        const mixer = this.mixer; // may be null in offline sink-capture mode
+
+        // One fixed gain for the whole utterance, from the baked level + target.
+        // Derive it against a peak inflated by the safety headroom (capped at full
+        // scale, the physical ceiling) so a runtime callout louder than the baked
+        // probe max can't be boosted into a clip.
+        let gain = 1;
+        if (this.config.normalize && baked) {
+            const safePeak = Math.min(1, baked.peak * dbToLinear(STREAM_PEAK_SAFETY_DB));
+            gain = computeGain(baked.rms, safePeak, -Math.abs(this.config.normalizeTarget));
+        }
+
+        // This callout's own mixer voice. Each concurrent callout opens its own,
+        // and the mixer sums them, so overlapping callouts play together.
+        const handle: VoiceHandle | null = mixer ? mixer.openVoice({ id: reqId, enqueueT: performance.now() }) : null;
+        const sinkParts: Buffer[] = [];
+        // Held in an object so its narrowing survives assignment inside `feed`
+        // (a `let` assigned only in a closure gets pinned to its null init).
+        const rs: { r: StreamingResampler | null } = { r: null };
+        let pending: Buffer | null = null; // last emitted buffer, held for tail declick
+        let isFirst = true;                // pending is also the first emitted buffer
+        let streamedAny = false;
+
+        // Emit the held `pending` buffer, declicking its onset (first of many) /
+        // tail (last) / both (the only buffer). Interior buffers are contiguous
+        // synth samples and need no ramp.
+        const flushPending = (last: boolean): void => {
+            if (!pending) return;
+            let buf = pending;
+            if (isFirst && last) buf = declick(buf);
+            else if (isFirst) buf = declickIn(buf);
+            else if (last) buf = declickOut(buf);
+            if (mixer && handle) mixer.appendToVoice(handle, buf);
+            sinkParts.push(buf);
+            isFirst = false;
+            pending = null;
+        };
+        // Hand a freshly resampled buffer to the holdback: the previous pending is
+        // now known not to be the last, so emit it and hold this one.
+        const consume = (out: Buffer): void => {
+            if (out.length === 0) return;
+            flushPending(false);
+            pending = out;
+        };
+        // Convert one mono chunk -> stereo (gain folded) -> resampled 48k stereo.
+        const feed = (samples: Float32Array, srcRate: number): void => {
+            if (!rs.r) rs.r = new StreamingResampler(srcRate, TARGET_SAMPLE_RATE);
+            consume(rs.r.push(monoFloat32ToStereoInt16(samples, gain)));
+        };
+
+        let audio;
+        let synthErr: unknown = null;
+        try {
+            audio = await this.onnxTts.synth(text, (samples, srcRate) => {
+                streamedAny = true;
+                feed(samples, srcRate);
+            });
+        } catch (e) {
+            synthErr = e;
+        }
+
+        // If sherpa didn't stream (single-shot onProgress), still play the whole
+        // resolved buffer through the same path so the callout isn't silent.
+        if (!streamedAny && audio && audio.samples.length > 0) {
+            feed(audio.samples, audio.sampleRate);
+        }
+        // Drain the resampler tail and emit the final (declick-out) buffer.
+        if (rs.r) consume(rs.r.flush());
+        flushPending(true);
+        if (mixer && handle) mixer.closeVoice(handle);
+
+        // Capture the exact played audio as one WAV (preserves the sink contract).
+        if (this.sink && sinkParts.length > 0) {
+            try {
+                const full = Buffer.concat(sinkParts);
+                const path = this.sink.write(`SpeakText-${reqId}`, full);
+                log.info(`audio sink: SpeakText reqId=${reqId} -> ${path}`);
+            } catch (e) {
+                log.error('audio sink write failed', e);
+            }
+        }
+
+        // A mid-utterance synth throw can land after chunks already streamed into
+        // the live voice. Those can't be unplayed, and the holdback already
+        // declick-faded the tail, so the partial callout ends cleanly instead of
+        // clicking — report it as played (the listener heard the callout) with a
+        // warning. Only a throw before any audio is a hard failure, matching the
+        // buffered path's "nothing played" behavior.
+        if (synthErr) {
+            if (sinkParts.length === 0) return { ok: false, error: log.errMsg(synthErr) };
+            this._sendLog('Warn', 'ONNX synthesis failed mid-utterance; played the partial callout.');
+            log.info(`SpeakText(stream) reqId=${reqId} partial err=${log.errMsg(synthErr)}`);
+            return { ok: true, error: '' };
+        }
+        if (sinkParts.length === 0) {
+            this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
+            return { ok: false, error: 'ONNX synthesis produced no audio' };
+        }
+        if (meta) {
+            const total = (performance.now() - meta.recvT).toFixed(1);
+            log.info(`SpeakText(stream) reqId=${reqId} voice=${this.onnxTts.describe()} gain=${gain.toFixed(3)} recv->done=${total}ms ${this._pingStr()}`);
+        }
+        return { ok: true, error: '' };
     }
 
     private _startPingLog(): void {

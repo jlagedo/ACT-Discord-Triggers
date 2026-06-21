@@ -99,3 +99,26 @@ test('output length always matches input length', () => {
     const r = normalizePcm16(buf, -16);
     assert.equal(r.pcm.length, buf.length);
 });
+
+test('known level skips measurement and matches measuring an equivalent clip', () => {
+    // A constant half-scale clip: RMS == peak == 16384/32768 = 0.5. Passing that
+    // as a known level must yield the identical gain to measuring it.
+    const loud = constStereo(480, 16384);
+    const measured = normalizePcm16(loud, -20);
+    const known = normalizePcm16(loud, -20, { rms: 0.5, peak: 0.5 });
+    assert.equal(known.applied, measured.applied);
+    assert.ok(Math.abs(known.gain - measured.gain) < 1e-9, `known=${known.gain} measured=${measured.gain}`);
+    assert.ok(Math.abs(rmsNorm(known.pcm) - 0.1) < 0.01);
+});
+
+test('known level uses the supplied numbers, not the buffer contents', () => {
+    // Buffer is silent, but we assert that a known peak drives the peak-ceiling
+    // clamp: a tiny known rms with a high known peak limits the gain to the
+    // ceiling/peak, proving the buffer was never scanned for level.
+    const buf = constStereo(200, 0);
+    const r = normalizePcm16(buf, -20, { rms: 0.02, peak: 0.8 });
+    assert.equal(r.applied, true);
+    const peakLimit = 0.97 / 0.8;
+    assert.ok(r.gain <= peakLimit + 1e-9, `gain ${r.gain} exceeded peak limit ${peakLimit}`);
+    assert.ok(r.gain > 1, 'a -34 dBFS known rms toward -20 should boost');
+});

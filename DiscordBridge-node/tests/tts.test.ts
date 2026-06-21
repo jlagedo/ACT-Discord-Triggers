@@ -41,6 +41,45 @@ test('parseTtsParams: piper descriptor with defaults', () => {
     assert.equal(d.lang, '');
     assert.equal(d.speedSlider, 10); // default mid slider
     assert.equal(d.threads, 1);
+    assert.equal(d.rmsDbfs, undefined); // no baked loudness -> runtime measure
+    assert.equal(d.peakDbfs, undefined);
+});
+
+test('parseTtsParams: baked rms/peak parsed only when a real (negative) dBFS', () => {
+    const d = parseTtsParams({
+        engine: 'onnx', family: 'piper', modelDir: 'C:\\m', rms: '-22.6', peak: '-3',
+    });
+    assert.ok(d);
+    assert.equal(d.rmsDbfs, -22.6);
+    assert.equal(d.peakDbfs, -3);
+
+    // 0 (the unmeasured sentinel), a positive value, and junk all read as absent.
+    const z = parseTtsParams({ engine: 'onnx', modelDir: 'C:\\m', rms: '0', peak: '0' });
+    assert.equal(z?.rmsDbfs, undefined);
+    assert.equal(z?.peakDbfs, undefined);
+    const j = parseTtsParams({ engine: 'onnx', modelDir: 'C:\\m', rms: '1.5', peak: 'x' });
+    assert.equal(j?.rmsDbfs, undefined);
+    assert.equal(j?.peakDbfs, undefined);
+});
+
+test('OnnxTts.bakedLevel: dBFS -> linear full-scale, null when unmeasured', () => {
+    // configure sets the descriptor before validating model files, so bakedLevel
+    // is readable even though these fake dirs make the voice not-ready.
+    const measured = new OnnxTts();
+    measured.configure({
+        family: 'piper', modelDir: 'C:\\m', sid: 0, lang: '', speedSlider: 10,
+        threads: 1, rmsDbfs: -20, peakDbfs: -6,
+    });
+    const lvl = measured.bakedLevel();
+    assert.ok(lvl);
+    assert.ok(Math.abs(lvl.rms - 0.1) < 1e-9);          // 10^(-20/20) = 0.1
+    assert.ok(Math.abs(lvl.peak - 0.501187) < 1e-5);    // 10^(-6/20) ≈ 0.5012
+
+    const unmeasured = new OnnxTts();
+    unmeasured.configure({
+        family: 'piper', modelDir: 'C:\\m', sid: 0, lang: '', speedSlider: 10, threads: 1,
+    });
+    assert.equal(unmeasured.bakedLevel(), null);
 });
 
 test('parseTtsParams: kokoro descriptor carries sid/lang/speed/threads', () => {
@@ -107,6 +146,18 @@ test('monoFloat32ToStereoInt16: clamps out-of-range samples to full scale', () =
     const buf = monoFloat32ToStereoInt16(mono);
     assert.equal(buf.readInt16LE(0), 0x7fff);   // +full scale
     assert.equal(buf.readInt16LE(4), -0x8000);  // -full scale
+});
+
+test('monoFloat32ToStereoInt16: gain factor scales before clamp (default 1 unchanged)', () => {
+    const mono = Float32Array.from([0.5]);
+    // Default gain leaves the sample at 0.5 * 0x7fff.
+    assert.equal(monoFloat32ToStereoInt16(mono).readInt16LE(0), Math.round(0.5 * 0x7fff));
+    // gain 0.5 halves it; both channels carry the scaled value.
+    const half = monoFloat32ToStereoInt16(mono, 0.5);
+    assert.equal(half.readInt16LE(0), Math.round(0.25 * 0x7fff));
+    assert.equal(half.readInt16LE(2), Math.round(0.25 * 0x7fff));
+    // A boosting gain still clamps at full scale (no wrap/overflow).
+    assert.equal(monoFloat32ToStereoInt16(mono, 4).readInt16LE(0), 0x7fff);
 });
 
 // ----------------------------------------------------------------------------

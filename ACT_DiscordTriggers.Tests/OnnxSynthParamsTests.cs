@@ -89,6 +89,43 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public void Resolve_Onnx_MeasuredVoice_EmitsBakedLoudness() {
+      using (var t = new TempDir()) {
+        // A catalog voice with a real (negative) baked rms — the installed set is
+        // measured, so a recommended Piper voice carries one.
+        var voice = OnnxCatalog.ByFamily(OnnxCatalog.FamilyPiper).First(v => v.RmsDbfs < 0);
+        InstallPiper(t.Path, voice);
+
+        var p = OnnxSynthParams.Resolve(new PluginSettings {
+          TtsEngine = "onnx", OnnxVoice = voice.Id, ModelsDir = t.Path,
+        });
+
+        Assert.Equal(voice.RmsDbfs.ToString(System.Globalization.CultureInfo.InvariantCulture), p["rms"]);
+        Assert.Equal(voice.PeakDbfs.ToString(System.Globalization.CultureInfo.InvariantCulture), p["peak"]);
+      }
+    }
+
+    [Fact]
+    public void Resolve_Onnx_UnmeasuredVoice_OmitsBakedLoudness() {
+      using (var t = new TempDir()) {
+        // A voice with no baked loudness (sentinel 0) must not forward rms/peak,
+        // so the bridge falls back to a runtime RMS measure. The shipped catalog
+        // is fully baked, so this skips unless an unmeasured voice is ever added;
+        // the guard it protects stays in OnnxSynthParams regardless.
+        var voice = OnnxCatalog.ByFamily(OnnxCatalog.FamilyPiper).FirstOrDefault(v => v.RmsDbfs == 0);
+        Assert.SkipUnless(voice != null, "All catalog voices are baked; no unmeasured fixture.");
+        InstallPiper(t.Path, voice);
+
+        var p = OnnxSynthParams.Resolve(new PluginSettings {
+          TtsEngine = "onnx", OnnxVoice = voice.Id, ModelsDir = t.Path,
+        });
+
+        Assert.False(p.ContainsKey("rms"));
+        Assert.False(p.ContainsKey("peak"));
+      }
+    }
+
+    [Fact]
     public void Resolve_Onnx_UnknownVoiceId_ReturnsEmptyBag() {
       using (var t = new TempDir()) {
         var p = OnnxSynthParams.Resolve(new PluginSettings {

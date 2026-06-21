@@ -13,7 +13,7 @@
 // discord-host applies this in _enqueue, AFTER any random effect, so the effect's
 // own level change is what gets corrected.
 
-const FULL_SCALE = 32768; // |int16| range; 1.0 == 0 dBFS
+export const FULL_SCALE = 32768; // |int16| range; 1.0 == 0 dBFS
 
 // Leave a sliver of headroom under 0 dBFS. A gain that would push the loudest
 // sample past this is clamped down to it — the limiter that makes boosting safe.
@@ -38,18 +38,34 @@ export interface NormalizeResult {
     applied: boolean; // false → pcm is the input buffer, untouched
 }
 
-function dbToLinear(db: number): number {
+// A pre-known loudness for the buffer, both linear and normalized to full scale
+// (1.0 == 0 dBFS), so normalizePcm16 can skip its measurement pass. Used for
+// neural-TTS clips whose loudness is baked per-voice in the catalog: the gain is
+// derived from these instead of scanning every sample, which is what lets the
+// synth path stream. Only valid when the buffer wasn't relevelled after baking
+// (e.g. a random effect) — the caller is responsible for that gate.
+export interface KnownLevel {
+    rms: number;  // 0..1
+    peak: number; // 0..1
+}
+
+export function dbToLinear(db: number): number {
     return Math.pow(10, db / 20);
 }
 
-// Normalize a 48k/16-bit/stereo PCM buffer toward `targetDbfs` (a negative dBFS
-// value, e.g. -20). Measures RMS + peak across every sample (both channels
-// together — we want a single coherent gain, not per-channel balance changes),
-// then derives one gain bounded by the peak ceiling and the max-boost cap.
-export function normalizePcm16(pcm: Buffer, targetDbfs: number): NormalizeResult {
-    const sampleCount = pcm.length >>> 1; // int16 samples across L+R
-    if (sampleCount === 0) return { pcm, gain: 1, applied: false };
+// Linear full-scale fraction (0..1) -> dBFS; 0 maps to -Infinity. The inverse of
+// dbToLinear, used by offline tooling to report baked levels in dB.
+export function linearToDb(x: number): number {
+    return x > 0 ? 20 * Math.log10(x) : -Infinity;
+}
 
+// Measure a 48k/16-bit/stereo PCM buffer's RMS and peak as linear fractions of
+// full scale (1.0 == 0 dBFS), both channels together (one coherent gain, not
+// per-channel balance). The same energy math normalizePcm16 levels with, exposed
+// so offline tooling bakes voice loudness from the exact runtime numbers.
+export function measureLevel(pcm: Buffer): { rms: number; peak: number } {
+    const sampleCount = pcm.length >>> 1; // int16 samples across L+R
+    if (sampleCount === 0) return { rms: 0, peak: 0 };
     let sumSq = 0;
     let peak = 0;
     for (let i = 0; i < sampleCount; i++) {
@@ -58,15 +74,35 @@ export function normalizePcm16(pcm: Buffer, targetDbfs: number): NormalizeResult
         const a = s < 0 ? -s : s;
         if (a > peak) peak = a;
     }
+    return { rms: Math.sqrt(sumSq / sampleCount), peak };
+}
 
-    const rms = Math.sqrt(sumSq / sampleCount);
-    if (rms < MIN_RMS || peak === 0) return { pcm, gain: 1, applied: false };
-
-    // Gain that lands RMS on target, then clamp: never exceed the peak ceiling
-    // (no clipping) and never boost beyond the cap (no amplifying silence).
+// The single gain decision, shared by the runtime-measure path and the streaming
+// fixed-gain path: land RMS on target, then clamp so it never exceeds the peak
+// ceiling (no clipping) nor the max-boost cap (no amplifying near-silence). rms
+// and peak are linear fractions of full scale (0..1). Returns 1 (no change) for a
+// silent/degenerate buffer. The streaming path folds this gain into the
+// mono->stereo conversion so a clip is leveled without a whole-buffer scan.
+export function computeGain(rms: number, peak: number, targetDbfs: number): number {
+    if (rms < MIN_RMS || peak <= 0) return 1;
     const peakLimit = PEAK_CEILING / peak;
-    const gain = Math.min(dbToLinear(targetDbfs) / rms, peakLimit, MAX_BOOST_LINEAR);
+    return Math.min(dbToLinear(targetDbfs) / rms, peakLimit, MAX_BOOST_LINEAR);
+}
 
+// Normalize a 48k/16-bit/stereo PCM buffer toward `targetDbfs` (a negative dBFS
+// value, e.g. -20). Measures RMS + peak across every sample (both channels
+// together — we want a single coherent gain, not per-channel balance changes),
+// then derives one gain bounded by the peak ceiling and the max-boost cap.
+// When `known` is supplied (a baked per-voice level), the measurement pass is
+// skipped and the gain is derived from it — same gain math, no buffer scan.
+export function normalizePcm16(pcm: Buffer, targetDbfs: number, known?: KnownLevel): NormalizeResult {
+    const sampleCount = pcm.length >>> 1; // int16 samples across L+R
+    if (sampleCount === 0) return { pcm, gain: 1, applied: false };
+
+    const { rms, peak } = known ?? measureLevel(pcm);
+    if (rms < MIN_RMS || peak <= 0) return { pcm, gain: 1, applied: false };
+
+    const gain = computeGain(rms, peak, targetDbfs);
     if (Math.abs(gain - 1) < UNITY_EPSILON) return { pcm, gain: 1, applied: false };
 
     const out = Buffer.allocUnsafe(sampleCount * 2);

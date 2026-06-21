@@ -37,6 +37,15 @@ namespace ACT_DiscordTriggers.Core.Tts {
       p["lang"] = voice.Lang ?? "";
       p["speed"] = settings.TtsSpeed.ToString(inv);
       p["threads"] = settings.TtsThreads.ToString(inv);
+      // Baked per-voice loudness, emitted only when measured (a real dBFS value
+      // is negative). The bridge levels the clip to the user's target with these
+      // fixed values instead of scanning the whole buffer; absent them it falls
+      // back to a runtime RMS measure. Valid dBFS is < 0, so a non-negative value
+      // is the "unmeasured" sentinel and is not forwarded.
+      if (voice.RmsDbfs < 0 && voice.PeakDbfs < 0) {
+        p["rms"] = voice.RmsDbfs.ToString(inv);
+        p["peak"] = voice.PeakDbfs.ToString(inv);
+      }
       return p;
     }
   }

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { PcmMixer } from '../src/pcm-mixer.js';
 import { decodeFileToFinalPcm } from '../src/discord-host.js';
-import { declick, FADE_IN_FRAMES, FADE_OUT_FRAMES } from '../src/declick.js';
+import { declick, declickIn, declickOut, FADE_IN_FRAMES, FADE_OUT_FRAMES } from '../src/declick.js';
 
 // Fix verification for the "subtle click at the start/end of a sound" artifact.
 //
@@ -102,6 +102,50 @@ test('declicked clip has no full-amplitude step at the mixer silence boundaries'
     // Old hard step was the full 12000; the ramps cap any single step well under
     // 800 (≈ amplitude / smallest fade-frame count).
     assert.ok(step < 800, `max boundary step should be small after declick, got ${step}`);
+});
+
+// ----------------------------------------------------------------------------
+// Streaming edge declick: declickIn (first chunk) / declickOut (last chunk)
+// ----------------------------------------------------------------------------
+
+test('declickIn ramps the onset only, leaves the tail verbatim', () => {
+    const amp = 12000;
+    const frames = 4000;
+    const out = declickIn(constStereo(amp, frames));
+    assert.ok(Math.abs(frameL(out, 0)) < amp / 10, `onset ramps from ~0 (got ${frameL(out, 0)})`);
+    assert.equal(frameL(out, FADE_IN_FRAMES), amp, 'first full-gain frame after fade-in');
+    // Tail untouched — no fade-out.
+    assert.equal(frameL(out, frames - 1), amp, 'tail is verbatim (no fade-out)');
+});
+
+test('declickOut ramps the tail only, leaves the onset verbatim', () => {
+    const amp = 12000;
+    const frames = 4000;
+    const out = declickOut(constStereo(amp, frames));
+    assert.equal(frameL(out, 0), amp, 'onset is verbatim (no fade-in)');
+    assert.equal(frameL(out, frames - FADE_OUT_FRAMES - 1), amp, 'last full-gain frame before fade-out');
+    assert.ok(Math.abs(frameL(out, frames - 1)) < amp / 10, `tail ramps to ~0 (got ${frameL(out, frames - 1)})`);
+});
+
+test('declickIn(first) + middles + declickOut(last) == declick(whole)', () => {
+    // The streaming holdback fades the first emitted chunk's onset and the last
+    // chunk's tail; interior chunks are verbatim. With chunks each longer than
+    // both ramps, the concatenation must equal a single whole-buffer declick.
+    const amp = 9000;
+    const a = constStereo(amp, 1000); // first
+    const b = constStereo(amp, 1000); // middle (verbatim)
+    const c = constStereo(amp, 1000); // last
+    const streamed = Buffer.concat([declickIn(a), b, declickOut(c)]);
+    const whole = declick(Buffer.concat([a, b, c]));
+    assert.equal(Buffer.compare(streamed, whole), 0);
+});
+
+test('declickIn / declickOut do not mutate the input', () => {
+    const input = constStereo(8000, 1000);
+    const copy = Buffer.from(input);
+    declickIn(input);
+    declickOut(input);
+    assert.equal(Buffer.compare(input, copy), 0);
 });
 
 test('real fixtures end on non-zero samples; declick ramps them to ~0', async () => {

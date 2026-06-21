@@ -19,7 +19,7 @@ namespace ACT_DiscordTriggers.Tests {
   //
   // Auto-skips unless everything needed is present: a built dist/ with the native
   // addon staged (run build.ps1 with sherpa-onnx-node installed) and the voice
-  // models (default E:\dev\sherpa-onnx-test\models, override ACT_DT_MODELS_DIR).
+  // models (default E:\ai, override ACT_DT_MODELS_DIR).
   public class OnnxBridgeE2ETests {
     private static string DistDir() {
       string testDir = Path.GetDirectoryName(typeof(OnnxBridgeE2ETests).Assembly.Location);
@@ -29,7 +29,7 @@ namespace ACT_DiscordTriggers.Tests {
 
     private static string ModelsDir() {
       var env = Environment.GetEnvironmentVariable("ACT_DT_MODELS_DIR");
-      return string.IsNullOrWhiteSpace(env) ? @"E:\dev\sherpa-onnx-test\models" : env.Trim();
+      return string.IsNullOrWhiteSpace(env) ? @"E:\ai" : env.Trim();
     }
 
     private static bool DistReady(string dist) =>

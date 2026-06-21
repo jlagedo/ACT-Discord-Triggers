@@ -13,11 +13,7 @@ import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
 import { monoFloat32ToStereoInt16, resampleStereo16 } from '../src/discord-host.js';
 import { writeWav16 } from '../src/wav-write.js';
 import { resolve } from 'node:path';
-
-function arg(name: string, fallback: string): string {
-    const i = process.argv.indexOf(`--${name}`);
-    return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1]! : fallback;
-}
+import { arg } from './args.js';
 
 async function main(): Promise<void> {
     const modelDir = arg('model', '');
