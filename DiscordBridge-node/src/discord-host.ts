@@ -592,34 +592,49 @@ export class DiscordHost implements Host {
     // baked (all catalog voices are). Random FX is not applied to spoken callouts.
     // The buffered path is the fallback for the rare unmeasured-voice + normalize
     // case. A not-ready/empty case logs + skips so a bad voice never drops the bot.
-    async speakText(text: string, meta?: SpeakMeta): Promise<OpResult> {
+    speakText(text: string, meta?: SpeakMeta): Promise<OpResult> {
         const guard = this._guardPlayback();
-        if (!guard.ok) return guard;
+        if (!guard.ok) return Promise.resolve(guard);
         if (!this.onnxTts.isReady()) {
             this._sendLog('Warn', 'ONNX voice not ready; skipped this callout.');
-            return { ok: false, error: 'ONNX voice not ready' };
+            return Promise.resolve({ ok: false, error: 'ONNX voice not ready' });
         }
         const baked = this.onnxTts.bakedLevel();
-        if (!this.config.normalize || baked) {
-            return this._streamSpeakText(text, meta, baked);
-        }
+        // The Result acks *acceptance*, not completion: synthesis runs detached so
+        // ACT's trigger thread isn't blocked for the whole synth, and concurrent
+        // callouts overlap in the mixer (each opens its own voice). Pre-flight
+        // failures above ride this Result; anything that fails after this point is
+        // past the ack, so it surfaces via Log instead.
+        const run = (!this.config.normalize || baked)
+            ? this._streamSpeakText(text, meta, baked)
+            : this._bufferedSpeakText(text, meta);
+        void run.catch((e: unknown) => {
+            this._sendLog('Error', `ONNX callout crashed: ${log.errMsg(e)}`);
+            log.error('SpeakText detached crash', e);
+        });
+        return Promise.resolve({ ok: true, error: '' });
+    }
 
-        // Fallback: unmeasured voice with normalize on — must measure the whole
-        // buffer, so synthesize fully first. Still skips FX (skipFx) for TTS.
+    // Buffered fallback for the rare unmeasured-voice + normalize case: leveling
+    // must scan the whole clip, so synthesize fully before enqueueing. Runs
+    // detached like the streaming path, so its failures surface via Log, not the
+    // already-sent Result. Still skips FX (skipFx) for TTS.
+    private async _bufferedSpeakText(text: string, meta?: SpeakMeta): Promise<void> {
         let audio;
         try {
             audio = await this.onnxTts.synth(text);
         } catch (e) {
-            return { ok: false, error: log.errMsg(e) };
+            this._sendLog('Warn', `ONNX synthesis failed: ${log.errMsg(e)}`);
+            return;
         }
         if (!audio || audio.samples.length === 0) {
             this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
-            return { ok: false, error: 'ONNX synthesis produced no audio' };
+            return;
         }
         const finalPcm = resampleStereoF32(
             monoFloat32ToStereoF32(audio.samples), audio.sampleRate, TARGET_SAMPLE_RATE);
         log.info(`SpeakText synth: voice=${this.onnxTts.describe()} srcRate=${audio.sampleRate} outSamples=${finalPcm.length}`);
-        return this._enqueue('SpeakText', finalPcm, meta, undefined, /*skipFx*/ true);
+        this._enqueue('SpeakText', finalPcm, meta, undefined, /*skipFx*/ true);
     }
 
     // Streaming TTS: feed sherpa's onProgress chunks into an open mixer voice as
@@ -719,7 +734,10 @@ export class DiscordHost implements Host {
         // warning. Only a throw before any audio is a hard failure, matching the
         // buffered path's "nothing played" behavior.
         if (synthErr) {
-            if (sinkParts.length === 0) return { ok: false, error: log.errMsg(synthErr) };
+            if (sinkParts.length === 0) {
+                this._sendLog('Warn', `ONNX synthesis failed; nothing played: ${log.errMsg(synthErr)}`);
+                return { ok: false, error: log.errMsg(synthErr) };
+            }
             this._sendLog('Warn', 'ONNX synthesis failed mid-utterance; played the partial callout.');
             log.info(`SpeakText(stream) reqId=${reqId} partial err=${log.errMsg(synthErr)}`);
             return { ok: true, error: '' };

@@ -23,9 +23,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     Task LeaveChannelAsync();
     Task DeinitAsync();
 
-    void Speak(string text, string voice, int vol, int speed);
-    void SpeakOnnx(string text);
-    void SpeakFile(string path);
+    // Playback is awaitable (not blocking, not fire-and-forget): the caller awaits
+    // so ACT's callout thread is never parked, while failures stay observable.
+    Task SpeakAsync(string text, string voice, int vol, int speed);
+    Task SpeakOnnxAsync(string text);
+    Task SpeakFileAsync(string path);
 
     string[] GetInstalledVoices();
   }

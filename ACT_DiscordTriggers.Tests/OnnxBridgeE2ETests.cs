@@ -120,9 +120,11 @@ namespace ACT_DiscordTriggers.Tests {
 
         var spoke = await pc.SendAsync<BridgeResponse>(
           new SpeakTextRequest { Text = text }, TimeSpan.FromSeconds(30));
-        Assert.True(spoke.Ok, $"SpeakText failed: {spoke.Error}");
+        Assert.True(spoke.Ok, $"SpeakText accept failed: {spoke.Error}");
 
-        var wavs = Directory.GetFiles(sinkDir, "*.wav");
+        // The Result acks acceptance; synthesis runs detached on the bridge, so the
+        // captured WAV lands shortly after. Poll the sink until it appears.
+        var wavs = await WaitForWavsAsync(sinkDir, 1, TimeSpan.FromSeconds(30));
         Assert.Single(wavs);
         AssertNonSilent48kStereoWav(wavs[0]);
       } finally {
@@ -166,6 +168,17 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.False(ic.Data.Connected);
       } finally {
         try { await pc_Shutdown(bp); } catch { }
+      }
+    }
+
+    // Poll the audio sink until at least `count` WAVs are present or the timeout
+    // elapses (then return whatever's there so the caller's assert reports it).
+    private static async Task<string[]> WaitForWavsAsync(string sinkDir, int count, TimeSpan timeout) {
+      var deadline = DateTime.UtcNow + timeout;
+      for (; ; ) {
+        var wavs = Directory.GetFiles(sinkDir, "*.wav");
+        if (wavs.Length >= count || DateTime.UtcNow >= deadline) return wavs;
+        await Task.Delay(50);
       }
     }
 

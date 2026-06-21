@@ -36,9 +36,9 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     public Task LeaveChannelAsync() => DiscordClient.LeaveChannelAsync();
     public Task DeinitAsync() => DiscordClient.DeinitAsync();
 
-    public void Speak(string text, string voice, int vol, int speed) => DiscordClient.Speak(text, voice, vol, speed);
-    public void SpeakOnnx(string text) => DiscordClient.SpeakOnnx(text);
-    public void SpeakFile(string path) => DiscordClient.SpeakFile(path);
+    public Task SpeakAsync(string text, string voice, int vol, int speed) => DiscordClient.SpeakAsync(text, voice, vol, speed);
+    public Task SpeakOnnxAsync(string text) => DiscordClient.SpeakOnnxAsync(text);
+    public Task SpeakFileAsync(string path) => DiscordClient.SpeakFileAsync(path);
 
     public string[] GetInstalledVoices() => DiscordClient.GetInstalledVoices();
 

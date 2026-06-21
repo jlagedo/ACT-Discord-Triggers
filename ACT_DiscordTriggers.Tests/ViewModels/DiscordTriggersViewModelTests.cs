@@ -440,9 +440,9 @@ namespace ACT_DiscordTriggers.Tests {
       }
       public Task LeaveChannelAsync() { LeaveCalled = true; return Task.CompletedTask; }
       public Task DeinitAsync() { DeinitCallCount++; return Task.CompletedTask; }
-      public void Speak(string text, string voice, int vol, int speed) => SpeakCalls.Add((text, voice, vol, speed));
-      public void SpeakOnnx(string text) => SpeakOnnxCalls.Add(text);
-      public void SpeakFile(string path) { }
+      public Task SpeakAsync(string text, string voice, int vol, int speed) { SpeakCalls.Add((text, voice, vol, speed)); return Task.CompletedTask; }
+      public Task SpeakOnnxAsync(string text) { SpeakOnnxCalls.Add(text); return Task.CompletedTask; }
+      public Task SpeakFileAsync(string path) => Task.CompletedTask;
       public string[] GetInstalledVoices() => VoicesToReturn;
     }
   }

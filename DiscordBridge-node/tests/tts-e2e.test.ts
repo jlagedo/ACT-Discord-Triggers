@@ -40,6 +40,18 @@ function kokoroPtParams(dir: string): Record<string, string> {
     return { engine: 'onnx', family: 'kokoro', modelDir: dir, sid: '42', lang: 'pt-br', speed: '10', threads: '2' };
 }
 
+// SpeakText is acked on acceptance and synthesis runs detached, so the captured
+// WAV lands shortly after the Result rather than before it. Poll the sink until
+// the expected count appears (or time out and let the caller's assert report it).
+async function waitForWavs(sinkDir: string, count: number, timeoutMs = 20000): Promise<string[]> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const wavs = readdirSync(sinkDir).filter((f) => f.endsWith('.wav'));
+        if (wavs.length >= count || Date.now() >= deadline) return wavs;
+        await new Promise((r) => setTimeout(r, 50));
+    }
+}
+
 async function withBridge(
     suffix: string,
     sinkDir: string | null,
@@ -70,7 +82,7 @@ test('SpeakText through the bridge writes a non-silent 48k/stereo WAV', skip, as
             assert.equal(spoke['op'], Op.Result);
             assert.equal(spoke['ok'], true, `SpeakText failed: ${String(spoke['error'])}`);
 
-            const wavs = readdirSync(sinkDir).filter((f) => f.endsWith('.wav'));
+            const wavs = await waitForWavs(sinkDir, 1);
             assert.equal(wavs.length, 1, `expected one captured WAV, got ${wavs.join(',')}`);
             const { sampleRate, channelData } = await decode(readFileSync(join(sinkDir, wavs[0]!)));
             assert.equal(sampleRate, 48000, 'capture must be at the bridge target rate');
@@ -98,7 +110,7 @@ test('SpeakText streams a baked voice chunk-by-chunk to a non-silent 48k/stereo 
             assert.equal(spoke['op'], Op.Result);
             assert.equal(spoke['ok'], true, `SpeakText failed: ${String(spoke['error'])}`);
 
-            const wavs = readdirSync(sinkDir).filter((f) => f.endsWith('.wav'));
+            const wavs = await waitForWavs(sinkDir, 1);
             assert.equal(wavs.length, 1, `expected one captured WAV, got ${wavs.join(',')}`);
             const { sampleRate, channelData } = await decode(readFileSync(join(sinkDir, wavs[0]!)));
             assert.equal(sampleRate, 48000, 'capture must be at the bridge target rate');
@@ -121,7 +133,7 @@ test('SpeakText with a Kokoro pt-BR voice synthesizes through the bridge (baked 
             const spoke = await client.send(Op.SpeakText, { text: PT_LINE });
             assert.equal(spoke['ok'], true, `SpeakText failed: ${String(spoke['error'])}`);
 
-            const wavs = readdirSync(sinkDir).filter((f) => f.endsWith('.wav'));
+            const wavs = await waitForWavs(sinkDir, 1);
             assert.equal(wavs.length, 1, `expected one captured WAV, got ${wavs.join(',')}`);
             const { sampleRate, channelData } = await decode(readFileSync(join(sinkDir, wavs[0]!)));
             assert.equal(sampleRate, 48000, 'capture must be at the bridge target rate');

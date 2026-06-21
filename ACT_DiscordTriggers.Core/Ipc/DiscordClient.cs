@@ -283,62 +283,49 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             }
         }
 
-        public static void Speak(string text, string voice, int vol, int speed) {
-            // Called from ACT's PlayTtsMethod hook on a background thread, not the UI.
-            // Synthesis itself is sync; downstream IPC blocks the trigger thread by design.
-            var swSynth = Stopwatch.StartNew();
-            byte[] pcm;
-            try {
-                using (var tts = new SpeechSynthesizer())
-                using (var ms = new MemoryStream()) {
-                    tts.SelectVoice(voice);
-                    tts.Volume = vol * 5;
-                    tts.Rate = speed - 10;
-                    tts.SetOutputToAudioStream(ms, formatInfo);
-                    tts.Speak(text);
-                    pcm = ms.ToArray();
+        // SAPI TTS: synthesize in-process (System.Speech is a Windows capability the
+        // bridge can't run), then send the PCM. The CPU-bound synth AND the IPC run on a
+        // thread-pool thread (Task.Run) so the ACT callout thread that invokes this is
+        // never blocked — the caller awaits the returned Task instead.
+        public static Task SpeakAsync(string text, string voice, int vol, int speed) {
+            return Task.Run(async () => {
+                var swSynth = Stopwatch.StartNew();
+                byte[] pcm;
+                try {
+                    using (var tts = new SpeechSynthesizer())
+                    using (var ms = new MemoryStream()) {
+                        tts.SelectVoice(voice);
+                        tts.Volume = vol * 5;
+                        tts.Rate = speed - 10;
+                        tts.SetOutputToAudioStream(ms, formatInfo);
+                        tts.Speak(text);
+                        pcm = ms.ToArray();
+                    }
+                } catch (Exception ex) {
+                    Log?.Invoke("TTS synthesis failed: " + ex.Message);
+                    return;
                 }
-            } catch (Exception ex) {
-                Log?.Invoke("TTS synthesis failed: " + ex.Message);
-                return;
-            }
-            swSynth.Stop();
-            var swIpc = Stopwatch.StartNew();
-            SendSpeakPcm(pcm);
-            swIpc.Stop();
-            Log?.Invoke($"Speak timing: synth={swSynth.ElapsedMilliseconds}ms ipc={swIpc.ElapsedMilliseconds}ms bytes={pcm.Length}");
+                swSynth.Stop();
+                var swIpc = Stopwatch.StartNew();
+                await SendSpeakPcmAsync(pcm).ConfigureAwait(false);
+                swIpc.Stop();
+                Log?.Invoke($"Speak timing: synth={swSynth.ElapsedMilliseconds}ms ipc={swIpc.ElapsedMilliseconds}ms bytes={pcm.Length}");
+            });
         }
 
-        public static void SpeakFile(string path) {
-            // Called from ACT's PlaySoundMethod hook (signature: void(string,int)) on
-            // a background thread. The single sync-over-async boundary lives here.
-            try {
-                Task.Run(() => SpeakFileAsync(path)).GetAwaiter().GetResult();
-            } catch (Exception ex) {
-                Log?.Invoke("SpeakFile error: " + ex.Message);
-            }
-        }
-
-        private static Task SpeakFileAsync(string path) =>
+        // Play a sound file through the bridge. Awaitable; the bridge decodes + enqueues
+        // and replies, so the caller never blocks on playback.
+        public static Task SpeakFileAsync(string path) =>
             SendSpeakRequestAsync(
                 new SpeakFileRequest { Path = path },
                 notConnected: "Cannot play file: bridge not connected.",
                 rejectedPrefix: "Bridge file rejected: ",
                 opName: "SpeakFile");
 
-        // ONNX TTS dispatch: send only the text. The bridge synthesizes with the
-        // voice it learned from the last SetConfig (ttsParams) and replies via the
-        // Result envelope. Called from ACT's PlayTtsMethod hook on a background
-        // thread (like Speak), so the sync-over-async boundary lives here.
-        public static void SpeakOnnx(string text) {
-            try {
-                Task.Run(() => SpeakOnnxAsync(text)).GetAwaiter().GetResult();
-            } catch (Exception ex) {
-                Log?.Invoke("SpeakText error: " + ex.Message);
-            }
-        }
-
-        private static Task SpeakOnnxAsync(string text) =>
+        // ONNX TTS dispatch: send only the text. The bridge synthesizes with the voice
+        // it learned from the last SetConfig (ttsParams) and replies (on acceptance) via
+        // the Result envelope. Awaitable, so the ACT callout thread isn't blocked.
+        public static Task SpeakOnnxAsync(string text) =>
             SendSpeakRequestAsync(
                 new SpeakTextRequest { Text = text },
                 notConnected: "Cannot speak (ONNX): bridge not connected.",
@@ -369,15 +356,14 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             }
         }
 
-        private static void SendSpeakPcm(byte[] pcm) {
+        private static async Task SendSpeakPcmAsync(byte[] pcm) {
             var pc = pipeClient;
             if (pc == null) {
                 Log?.Invoke("Cannot send audio: bridge not connected.");
                 return;
             }
             try {
-                var resp = Task.Run(() => pc.SendSpeakPcmAsync(pcm, 48000, 16, 2, TimeSpan.FromSeconds(30)))
-                    .GetAwaiter().GetResult();
+                var resp = await pc.SendSpeakPcmAsync(pcm, 48000, 16, 2, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
                     Log?.Invoke("Bridge audio rejected: " + resp.Error);
                 }

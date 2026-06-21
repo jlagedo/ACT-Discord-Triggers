@@ -355,7 +355,13 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       // so it shouldn't depend on a debounced push having already landed (e.g. right
       // after a voice download); pushing here makes it self-sufficient.
       await PushConfigNow().ConfigureAwait(true);
-      SpeakText("Discord Triggers voice test.");
+      // Await the synth/send directly (not the async-void SpeakText) so Test stays
+      // properly async on the UI thread and any failure is surfaced in order.
+      try {
+        await SpeakTextCoreAsync("Discord Triggers voice test.");
+      } catch (Exception ex) {
+        Log("Test playback error: " + ex.Message);
+      }
     }
 
     // Download and install the selected voice pack via OnnxDownloader (HttpClient +
@@ -467,20 +473,40 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- TTS/sound routing (target of ACT's delegates, wired by the view) -------
-    public void SpeakText(string text) {
-      Log("Playing TTS for text: " + text);
-      if (string.Equals(Engine, "onnx", StringComparison.OrdinalIgnoreCase))
-        // The bridge synthesizes with the voice it learned from SetConfig; only
-        // the text crosses the wire. If no installed ONNX voice is configured the
-        // bridge logs + skips, so a not-yet-downloaded voice never crashes it.
-        discord.SpeakOnnx(text);
-      else
-        discord.Speak(text, TtsVoice, TtsVolume, TtsSpeed);
+    // ACT's PlayTtsMethod delegate is void, so this is async void: it kicks off the
+    // synth/send and returns to ACT's callout thread immediately rather than blocking
+    // it (ACT is busy churning log data), while still observing — logging — any
+    // failure, so it's async, not a discard-the-Task fire-and-forget. The Test command
+    // awaits the same SpeakTextCoreAsync.
+    public async void SpeakText(string text) {
+      try {
+        await SpeakTextCoreAsync(text).ConfigureAwait(false);
+      } catch (Exception ex) {
+        Log("TTS playback error: " + ex.Message);
+      }
     }
 
-    public void SpeakSoundFile(string path, int volume) {
+    // Awaitable synth/send for the configured engine, shared by the async-void ACT
+    // delegate target above and the (awaited) Test command.
+    private Task SpeakTextCoreAsync(string text) {
+      Log("Playing TTS for text: " + text);
+      // ONNX: the bridge synthesizes with the voice it learned from SetConfig; only
+      // the text crosses the wire. If no installed ONNX voice is configured the bridge
+      // logs + skips, so a not-yet-downloaded voice never crashes it.
+      return string.Equals(Engine, "onnx", StringComparison.OrdinalIgnoreCase)
+        ? discord.SpeakOnnxAsync(text)
+        : discord.SpeakAsync(text, TtsVoice, TtsVolume, TtsSpeed);
+    }
+
+    // ACT's PlaySoundMethod delegate (also void): async void for the same reason —
+    // fire the playback without blocking ACT's callout thread, log any failure.
+    public async void SpeakSoundFile(string path, int volume) {
       Log("Playing Audio file: " + path);
-      discord.SpeakFile(path);
+      try {
+        await discord.SpeakFileAsync(path).ConfigureAwait(false);
+      } catch (Exception ex) {
+        Log("Sound playback error: " + ex.Message);
+      }
     }
 
     // --- Lifecycle --------------------------------------------------------------
