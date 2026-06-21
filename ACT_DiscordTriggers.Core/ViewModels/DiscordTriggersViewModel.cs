@@ -108,6 +108,16 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       set => SetClamped(ref audioQualityIndex, value, PluginSettings.AudioQualityIndexMin, PluginSettings.AudioQualityIndexMax, push: true, dependentLabel: nameof(ShowHighQualityWarning));
     }
 
+    // Master bus limiter (independent of Normalize). Enable toggle + ceiling tier.
+    [ObservableProperty] private bool limiterEnabled = true;
+    partial void OnLimiterEnabledChanged(bool value) => ScheduleConfigPush();
+
+    private int limiterCeilingIndex = 1; // -1 dBTP
+    public int LimiterCeilingIndex {
+      get => limiterCeilingIndex;
+      set => SetClamped(ref limiterCeilingIndex, value, PluginSettings.LimiterCeilingIndexMin, PluginSettings.LimiterCeilingIndexMax, push: true);
+    }
+
     // --- ONNX TTS (persisted in PluginSettings; bridge-relevant fields push) -----
     // Engine and Quality are single-value choices exposed as paired bools so the
     // choice-cards / segmented RadioButtons can two-way bind without a converter:
@@ -633,6 +643,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Normalize = s.Normalize;
         NormalizeTarget = s.NormalizeTarget;
         AudioQualityIndex = s.AudioQualityIndex;
+        LimiterEnabled = s.LimiterEnabled;
+        LimiterCeilingIndex = s.LimiterCeilingIndex;
       } finally {
         suppressPush = false;
       }
@@ -655,6 +667,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       Normalize = Normalize,
       NormalizeTarget = NormalizeTarget,
       AudioQualityIndex = AudioQualityIndex,
+      LimiterEnabled = LimiterEnabled,
+      LimiterCeilingIndex = LimiterCeilingIndex,
     };
 
     // --- Debounced config pushes ------------------------------------------------

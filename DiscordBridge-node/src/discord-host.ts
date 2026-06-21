@@ -50,6 +50,13 @@ const STREAM_PEAK_SAFETY_DB = 3;
 // bitrate. Owned here so retuning the tiers never touches the wire contract.
 const AUDIO_QUALITY_BITRATES = [48000, 96000, 128000];
 
+// Maps the plugin's limiter ceiling tier (config.limiterCeilingIndex) to a
+// true-peak ceiling in dBTP. Owned here (like the bitrate table) so the wire
+// only carries an index. The headroom under 0 dBFS absorbs inter-sample peaks
+// that emerge after Opus decode at the listener.
+const LIMITER_CEILINGS_DB = [-0.5, -1, -2, -3];
+const DEFAULT_LIMITER_CEILING_DB = -1;
+
 // Bound peak memory before decode: a compressed file expands roughly ~10x once
 // turned into float PCM, so reject pathological input sizes up front.
 const MAX_DECODE_INPUT_BYTES = 64 * 1024 * 1024;
@@ -176,6 +183,8 @@ export class DiscordHost implements Host {
         // eagerly for them.
         if (config.botStatus !== prev.botStatus) this._applyStatus();
         if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
+        if (config.limiterEnabled !== prev.limiterEnabled
+            || config.limiterCeilingIndex !== prev.limiterCeilingIndex) this._applyLimiter();
         this._applyOnnxVoice(ttsParams);
     }
 
@@ -210,6 +219,24 @@ export class DiscordHost implements Host {
         } catch (e) {
             log.error('opus setBitrate failed', e);
         }
+    }
+
+    // True-peak ceiling (linear, 1.0 == 0 dBFS) for the current limiter tier.
+    private _currentLimiterCeilingLinear(): number {
+        const db = LIMITER_CEILINGS_DB[this.config.limiterCeilingIndex] ?? DEFAULT_LIMITER_CEILING_DB;
+        return dbToLinear(db);
+    }
+
+    // Push the current limiter settings onto the live mixer bus. No-op when not
+    // connected (no mixer yet); re-applied on join and on every config change
+    // that touches the limiter fields.
+    private _applyLimiter(): void {
+        if (!this.mixer) return;
+        const enabled = this.config.limiterEnabled;
+        const ceiling = this._currentLimiterCeilingLinear();
+        this.mixer.configureLimiter(enabled, ceiling);
+        log.info(`bus limiter enabled=${enabled} ceiling=${ceiling.toFixed(3)} ` +
+            `(${LIMITER_CEILINGS_DB[this.config.limiterCeilingIndex] ?? DEFAULT_LIMITER_CEILING_DB}dBTP)`);
     }
 
     async connect(): Promise<OpResult> {
@@ -333,6 +360,9 @@ export class DiscordHost implements Host {
             this._startPingLog();
 
             this.mixer = new PcmMixer();
+            // Arm the master bus limiter from the current config before the
+            // mixer feeds any audio (idempotent; re-applied on config change).
+            this._applyLimiter();
             // maxMissedFrames: with the mixer's pull-based _read producing
             // a chunk per call, the encoder should never see null. But a
             // GC pause that delays our _read by >100 ms (default tolerance)

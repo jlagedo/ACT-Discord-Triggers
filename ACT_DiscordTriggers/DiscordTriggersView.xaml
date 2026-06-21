@@ -733,6 +733,28 @@
                                 Value="{Binding NormalizeTarget}" />
                         </HeaderedContentControl>
 
+                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.TopSpeed}">
+                            <HeaderedContentControl.Header>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource CardTitle}" Text="Master limiter" />
+                                    <TextBlock Style="{StaticResource CardDesc}" Text="Stop overlapping sounds from clipping." />
+                                </StackPanel>
+                            </HeaderedContentControl.Header>
+                            <CheckBox IsChecked="{Binding LimiterEnabled}" Style="{StaticResource ToggleSwitch}" />
+                        </HeaderedContentControl>
+
+                        <HeaderedContentControl
+                            Header="Limiter ceiling"
+                            IsEnabled="{Binding LimiterEnabled}"
+                            Style="{StaticResource SettingsCard}">
+                            <ComboBox Width="220" SelectedIndex="{Binding LimiterCeilingIndex}">
+                                <ComboBoxItem>-0.5 dB</ComboBoxItem>
+                                <ComboBoxItem>-1 dB (recommended)</ComboBoxItem>
+                                <ComboBoxItem>-2 dB</ComboBoxItem>
+                                <ComboBoxItem>-3 dB</ComboBoxItem>
+                            </ComboBox>
+                        </HeaderedContentControl>
+
                         <HeaderedContentControl
                             Header="Audio quality"
                             Style="{StaticResource SettingsCard}"

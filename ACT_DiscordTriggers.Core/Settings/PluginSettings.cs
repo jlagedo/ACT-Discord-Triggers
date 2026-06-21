@@ -28,6 +28,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
     public const int FxChanceMin = 0, FxChanceMax = 100;
     public const int NormalizeTargetMin = 12, NormalizeTargetMax = 30;
     public const int AudioQualityIndexMin = 0, AudioQualityIndexMax = 2; // 0=Low, 1=Medium, 2=High
+    public const int LimiterCeilingIndexMin = 0, LimiterCeilingIndexMax = 3; // -0.5/-1/-2/-3 dBTP, bridge-owned table
 
     // [JsonPropertyName] sets the wire names the node bridge reads (this whole POCO
     // is sent verbatim as the SetConfig payload). XML attributes drive on-disk
@@ -60,5 +61,11 @@ namespace ACT_DiscordTriggers.Core.Settings {
     [JsonPropertyName("normalize")] public bool Normalize { get; set; } = true;
     [JsonPropertyName("normalizeTarget")] public int NormalizeTarget { get; set; } = 20;     // 12..30, positive dB magnitude
     [JsonPropertyName("audioQualityIndex")] public int AudioQualityIndex { get; set; } = 1;  // 0=Low, 1=Medium, 2=High
+
+    // Master bus look-ahead limiter (bridge-applied on the summed mix, independent
+    // of Normalize). LimiterCeilingIndex picks a true-peak ceiling from the
+    // bridge's dBTP table; index 1 == -1 dBTP.
+    [JsonPropertyName("limiterEnabled")] public bool LimiterEnabled { get; set; } = true;
+    [JsonPropertyName("limiterCeilingIndex")] public int LimiterCeilingIndex { get; set; } = 1; // 0..3, default -1 dBTP
   }
 }

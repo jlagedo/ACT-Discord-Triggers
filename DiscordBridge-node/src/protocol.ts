@@ -79,6 +79,10 @@ export interface BaseRequest { op: OpName; reqId: ReqId }
 //   - normalize + normalizeTarget: targetdB is a positive magnitude; the bridge
 //     negates it to a dBFS RMS target (e.g. 20 -> -20 dBFS).
 //   - audioQualityIndex: 0/1/2 mapped to an Opus bitrate by the bridge.
+//   - limiterEnabled + limiterCeilingIndex: the master bus look-ahead limiter;
+//     the index (0..3) is mapped to a true-peak ceiling (dBTP -> linear) by the
+//     bridge. Independent of normalize — it catches inter-voice sum clipping
+//     even with normalize off.
 export interface BridgeConfigView {
     botToken: string;
     botStatus: string;
@@ -87,6 +91,8 @@ export interface BridgeConfigView {
     normalize: boolean;
     normalizeTarget: number;   // positive dB magnitude
     audioQualityIndex: number; // 0=Low, 1=Medium, 2=High
+    limiterEnabled: boolean;
+    limiterCeilingIndex: number; // 0..3 -> dBTP ceiling table (bridge-owned)
 }
 
 // Bridge-side defaults, used until the first SetConfig lands (pre-connect clips)
@@ -103,6 +109,8 @@ export const DEFAULT_CONFIG_VIEW: BridgeConfigView = {
     normalize: true,
     normalizeTarget: 20,
     audioQualityIndex: 1,
+    limiterEnabled: true,
+    limiterCeilingIndex: 1, // -1 dBTP
 };
 
 export interface HelloRequest        extends BaseRequest { op: 'Hello'; protocolVersion: number }

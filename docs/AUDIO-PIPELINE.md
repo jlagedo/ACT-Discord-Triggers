@@ -26,29 +26,30 @@ all of them together, never add a one-off conversion:
 - `effects.ts` `SR`.
 
 **Sample format:** the interior pipeline (decode → resample → fx → normalize →
-declick → mix) is **interleaved float32 stereo**, nominal [-1, 1] but allowed to
-exceed it *between* stages so headroom is preserved (an fx tail or a hot mix sum
-is pulled back down later, not clipped mid-chain). int16 lives only at the two
-edges, both in `audio-format.ts`:
+declick → mix → master limiter) is **interleaved float32 stereo**, nominal [-1, 1]
+but allowed to exceed it *between* stages so headroom is preserved (an fx tail or a
+hot mix sum is pulled back down later, not clipped mid-chain). int16 lives only at
+the two edges, both in `audio-format.ts`:
 
 - **ingest:** the `SpeakPcm` wire frame arrives s16le and is widened once
   (`int16ToFloat32`).
-- **exit:** `PcmMixer` sums voices in float64 and performs the pipeline's single
-  int16 quantization at its output (`floatToInt16`) right before the Opus encoder.
+- **exit:** `PcmMixer` sums voices in float64, the master limiter rides the bus to
+  a true-peak ceiling, then the pipeline's single int16 quantization happens at its
+  output (`floatToInt16`) right before the Opus encoder.
 
-`floatToInt16` is the single quantization point and the natural home for a future
-master limiter (see Roadmap P1.2). Don't reintroduce per-stage int16 round-trips.
+`floatToInt16` is the single quantization point (round + hard clamp, retained as
+the limiter's backstop). Don't reintroduce per-stage int16 round-trips.
 
 ---
 
 ## Current signal chain
 
 ```
-ingest                          per-clip (_enqueue)           mix bus              encode
-──────────────────────────      ─────────────────────────     ────────────────     ──────
+ingest                          per-clip (_enqueue)           mix bus                    encode
+──────────────────────────      ─────────────────────────     ──────────────────────     ──────
 SpeakPcm  s16→f32 ───────┐
-SpeakFile decode→resample├──▶ FX → normalize → declick ──▶  PcmMixer sum       ──▶ Opus
-SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64) → s16      (bitrate)
+SpeakFile decode→resample├──▶ FX → normalize → declick ──▶  PcmMixer sum → limiter  ──▶ Opus
+SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64) → s16            (bitrate)
 ```
 
 **Ingest → 48k float stereo**
@@ -73,11 +74,13 @@ SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64)
   samples ramp from/to zero instead of stepping against the mixer's silence.
 
 **Realtime mix** (`pcm-mixer.ts` `_read`, every 20 ms):
-- Sum all active voices into a float64 accumulator; quantize once via
-  `floatToInt16` (round + **hard clamp**). Pull-based: every `_read` emits exactly
-  one 20 ms chunk, silence when idle — the player never ends, which is how
-  concurrent callouts overlap (each opens its own mixer voice). FIFO eviction caps
-  worst-case memory; open streaming voices are pinned against eviction.
+- Sum all active voices into a float64 accumulator; the **master limiter**
+  (`limiter.ts`, see Roadmap P1.2) rides the summed bus to a true-peak ceiling;
+  quantize once via `floatToInt16` (round + hard clamp, now the limiter's backstop
+  rather than the only ceiling). Pull-based: every `_read` emits exactly one 20 ms
+  chunk, silence when idle — the player never ends, which is how concurrent callouts
+  overlap (each opens its own mixer voice). FIFO eviction caps worst-case memory;
+  open streaming voices are pinned against eviction.
 
 **Encode**
 - One long-lived `AudioResource` (`StreamType.Raw`) fed by the mixer; prism's Opus
@@ -98,6 +101,8 @@ SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64)
 - **Declick edges.** No onset/tail clicks from stepping against digital silence.
 - **Pull-based mixer that degrades to silence.** A mix error or underrun emits a
   silent frame instead of tearing down the resource.
+- **Master look-ahead limiter on the bus.** Overlapping voices that sum past full
+  scale are ridden down to a true-peak ceiling instead of hard-clipping (P1.2).
 - **Off-thread synth.** sherpa `generateAsync` runs on a libuv worker; the 20 ms
   frame delivery and Discord keepalives keep running during synthesis.
 - **Decode/resample cache** keyed by path+mtime; edits invalidate naturally.
@@ -157,21 +162,42 @@ the WASM module once at bridge startup (alongside `warmupDecoders`, before
 `end_of_input=0`, so the streaming tail never flushes), `node-soxr` (native +
 LGPL, breaks no-native/single-`node.exe`), `wasm-audio-resampler` (dormant).
 
-#### 2. Master limiter on the mix bus 🔵 — Effort: M
-**A real limiter before `floatToInt16`, replacing the hard clamp.**
+#### 2. Master limiter on the mix bus 🟢 — Effort: M
+**Look-ahead brickwall limiter on the float64 bus before `floatToInt16`.**
 
-The mixer sums voices straight and the only ceiling is the hard clamp in
-`floatToInt16`. Each voice normalizes up to a ~0.97 peak, so **two overlapping
-callouts can sum to ~1.94 → brick-wall clip.** Overlap is a designed feature (each
-callout opens its own voice), so this is the normal multi-trigger case, not an edge.
-Hard clipping is the harshest limiting — broadband harmonics that then alias and
-waste Opus bits.
+The mixer summed voices straight, with the hard clamp in `floatToInt16` as the only
+ceiling. Each voice normalizes up to a ~0.97 peak, so **two overlapping callouts
+summed to ~1.94 → brick-wall clip.** Overlap is a designed feature (each callout
+opens its own voice), so this was the normal multi-trigger case, not an edge.
 
-Put a limiter on the float64 bus (`acc`) before quantization: lookahead (a few ms,
-buffered across 20 ms chunks), soft knee, fast attack / ~50–100 ms release.
-`floatToInt16`'s own comment nominates it as the limiter's home. Minimum viable: a
-`tanh` soft-clip on the bus removes the worst harshness in a few lines; the
-lookahead limiter is the pro version. Fold true-peak detection (P2.4) into it.
+**`limiter.ts` `LookaheadLimiter`** rides the summed bus to a true-peak-safe ceiling
+before quantization (the `floatToInt16` clamp stays as the backstop):
+
+- **Look-ahead brickwall, channel-linked.** ~2 ms look-ahead delay
+  (`LOOKAHEAD_FRAMES = 96`) carried across the 20 ms chunks; the same gain hits L+R
+  so the stereo image never shifts. The detector is a running **minimum** of the
+  required gain over the look-ahead window (monotonic deque, O(1) amortized), so the
+  gain is already down before a peak reaches the output — the attack is smooth and
+  no transient slips through (overshoot-free, verified in the e2e harness).
+- **Linear attack** (reaches any target within the window) + **exponential release**
+  (~100 ms, no pumping). Silence recovers to unity.
+- **Bypassed by default** on a bare `PcmMixer` (a look-ahead limiter delays even at
+  unity, so an unconfigured mixer stays a pure, delay-free summing bus — the
+  sample-exact mix-math tests are unaffected). `discord-host` arms it from the live
+  config on join and on every change via `PcmMixer.configureLimiter`.
+- **Configurable + user-facing.** `limiterEnabled` + `limiterCeilingIndex` (0..3 →
+  `LIMITER_CEILINGS_DB` `[-0.5,-1,-2,-3]` dBTP, default index 1 = −1 dBTP) ride the
+  existing `SetConfig` POCO (additive, no `PROTOCOL_VERSION` bump) with an enable
+  toggle + ceiling dropdown in the WPF Sound tab. **Independent of `normalize`** —
+  it catches inter-voice sum clipping even with normalize off.
+- **True-peak via headroom** (folds in P2.4), not oversampled detection: the bus
+  feeds lossy Opus, which reshapes peaks downstream, so an exact inter-sample
+  guarantee at the encoder input would be undone by the codec; the −1 dBTP default
+  ceiling leaves margin to absorb inter-sample overshoot at zero cost.
+
+Verify end-to-end with **`npm run limiter:e2e`** (drives the real mixer with
+overlapping / DC / Nyquist / transient signals, writes WAVs, asserts zero clipping
++ the ceiling held). Unit coverage in `tests/limiter.test.ts` + `tests/pcm-mixer.test.ts`.
 
 ### P2 — pro-level correctness
 
@@ -186,14 +212,18 @@ mean-square, ~10 lines of biquad) makes auto-leveling perceptually uniform acros
 the varied trigger library. Baked per-voice TTS levels need re-measuring under the
 new metric.
 
-#### 4. True-peak ceiling 🔵 — Effort: S (with P1.2)
-**Account for inter-sample peaks instead of sample peak.**
+#### 4. True-peak ceiling 🟢 — Effort: S (with P1.2)
+**Headroom-based inter-sample-peak margin on the bus limiter.**
 
-`PEAK_CEILING = 0.97` leaves only −0.26 dBFS. After Opus decode + the listener's
-DAC reconstruction, inter-sample peaks routinely exceed sample peak by up to ~+3 dB
-→ downstream clipping invisible in the samples. Cheap mitigation: drop the ceiling
-to ≈ **−1.5 dBFS (0.84)**. Proper: oversampled true-peak detection (BS.1770-4, 4×)
-inside the bus limiter.
+Done as part of P1.2, via headroom rather than oversampled detection. The bus
+limiter's ceiling defaults to **−1 dBTP** (configurable −0.5/−1/−2/−3 via
+`limiterCeilingIndex`), leaving margin for inter-sample peaks that emerge after Opus
+decode + the listener's DAC reconstruction. Oversampled true-peak detection
+(BS.1770-4, 4×) was deliberately **not** done: the bus feeds lossy Opus, which
+reshapes peaks downstream, so an exact inter-sample guarantee at the encoder input
+would be undone by the codec — the headroom margin captures the protection at zero
+CPU cost. (Per-clip `normalize` still uses `PEAK_CEILING = 0.97` as a clip-safe
+boost bound; the bus limiter is the true-peak stage.)
 
 #### 5. Anti-alias the nonlinear effects 🔵 — Effort: M
 **Oversample `distortion` and `pitch`.**
@@ -225,7 +255,7 @@ lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
 - **TPDF dither before Opus.** 16-bit quantization noise (~−96 dBFS) sits far
   below the noise Opus immediately adds at 48–128 kbps; dithering before a lossy
   codec spends effort on noise the codec masks. The straight round + clamp in
-  `floatToInt16` is correct — add the *limiter* before it (P1.2), not dither.
+  `floatToInt16` is correct — the *limiter* sits before it (P1.2, done), not dither.
 - **Global oversampling (96 kHz internal).** Only `distortion` clearly benefits,
   sources are ≤22 kHz band-limited, and the sink is lossy 48 kHz Opus. If ever
   revisited, prefer local oversampling around the nonlinear effect (P2.5).
@@ -234,16 +264,17 @@ lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
 
 ## Suggested sequencing
 
-1. **Master limiter** (P1.2) — self-contained, immediate audible benefit, kills
-   overlap clipping; build it to host true-peak (P2.4).
-2. **High-quality resampler** (P1.1) 🟢 — touches every callout, biggest single
+1. **High-quality resampler** (P1.1) 🟢 — touches every callout, biggest single
    win; done. Lives in `resample.ts`: `resampleStereoF32` (file, true stereo) +
    `MonoStreamResampler` (streaming TTS, mono).
-3. **K-weighted loudness** (P2.3) + re-bake voice levels.
+2. **Master limiter** (P1.2) 🟢 + **true-peak ceiling** (P2.4) 🟢 — self-contained,
+   kills overlap clipping; done in `limiter.ts`, true-peak folded in via the −1 dBTP
+   default ceiling.
+3. **K-weighted loudness** (P2.3) + re-bake voice levels — next up.
 4. **Cosine declick + DC-block** (P3.6/7) — cheap polish, bundle together.
 5. **FX anti-aliasing / Opus CTLs** (P2.5 / P3.9) as time allows.
 
-P1.1 + P1.2 together move the realtime path from clean-amateur to pro-grade.
+P1.1 + P1.2 together moved the realtime path from clean-amateur to pro-grade.
 
 ---
 
@@ -252,7 +283,7 @@ P1.1 + P1.2 together move the realtime path from clean-amateur to pro-grade.
 | Risk | Item | Mitigation |
 |------|------|-----------|
 | Heavy per-fire DSP blocks the single thread → mixer underrun | P1.1 | r8brain runs 500–2000× realtime; resample at enqueue not `_read`; `worker_thread` relief valve |
-| Limiter adds latency to the realtime path | P1.2 | Lookahead is a few ms, buffered across 20 ms chunks; far inside the existing send buffer |
+| Limiter adds latency to the realtime path | P1.2 🟢 | Resolved: ~2 ms look-ahead (`LOOKAHEAD_FRAMES = 96`) buffered across 20 ms chunks; negligible next to voice RTT + the 20 ms Opus framing |
 | Re-baking voice levels under LUFS drifts existing loudness | P2.3 | Re-measure all catalog voices in one pass with the new metric |
 | r8brain `.wasm` not inlined → unstaged/unloaded at runtime | P1.1 | Pin SHA in `package.json`; esbuild `external` + `build.ps1 $externals` must agree; `initResampler()` before `BRIDGE_READY` makes the self-test the gate |
 | Protocol drift (C# vs TS) if any item adds an op | any | Update both sides + version bump + tests, per CLAUDE.md |

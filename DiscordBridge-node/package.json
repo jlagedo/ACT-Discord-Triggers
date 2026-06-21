@@ -12,7 +12,8 @@
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
     "tts:probe": "node --import tsx tools/tts-probe.ts",
     "tts:rms": "node --import tsx tools/tts-rms.ts",
-    "tts:stream-probe": "node --import tsx tools/tts-stream-probe.ts"
+    "tts:stream-probe": "node --import tsx tools/tts-stream-probe.ts",
+    "limiter:e2e": "node --import tsx tools/limiter-e2e.ts"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",

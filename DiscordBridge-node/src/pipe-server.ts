@@ -84,6 +84,8 @@ function parseConfig(raw: Record<string, unknown>): BridgeConfigView {
         normalize: asBool(raw['normalize'], d.normalize),
         normalizeTarget: asNumber(raw['normalizeTarget']) ?? d.normalizeTarget,
         audioQualityIndex: asNumber(raw['audioQualityIndex']) ?? d.audioQualityIndex,
+        limiterEnabled: asBool(raw['limiterEnabled'], d.limiterEnabled),
+        limiterCeilingIndex: asNumber(raw['limiterCeilingIndex']) ?? d.limiterCeilingIndex,
     };
 }
 

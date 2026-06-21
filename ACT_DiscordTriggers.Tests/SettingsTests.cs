@@ -98,6 +98,7 @@ namespace ACT_DiscordTriggers.Tests {
           TtsThreads = 4, ModelsDir = @"D:\voices",
           RandomFx = true, FxChance = 42, Normalize = false,
           NormalizeTarget = 15, AudioQualityIndex = 2,
+          LimiterEnabled = false, LimiterCeilingIndex = 3,
         };
         store.Save(original);
 
@@ -118,6 +119,8 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal(original.Normalize, loaded.Normalize);
         Assert.Equal(original.NormalizeTarget, loaded.NormalizeTarget);
         Assert.Equal(original.AudioQualityIndex, loaded.AudioQualityIndex);
+        Assert.Equal(original.LimiterEnabled, loaded.LimiterEnabled);
+        Assert.Equal(original.LimiterCeilingIndex, loaded.LimiterCeilingIndex);
         Assert.Equal(PluginSettings.CurrentSchemaVersion, loaded.SchemaVersion);
       }
     }
