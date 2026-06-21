@@ -23,14 +23,18 @@ Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
 
 ## Screenshots
 
-| General — connect & join a voice channel | Sound — TTS, effects & leveling |
-| :---: | :---: |
-| ![General settings tab](docs/screenshot-general.png) | ![Sound settings tab](docs/screenshot-sound.png) |
+| General — connect & join | Text-to-Speech — engine & voice | Sound — effects & leveling |
+| :---: | :---: | :---: |
+| ![General settings tab](docs/screenshot-general.png) | ![Text-to-Speech settings tab](docs/screenshot-tts.png) | ![Sound settings tab](docs/screenshot-sound.png) |
 
 ## Features
 
 - 🔊 **TTS in voice chat** — fire trigger text-to-speech straight into a Discord
   voice channel.
+- 🧠 **Neural voices** — an optional **ONNX** engine plays natural-sounding
+  neural voices (60+ across several languages), downloaded on demand. Or stick
+  with the offline **Windows (SAPI)** system voices — no download, nothing extra
+  to install.
 - 🎵 **Sound-file triggers** — play sound effects through the bot in `.wav`,
   MP3, OGG, or FLAC (MP3/OGG/FLAC via Triggernometry or Triggevent).
 - 🎚️ **Concurrent playback** — overlapping triggers mix together instead of
