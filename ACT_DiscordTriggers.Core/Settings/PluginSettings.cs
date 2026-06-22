@@ -38,6 +38,13 @@ namespace ACT_DiscordTriggers.Core.Settings {
     [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
+    // --- Output mode ---
+    // "bot" streams audio to a Discord voice channel (the default); "local" plays
+    // it on this PC's default sound device instead, with no Discord login/channel.
+    // The bridge reads this from SetConfig and starts/stops the local device on a
+    // transition. Additive field — defaults to "bot" for older saved settings.
+    [JsonPropertyName("outputMode")] public string OutputMode { get; set; } = "bot";  // "bot" | "local"
+
     // --- Connection ---
     [JsonPropertyName("botToken")] public string BotToken { get; set; } = "";
     [JsonPropertyName("botStatus")] public string BotStatus { get; set; } = "Playing with ACT Triggers";

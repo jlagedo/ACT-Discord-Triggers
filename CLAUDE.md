@@ -37,6 +37,16 @@ CI:
 - Needs `Advanced Combat Tracker.exe` to resolve the plugin reference — install ACT to `C:\Program Files (x86)\Advanced Combat Tracker\` (csproj fallback path) or copy the exe to `packages/`.
 - Runs `npm run lint` + `dotnet xstyler -p` (XAML format check) + `build.ps1` + `dotnet test` + `npm test`; Node via `setup-node`, .NET SDK is preinstalled on the runner (no `setup-dotnet`).
 
+## Output modes (bot vs local)
+
+The plugin has two output targets, chosen on the **Main** tab (`PluginSettings.OutputMode` = `"bot"` | `"local"`, default `"bot"`; rides in `SetConfig` as `outputMode`):
+- **`bot`** — the bridge streams the mix to a Discord voice channel (spawn → Hello → SetConfig → `Connect` login → `JoinChannel`). Original behaviour.
+- **`local`** — the bridge plays the same mix on the host's default sound device with **no Discord login/channel**. The bridge comes up via `DiscordClient.StartLocalAsync` (spawn → Hello → SetConfig, **skipping** `Connect`); the C# VM brings it online ASAP on plugin init / mode-select. `discord-host` starts/stops local output on the `outputMode` transition in `setConfig`; `_guardPlayback` accepts playback when `localOutput` is live.
+
+Local playback uses **`audify`** (RtAudio/WASAPI), an N-API prebuilt addon loaded lazily in `local-output.ts` (`createRequire(__filename)`, like sherpa in `tts.ts`) so the bridge still starts if it's absent. `LocalOutput` opens a 48k/stereo/s16 output stream and feeds it one `PcmMixer._mixOneChunk()` per `frameOutputCallback` — the device clock drives the pull, the mirror of how prism's Opus encoder pulls the mixer in bot mode. The whole DSP pipeline (decode/synth → resample → fx → normalize → declick → mix → master limiter) is shared by both modes. `audify` + its `bindings` loader are esbuild externals staged into `dist/node_modules` by `build.ps1 $externals`.
+
+The VM raises `OutputActivated`/`OutputDeactivated` (was `JoinedChannel`/`LeftChannel`) when output goes live/idle in **either** mode; the view swaps ACT's `PlayTtsMethod`/`PlaySoundMethod` on those. In local mode the Discord-only **General** tab is hidden (`IsBotMode`).
+
 ## Architecture: two processes
 
 The plugin must not open a Discord connection itself — Discord voice requires DAVE E2EE, which net48 (all ACT loads) can't do. Voice lives in a separate node process:

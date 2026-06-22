@@ -226,9 +226,28 @@ test('SetConfig: forwards parsed config view to host.setConfig; result ok=true',
     assert.deepEqual(call.args[0], {
         botToken: 'tok-x', botStatus: 'Online', randomFx: true, fxChance: 50,
         normalize: false, normalizeTarget: 18, audioQualityIndex: 2,
-        // limiter fields absent from the incoming config -> bridge defaults them.
-        limiterEnabled: true, limiterCeilingIndex: 1,
+        // outputMode + limiter fields absent from the incoming config -> bridge defaults them.
+        outputMode: 'bot', limiterEnabled: true, limiterCeilingIndex: 1,
     });
+});
+
+test('SetConfig: local mode with the device live -> result ok=true', async () => {
+    const { sock, host } = makeHarness();
+    host.nextLocalOutputActive(true);
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 71, config: { outputMode: 'local' } }));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['reqId'], 71);
+    assert.equal(frame!['ok'], true);
+});
+
+test('SetConfig: local mode but the device did not open -> result ok=false with a clear error', async () => {
+    const { sock, host } = makeHarness();
+    host.nextLocalOutputActive(false);   // device failed to come up
+    sock.emit('data', encodeFrame({ op: Op.SetConfig, reqId: 74, config: { outputMode: 'local' } }));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['reqId'], 74);
+    assert.equal(frame!['ok'], false);
+    assert.match(String(frame!['error']), /Local audio output failed to start/);
 });
 
 test('SetConfig: ttsParams bag is forwarded verbatim as the second host arg', async () => {

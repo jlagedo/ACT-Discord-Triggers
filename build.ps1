@@ -65,12 +65,20 @@ try {
     #   libsodium                     — WASM blob loaded by libsodium-wrappers
     #   sherpa-onnx-node              — ONNX neural TTS addon loader (lazy-required by tts.ts)
     #   sherpa-onnx-win-x64           — its native runtime (onnxruntime + sherpa .dll/.node, ~21 MB)
+    #   audify                        — local audio output (RtAudio/WASAPI; lazy-required by local-output.ts).
+    #                                   Ships its prebuilt napi .node + rtaudio.dll/opus.dll in build/Release/.
+    #   bindings                      — audify's runtime addon loader (npm hoists it to the top-level
+    #                                   node_modules, so it must be staged explicitly or audify's
+    #                                   require('bindings') fails when local output starts).
+    #   file-uri-to-path              — bindings' own top-level require; hoisted next to bindings,
+    #                                   so it must be staged too or bindings.js throws Cannot find module.
     #
     # If you bump deps and a require fails at startup, audit this list — npm
     # hoists transitive packages here and our esbuild externals list silently
-    # misses them. The two sherpa packages are best-effort: when they aren't
+    # misses them. The sherpa + audify packages are best-effort: when they aren't
     # installed the staging warns and continues, and the bridge still self-tests
-    # green (lazy require) — only ONNX synthesis is unavailable until installed.
+    # green (lazy require) — only ONNX synthesis / local output is unavailable
+    # until installed.
     $externals = @(
         '@snazzah/davey',
         '@snazzah/davey-win32-x64-msvc',
@@ -79,6 +87,9 @@ try {
         'libsodium',
         'sherpa-onnx-node',
         'sherpa-onnx-win-x64',
+        'audify',
+        'bindings',
+        'file-uri-to-path',
         'r8brain-wasm'
     )
     $stageDir = 'dist\node_modules'

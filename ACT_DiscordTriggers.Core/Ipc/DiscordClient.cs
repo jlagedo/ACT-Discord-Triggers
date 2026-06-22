@@ -40,27 +40,44 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             bridgeDir = dir;
         }
 
-        // Spawn the bridge, handshake, push the config (which carries the token and
-        // every tunable), then tell the bridge to log in. `config` is the plugin's
-        // whole settings POCO; it is serialized verbatim and the bridge reads what
-        // it needs.
-        public static async Task ConnectAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams = null) {
+        // Spawn the bridge, handshake, and push the config, then tell the bridge to
+        // log in to Discord. `config` is the plugin's whole settings POCO, serialized
+        // verbatim; the bridge reads what it needs.
+        public static Task ConnectAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams = null) =>
+            StartAsync(config, ttsParams, login: true);
+
+        // Local-output start: spawn the bridge, handshake, and push the config — but
+        // skip the Discord login. The config carries outputMode="local", so the bridge
+        // brings up the local sound device on SetConfig. Used when the plugin is in
+        // local-output mode: the bridge comes online without a token/channel. Returns
+        // whether the bridge confirmed the local device actually opened (the SetConfig
+        // result's ok), so the caller only routes audio when there is something live
+        // to play it.
+        public static Task<bool> StartLocalAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams = null) =>
+            StartAsync(config, ttsParams, login: false);
+
+        // Shared bridge bring-up for both entry points. `login` gates the final
+        // Connect (Discord login) step; everything before it — spawn, Hello handshake,
+        // SetConfig — is identical and required either way. Returns true when the
+        // requested bring-up succeeded: a completed Discord login (login=true), or a
+        // confirmed local device (login=false, from the SetConfig result's ok).
+        private static async Task<bool> StartAsync<TConfig>(TConfig config, Dictionary<string, string> ttsParams, bool login) {
             // Race guard: a fast double-click on Connect would otherwise spawn two
             // node.exe processes since the long async work below runs unlocked.
             if (Interlocked.CompareExchange(ref connectInProgress, 1, 0) != 0) {
                 Log?.Invoke("Connection already in progress.");
-                return;
+                return false;
             }
             try {
                 lock (lifecycleLock) {
                     if (pipeClient != null) {
                         Log?.Invoke("Already connected.");
-                        return;
+                        return false;
                     }
                 }
                 if (string.IsNullOrEmpty(bridgeDir)) {
                     Log?.Invoke("Bridge directory not configured. Internal error.");
-                    return;
+                    return false;
                 }
 
                 BridgeProcess localBridge = new BridgeProcess();
@@ -76,7 +93,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 } catch (Exception ex) {
                     Log?.Invoke("Failed to start bridge: " + ex.Message);
                     try { localBridge.Dispose(); } catch { }
-                    return;
+                    return false;
                 }
 
                 PipeClient localClient = new PipeClient(pipe);
@@ -102,22 +119,33 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 } catch (Exception ex) {
                     Log?.Invoke("Bridge handshake error: " + ex.Message);
                     CleanupAfterPipeBroken();
-                    return;
+                    return false;
                 }
                 if (!hello.Ok) {
                     Log?.Invoke("Bridge handshake failed: " + hello.Error);
                     CleanupAfterPipeBroken();
-                    return;
+                    return false;
                 }
 
-                // Push config (incl. the bot token) before asking the bridge to log in.
+                // Push config (incl. the bot token, and outputMode) before logging in.
+                // In local-output mode this SetConfig is what arms the local sound
+                // device on the bridge — there is no login step that follows. The
+                // bridge fails the result (ok=false) if the device couldn't open, so
+                // localOk tells us whether local output is actually live.
+                bool localOk = false;
                 try {
-                    await localClient.SendAsync<BridgeResponse>(
+                    var setCfg = await localClient.SendAsync<BridgeResponse>(
                         new SetConfigRequest<TConfig> { Config = config, TtsParams = ttsParams },
                         TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                    localOk = setCfg.Ok;
+                    if (!setCfg.Ok) Log?.Invoke("SetConfig: " + setCfg.Error);
                 } catch (Exception ex) {
                     Log?.Invoke("SetConfig failed: " + ex.Message);
                 }
+
+                // Local-output mode stops here: no Discord login follows. Report
+                // whether the device came up so the caller only routes audio when live.
+                if (!login) return localOk;
 
                 try {
                     var connect = await localClient.SendAsync<BridgeResponse>(
@@ -128,13 +156,17 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                         // pipeClient makes the next Connect bail with "Already connected."
                         Log?.Invoke("Discord login failed: " + connect.Error);
                         CleanupAfterPipeBroken();
+                        return false;
                     }
                 } catch (Exception ex) {
                     Log?.Invoke("Discord login error: " + ex.Message);
                     CleanupAfterPipeBroken();
+                    return false;
                 }
+                return true;
             } catch (Exception ex) {
                 Log?.Invoke("Connect error: " + ex.Message);
+                return false;
             } finally {
                 Interlocked.Exchange(ref connectInProgress, 0);
             }

@@ -29,6 +29,7 @@ import { declick, declickIn, declickOut } from './declick.js';
 import { MonoStreamResampler, resampleMono, resampleStereoF32 } from './resample.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer, type VoiceHandle } from './pcm-mixer.js';
+import { LocalOutput, type LocalSink } from './local-output.js';
 import type { Host, Notifier, OpResult, SpeakMeta } from './pipe-server.js';
 import { DEFAULT_CONFIG_VIEW, type BridgeConfigView, type LogLevel } from './protocol.js';
 import { WavCache } from './wav-cache.js';
@@ -145,6 +146,13 @@ export class DiscordHost implements Host {
     private connection: VoiceConnection | null = null;
     private player: AudioPlayer | null = null;
     private mixer: PcmMixer | null = null;
+    // Local sound-device output (outputMode === 'local'). When non-null the bridge
+    // is playing the mix on this PC instead of a Discord channel; it owns its own
+    // PcmMixer (this.mixer), independent of any voice connection.
+    private localOutput: LocalSink | null = null;
+    // Factory for the local sink, injectable so the start/stop transition logic is
+    // unit-testable without the audify native addon. Defaults to the real one.
+    private readonly makeLocalOutput: (mixer: PcmMixer) => LocalSink;
     private currentGuildId: string | null = null;
     private pingTimer: NodeJS.Timeout | null = null;
     private readonly wavCache = new WavCache();
@@ -165,7 +173,16 @@ export class DiscordHost implements Host {
     // change.
     private encoder: AudioResource['encoder'] = undefined;
 
+    constructor(makeLocalOutput: (mixer: PcmMixer) => LocalSink = (mixer) => new LocalOutput(mixer)) {
+        this.makeLocalOutput = makeLocalOutput;
+    }
+
     setNotifier(fn: Notifier): void { this.notify = fn; }
+
+    // Whether local sound-device output is currently running. The bridge brings it
+    // up synchronously in setConfig and nulls it on any failure, so this is the
+    // authoritative "did the device open" signal pipe-server reports to the plugin.
+    isLocalOutputActive(): boolean { return this.localOutput !== null; }
 
     setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void {
         const prev = this.config;
@@ -185,7 +202,44 @@ export class DiscordHost implements Host {
         if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
         if (config.limiterEnabled !== prev.limiterEnabled
             || config.limiterCeilingIndex !== prev.limiterCeilingIndex) this._applyLimiter();
+        // Start/stop the local sound device on an outputMode transition. 'local'
+        // brings up its own mixer + device immediately (no Discord login needed);
+        // switching away tears it down. prev defaults to 'bot', so a first config of
+        // 'local' starts it and a plain bot config never touches it.
+        const wasLocal = prev.outputMode === 'local';
+        const isLocal = config.outputMode === 'local';
+        if (isLocal && !wasLocal) this._startLocalOutput();
+        else if (!isLocal && wasLocal) this._stopLocalOutput();
         this._applyOnnxVoice(ttsParams);
+    }
+
+    // Bring up local sound-device output: a fresh mixer (armed with the current
+    // limiter) feeding an audify WASAPI stream. On any failure (addon missing, no
+    // device) it reports and leaves localOutput/mixer null so _guardPlayback rejects
+    // local playback with a clear error rather than queuing into a mixer nobody drains.
+    private _startLocalOutput(): void {
+        if (this.localOutput) return;
+        try {
+            this.localOutput = this.makeLocalOutput(this._createMixer());
+            this.localOutput.start();
+            log.info('local output mode active');
+        } catch (e) {
+            log.error('local output failed to start', e);
+            this._sendLog('Error', `Local audio output failed: ${log.errMsg(e)}`);
+            try { this.localOutput?.stop(); } catch { /* ignore */ }
+            this.localOutput = null;
+            this.mixer = null;
+        }
+    }
+
+    // Tear down local output and its mixer. No-op when not in local mode.
+    private _stopLocalOutput(): void {
+        if (!this.localOutput) return;
+        try { this.localOutput.stop(); } catch { /* ignore */ }
+        this.localOutput = null;
+        this.mixer?.clear();
+        this.mixer = null;
+        log.info('local output mode stopped');
     }
 
     // Apply the ONNX synth descriptor from SetConfig's ttsParams. Validation
@@ -225,6 +279,16 @@ export class DiscordHost implements Host {
     private _currentLimiterCeilingLinear(): number {
         const db = LIMITER_CEILINGS_DB[this.config.limiterCeilingIndex] ?? DEFAULT_LIMITER_CEILING_DB;
         return dbToLinear(db);
+    }
+
+    // Fresh mixer bus with the master limiter armed from the current config
+    // before it feeds any audio (idempotent; re-applied on config change). Shared
+    // by the bot join path and the local-output path so the limiter is never left
+    // unarmed on a new mixer.
+    private _createMixer(): PcmMixer {
+        this.mixer = new PcmMixer();
+        this._applyLimiter();
+        return this.mixer;
     }
 
     // Push the current limiter settings onto the live mixer bus. No-op when not
@@ -286,6 +350,7 @@ export class DiscordHost implements Host {
 
     async disconnect(): Promise<void> {
         log.info('disconnect');
+        try { this._stopLocalOutput(); } catch { /* ignore */ }
         try { await this.leaveChannel(); } catch { /* ignore */ }
         try { await this.client?.destroy(); } catch { /* ignore */ }
         this.client = null;
@@ -359,10 +424,7 @@ export class DiscordHost implements Host {
             log.info('joinChannel: voice Ready');
             this._startPingLog();
 
-            this.mixer = new PcmMixer();
-            // Arm the master bus limiter from the current config before the
-            // mixer feeds any audio (idempotent; re-applied on config change).
-            this._applyLimiter();
+            const mixer = this._createMixer();
             // maxMissedFrames: with the mixer's pull-based _read producing
             // a chunk per call, the encoder should never see null. But a
             // GC pause that delays our _read by >100 ms (default tolerance)
@@ -383,7 +445,7 @@ export class DiscordHost implements Host {
             // One long-lived resource fed by the mixer. The mixer never
             // ends, so this single play() call drives all subsequent audio
             // (each speakPcm/speakFile just adds a voice into the mixer).
-            const resource = createAudioResource(this.mixer, { inputType: StreamType.Raw });
+            const resource = createAudioResource(mixer, { inputType: StreamType.Raw });
             this.player.play(resource);
 
             // StreamType.Raw makes @discordjs/voice insert a prism Opus encoder
@@ -809,9 +871,17 @@ export class DiscordHost implements Host {
     }
 
     private _guardPlayback(): OpResult {
+        // Local output mode: the device is running and fed by this.mixer, so accept
+        // playback with no Discord connection at all.
+        if (this.localOutput) return { ok: true, error: '' };
         // Offline capture mode: with the WAV sink enabled, deliver to a file even
         // without a live voice channel so the pipeline is testable end-to-end.
         if (this._liveReady() || this.sink) return { ok: true, error: '' };
+        // In local mode but the device failed to come up — say so plainly rather
+        // than the Discord "not connected" message.
+        if (this.config.outputMode === 'local') {
+            return { ok: false, error: 'Local audio output is not running.' };
+        }
         const connected = this.connection?.state.status === VoiceConnectionStatus.Ready;
         return { ok: false, error: connected ? 'Audio player not ready.' : 'Not connected to a voice channel.' };
     }

@@ -158,19 +158,20 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
-    public async Task Join_Success_EnablesLeave_AndRaisesJoinedChannel() {
+    public async Task Join_Success_EnablesLeave_AndRaisesOutputActivated() {
       var fake = new FakeDiscordService {
         ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" }, JoinResult = true,
       };
       var vm = NewVm(fake, TempStore());
       fake.RaiseBotReady();
-      bool joined = false;
-      vm.JoinedChannel += () => joined = true;
+      bool activated = false;
+      vm.OutputActivated += () => activated = true;
 
       await vm.JoinCommand.ExecuteAsync(null);
 
       Assert.True(vm.CanLeave);
-      Assert.True(joined);
+      Assert.True(vm.OutputActive);
+      Assert.True(activated);
       Assert.Equal("S1", fake.JoinedServer);
       Assert.Equal("C1", fake.JoinedChannel);
     }
@@ -192,20 +193,21 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
-    public async Task Leave_DisablesLeave_EnablesJoin_AndRaisesLeftChannel() {
+    public async Task Leave_DisablesLeave_EnablesJoin_AndRaisesOutputDeactivated() {
       var fake = new FakeDiscordService {
         ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" },
       };
       var vm = NewVm(fake, TempStore());
       fake.RaiseBotReady();
       await vm.JoinCommand.ExecuteAsync(null);
-      bool left = false;
-      vm.LeftChannel += () => left = true;
+      bool deactivated = false;
+      vm.OutputDeactivated += () => deactivated = true;
 
       await vm.LeaveCommand.ExecuteAsync(null);
 
       Assert.True(fake.LeaveCalled);
-      Assert.True(left);
+      Assert.True(deactivated);
+      Assert.False(vm.OutputActive);
       Assert.True(vm.CanJoin);
       Assert.False(vm.CanLeave);
     }
@@ -251,19 +253,19 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
-    public async Task Disconnect_WhileJoined_RaisesLeftChannel() {
+    public async Task Disconnect_WhileJoined_RaisesOutputDeactivated() {
       var fake = new FakeDiscordService {
         ServersToReturn = new[] { "S1" }, ChannelsToReturn = new[] { "C1" },
       };
       var vm = NewVm(fake, TempStore());
       fake.RaiseBotReady();
       await vm.JoinCommand.ExecuteAsync(null);
-      bool left = false;
-      vm.LeftChannel += () => left = true;
+      bool deactivated = false;
+      vm.OutputDeactivated += () => deactivated = true;
 
       await vm.DisconnectCommand.ExecuteAsync(null);
 
-      Assert.True(left);
+      Assert.True(deactivated);
     }
 
     [Fact]
@@ -284,6 +286,78 @@ namespace ACT_DiscordTriggers.Tests {
       Assert.Empty(vm.Channels);
     }
 
+    // --- Output mode (bot vs local) -------------------------------------------------
+
+    [Fact]
+    public void Initialize_LocalMode_StartsLocalOutput_WithoutDiscordLogin() {
+      var store = TempStore();
+      store.Save(new PluginSettings { OutputMode = "local" });
+      var fake = new FakeDiscordService();
+      var vm = NewVm(fake, store);
+
+      vm.Initialize();
+
+      Assert.True(vm.IsLocalMode);
+      Assert.Equal(1, fake.StartLocalCallCount);
+      Assert.Equal("local", fake.StartLocalCalledWith.OutputMode);
+      Assert.Null(fake.ConnectCalledWith);   // no Discord login in local mode
+      Assert.True(vm.OutputActive);          // delegates routed immediately
+    }
+
+    [Fact]
+    public void Initialize_LocalMode_DeviceFailedToOpen_LeavesOutputInactive() {
+      var store = TempStore();
+      store.Save(new PluginSettings { OutputMode = "local" });
+      var fake = new FakeDiscordService { StartLocalResult = false };   // device didn't come up
+      var vm = NewVm(fake, store);
+      bool activated = false;
+      vm.OutputActivated += () => activated = true;
+
+      vm.Initialize();
+
+      Assert.Equal(1, fake.StartLocalCallCount);  // start was attempted
+      Assert.False(vm.OutputActive);              // but output is not routed…
+      Assert.False(activated);                    // …and the delegate swap never fired
+    }
+
+    [Fact]
+    public void LocalMode_DisablesConnectCommand() {
+      var vm = NewVm(new FakeDiscordService(), TempStore());
+
+      vm.IsLocalMode = true;
+
+      Assert.False(vm.CanConnect);
+      Assert.False(vm.ConnectCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void SwitchToLocalMode_TearsDownBridge_AndStartsLocalOutput() {
+      var fake = new FakeDiscordService();
+      var vm = NewVm(fake, TempStore());
+
+      vm.IsLocalMode = true;   // runtime switch from the default bot mode
+
+      Assert.Equal(1, fake.DeinitCallCount);     // prior path torn down first
+      Assert.Equal(1, fake.StartLocalCallCount); // then local output started
+      Assert.True(vm.OutputActive);
+    }
+
+    [Fact]
+    public void SwitchBackToBotMode_TearsDownLocalOutput_AndLeavesBridgeDown() {
+      var store = TempStore();
+      store.Save(new PluginSettings { OutputMode = "local" });
+      var fake = new FakeDiscordService();
+      var vm = NewVm(fake, store);
+      vm.Initialize();
+      Assert.True(vm.OutputActive);
+
+      vm.IsBotMode = true;   // switch local -> bot
+
+      Assert.False(vm.OutputActive);             // delegates handed back
+      Assert.Equal(1, fake.StartLocalCallCount); // not started again for bot mode
+      Assert.True(fake.DeinitCallCount >= 1);    // local bridge torn down
+    }
+
     [Fact]
     public void SpeakText_ForwardsCurrentVoiceVolumeSpeed() {
       var fake = new FakeDiscordService();
@@ -300,8 +374,8 @@ namespace ACT_DiscordTriggers.Tests {
     public async Task TestCommand_PushesConfigBeforeSpeaking() {
       var fake = new FakeDiscordService();
       var vm = NewVm(fake, TempStore());
-      vm.TtsVoice = "V";       // SAPI voice → CanTest needs only CanLeave + a voice
-      vm.CanLeave = true;      // "in a channel", so Test is allowed
+      vm.TtsVoice = "V";        // SAPI voice → CanTest needs only live output + a voice
+      vm.OutputActive = true;   // output is live (joined channel / local device), so Test is allowed
       Assert.True(vm.TestCommand.CanExecute(null));
 
       await vm.TestCommand.ExecuteAsync(null);
@@ -362,11 +436,11 @@ namespace ACT_DiscordTriggers.Tests {
         vm.SelectedOnnxVoice = amy;
 
         // Pre-state: not installed → download strip showing, Test gated off even though
-        // the bot is "in a channel" (CanLeave), proving the gate ties to install-state.
+        // output is live (OutputActive), proving the gate ties to install-state.
         Assert.False(amy.Installed);
         Assert.True(vm.ShowDownloadPrompt);
         Assert.True(vm.DownloadButtonVisible);
-        vm.CanLeave = true;
+        vm.OutputActive = true;
         Assert.False(vm.TestCommand.CanExecute(null));
 
         await vm.DownloadVoiceCommand.ExecuteAsync(null);
@@ -438,6 +512,11 @@ namespace ACT_DiscordTriggers.Tests {
       public string[] VoicesToReturn = new string[0];
 
       public PluginSettings ConnectCalledWith;
+      public PluginSettings StartLocalCalledWith;
+      public int StartLocalCallCount;
+      // Whether StartLocalAsync reports the local device actually came up. Default
+      // true (the device opens); set false to exercise the failed-device path.
+      public bool StartLocalResult = true;
       public readonly List<PluginSettings> SetConfigCalls = new List<PluginSettings>();
       public string JoinedServer;
       public string JoinedChannel;
@@ -452,6 +531,7 @@ namespace ACT_DiscordTriggers.Tests {
       public void RaiseDisconnected() => Disconnected?.Invoke();
 
       public Task ConnectAsync(PluginSettings config) { ConnectCalledWith = config; return Task.CompletedTask; }
+      public Task<bool> StartLocalAsync(PluginSettings config) { StartLocalCalledWith = config; StartLocalCallCount++; return Task.FromResult(StartLocalResult); }
       public Task SetConfigAsync(PluginSettings config) { SetConfigCalls.Add(config); return Task.CompletedTask; }
       public Task<bool> IsConnectedAsync() => Task.FromResult(IsConnectedResult);
       public Task<string[]> GetServersAsync() { GetServersCallCount++; return Task.FromResult(ServersToReturn); }

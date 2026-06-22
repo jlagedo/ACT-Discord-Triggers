@@ -40,10 +40,11 @@ namespace ACT_DiscordTriggers {
       vm = new DiscordTriggersViewModel(discordService, store);
       DataContext = vm;
 
-      // The VM stays ACT-free: it raises these so the view swaps ACT's TTS/sound delegates
-      // to route through Discord while joined.
-      vm.JoinedChannel += OnJoinedChannel;
-      vm.LeftChannel += OnLeftChannel;
+      // The VM stays ACT-free: it raises these so the view swaps ACT's TTS/sound
+      // delegates to route through the bridge while output is active — a joined
+      // Discord channel (bot mode) or the running local device (local mode).
+      vm.OutputActivated += OnOutputActivated;
+      vm.OutputDeactivated += OnOutputDeactivated;
 
       vm.Log("Diagnostics log: " + DiagnosticsLog.UnifiedPath);
       vm.Initialize();
@@ -66,8 +67,8 @@ namespace ACT_DiscordTriggers {
       // handler bound to a disposed view across a plugin reload.
       try { discordService?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Append("Error disposing Discord service on exit: " + ex); }
       if (vm != null) {
-        vm.JoinedChannel -= OnJoinedChannel;
-        vm.LeftChannel -= OnLeftChannel;
+        vm.OutputActivated -= OnOutputActivated;
+        vm.OutputDeactivated -= OnOutputDeactivated;
         // Guard each teardown step independently: a save failure (e.g. a locked settings
         // file) must not skip the bridge shutdown and orphan node.exe.
         try {
@@ -168,12 +169,12 @@ namespace ACT_DiscordTriggers {
     }
     #endregion
 
-    private void OnJoinedChannel() {
+    private void OnOutputActivated() {
       ActGlobals.oFormActMain.PlayTtsMethod = vm.SpeakText;
       ActGlobals.oFormActMain.PlaySoundMethod = vm.SpeakSoundFile;
     }
 
-    private void OnLeftChannel() {
+    private void OnOutputDeactivated() {
       ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
       ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
     }

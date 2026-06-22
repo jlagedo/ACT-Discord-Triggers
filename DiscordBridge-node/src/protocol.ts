@@ -87,6 +87,11 @@ export interface BaseRequest { op: OpName; reqId: ReqId }
 export interface BridgeConfigView {
     botToken: string;
     botStatus: string;
+    // Output target. 'bot' streams the mix to a Discord voice channel (the
+    // default); 'local' plays it on the host's default sound device instead (no
+    // Discord login needed). The bridge starts/stops the local device when this
+    // field transitions in SetConfig. Additive — defaults to 'bot' when missing.
+    outputMode: string;        // 'bot' | 'local'
     randomFx: boolean;
     fxChance: number;          // 0..100 (%)
     normalize: boolean;
@@ -105,6 +110,7 @@ export interface BridgeConfigView {
 export const DEFAULT_CONFIG_VIEW: BridgeConfigView = {
     botToken: '',
     botStatus: '',
+    outputMode: 'bot',
     randomFx: false,
     fxChance: 25,
     normalize: true,

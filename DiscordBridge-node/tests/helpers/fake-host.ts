@@ -20,6 +20,7 @@ export class FakeHost implements Host {
     private _nextSpeakFile: OpResult = { ok: true, error: '' };
     private _nextSpeakText: OpResult = { ok: true, error: '' };
     private _nextIsConnected = false;
+    private _nextLocalOutputActive = false;
     private _nextServers: string[] = [];
     private _nextChannels: string[] = [];
 
@@ -36,6 +37,11 @@ export class FakeHost implements Host {
 
     setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void {
         this.calls.push({ method: 'setConfig', args: [config, ttsParams] });
+    }
+
+    isLocalOutputActive(): boolean {
+        this.calls.push({ method: 'isLocalOutputActive', args: [] });
+        return this._nextLocalOutputActive;
     }
 
     connect(): Promise<OpResult> {
@@ -99,6 +105,7 @@ export class FakeHost implements Host {
     nextSpeakFile(r: OpResult): void { this._nextSpeakFile = r; }
     nextSpeakText(r: OpResult): void { this._nextSpeakText = r; }
     nextIsConnected(v: boolean): void { this._nextIsConnected = v; }
+    nextLocalOutputActive(v: boolean): void { this._nextLocalOutputActive = v; }
     nextServers(s: string[]): void { this._nextServers = s; }
     nextChannels(c: string[]): void { this._nextChannels = c; }
 

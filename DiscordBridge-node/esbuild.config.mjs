@@ -68,6 +68,11 @@ await esbuild.build({
         // bundle. Staged into dist/node_modules by build.ps1 $externals.
         'sherpa-onnx-node',
         'sherpa-onnx-win-x64',
+        // Local audio output (RtAudio/WASAPI). Native N-API addon, loaded lazily
+        // via createRequire in local-output.ts so the bridge starts even when it's
+        // absent; listed here so a stray static import also stays external. Staged
+        // into dist/node_modules (with its `bindings` loader) by build.ps1 $externals.
+        'audify',
         // High-quality resampler: ESM package whose .wasm is a SEPARATE file located
         // at runtime via `new URL("r8brain.wasm", import.meta.url)`. It must stay
         // external (not inlined) and loaded as on-disk ESM (dynamic import in

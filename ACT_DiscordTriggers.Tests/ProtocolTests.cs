@@ -107,7 +107,7 @@ namespace ACT_DiscordTriggers.Tests {
         [Fact]
         public void SetConfigRequest_serializes_whole_settings_with_camelCase_fields() {
             var settings = new PluginSettings {
-                BotToken = "abc", BotStatus = "hi", RandomFx = true, FxChance = 50,
+                BotToken = "abc", BotStatus = "hi", OutputMode = "local", RandomFx = true, FxChance = 50,
                 Normalize = false, NormalizeTarget = 18, AudioQualityIndex = 2,
             };
             var req = new SetConfigRequest<PluginSettings> { ReqId = 1, Config = settings };
@@ -117,11 +117,20 @@ namespace ACT_DiscordTriggers.Tests {
             var cfg = root.GetProperty("config");
             Assert.Equal("abc", cfg.GetProperty("botToken").GetString());
             Assert.Equal("hi", cfg.GetProperty("botStatus").GetString());
+            Assert.Equal("local", cfg.GetProperty("outputMode").GetString());
             Assert.True(cfg.GetProperty("randomFx").GetBoolean());
             Assert.Equal(50, cfg.GetProperty("fxChance").GetInt32());
             Assert.False(cfg.GetProperty("normalize").GetBoolean());
             Assert.Equal(18, cfg.GetProperty("normalizeTarget").GetInt32());
             Assert.Equal(2, cfg.GetProperty("audioQualityIndex").GetInt32());
+        }
+
+        [Fact]
+        public void PluginSettings_defaults_outputMode_to_bot() {
+            // Older saved files have no outputMode; a fresh POCO must default to the
+            // Discord-bot path so existing users see no behavior change.
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(new PluginSettings(), opts));
+            Assert.Equal("bot", doc.RootElement.GetProperty("outputMode").GetString());
         }
 
         [Fact]

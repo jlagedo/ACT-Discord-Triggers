@@ -163,8 +163,89 @@
         <!--  Left-rail navigation (General / Sound / Information) over the remaining area.  -->
         <TabControl Style="{StaticResource NavTabControl}" TabStripPlacement="Left">
 
-            <!--  ===== General =====  -->
-            <TabItem Header="General" Tag="{StaticResource Icon.General}">
+            <!--  ===== Main =====  -->
+            <TabItem Header="Main" Tag="{StaticResource Icon.Home}">
+                <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="640">
+
+                        <!--  Output mode — the plugin's top-level either/or: where audio goes.  -->
+                        <TextBlock
+                            Margin="2,0,0,8"
+                            Style="{StaticResource SectionHeader}"
+                            Text="Output mode" />
+
+                        <UniformGrid Columns="2">
+                            <RadioButton
+                                Margin="0,0,5,0"
+                                GroupName="outputMode"
+                                IsChecked="{Binding IsBotMode, Mode=TwoWay}"
+                                Style="{StaticResource EngineChoiceCard}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="20"
+                                            Foreground="{StaticResource Accent}"
+                                            Text="{StaticResource Icon.PlugConnected}" />
+                                        <TextBlock
+                                            Margin="9,0,0,0"
+                                            VerticalAlignment="Center"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="Discord bot" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Speak through a Discord voice channel. Set up the bot on the General tab." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton
+                                Margin="5,0,0,0"
+                                GroupName="outputMode"
+                                IsChecked="{Binding IsLocalMode, Mode=TwoWay}"
+                                Style="{StaticResource EngineChoiceCard}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            FontFamily="{StaticResource IconFont}"
+                                            FontSize="20"
+                                            Foreground="{StaticResource TextSecondary}"
+                                            Text="{StaticResource Icon.Desktop}" />
+                                        <TextBlock
+                                            Margin="9,0,0,0"
+                                            VerticalAlignment="Center"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource TextPrimary}"
+                                            Text="This PC (local)" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Play all audio on this computer's speakers. No Discord bot needed." />
+                                </StackPanel>
+                            </RadioButton>
+                        </UniformGrid>
+
+                        <!--  Local-mode notice: how it behaves, shown only in local mode.  -->
+                        <Border
+                            Margin="0,4,0,0"
+                            Style="{StaticResource InfoCallout}"
+                            Visibility="{Binding IsLocalMode, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Style="{StaticResource CardDesc}" Text="Local output starts as soon as it's selected. All TTS and trigger sounds — including neural voices and effects — play on this PC's default output device." />
+                        </Border>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!--  ===== General ===== (Discord-only; hidden in local-output mode)  -->
+            <TabItem
+                Header="General"
+                Tag="{StaticResource Icon.General}"
+                Visibility="{Binding IsBotMode, Converter={StaticResource BoolToVis}}">
                 <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="640">
 

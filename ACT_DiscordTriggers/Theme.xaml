@@ -64,6 +64,7 @@
     -->
     <FontFamily x:Key="IconFont">Segoe Fluent Icons</FontFamily>
 
+    <sys:String x:Key="Icon.Home">&#xE80F;</sys:String>
     <sys:String x:Key="Icon.General">&#xE713;</sys:String>
     <sys:String x:Key="Icon.Sound">&#xE767;</sys:String>
     <sys:String x:Key="Icon.Info">&#xE946;</sys:String>

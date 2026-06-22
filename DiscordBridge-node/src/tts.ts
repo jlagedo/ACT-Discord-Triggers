@@ -14,11 +14,11 @@
 // `lang` arrives pre-vetted (an unknown one hard-exits the whole process), so this
 // module never computes it.
 
-import { createRequire } from 'node:module';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as log from './file-log.js';
 import { dbToLinear } from './normalize.js';
+import { requireExternal } from './native-require.js';
 import type { OpResult } from './pipe-server.js';
 
 // The raw Float32 mono samples + rate a synth produces. Also the shape
@@ -42,16 +42,11 @@ interface SherpaModule {
     GenerationConfig: new (opts: GenerationConfigOpts) => object;
 }
 
-// Base createRequire on __filename, not import.meta.url: esbuild emits CJS where
-// import.meta is `{}` (so createRequire(import.meta.url) would throw at startup),
-// while __filename is a real CJS global in the bundle. The native addon is in the
-// esbuild `external` list and resolves from dist/node_modules at runtime.
+// Lazy-loaded so a missing/broken addon can't break bridge startup — see
+// native-require.ts for why it's required this way.
 let sherpaMod: SherpaModule | null = null;
 function loadSherpa(): SherpaModule {
-    if (!sherpaMod) {
-        const requireNative = createRequire(__filename);
-        sherpaMod = requireNative('sherpa-onnx-node') as SherpaModule;
-    }
+    if (!sherpaMod) sherpaMod = requireExternal<SherpaModule>('sherpa-onnx-node');
     return sherpaMod;
 }
 

@@ -49,6 +49,12 @@ test('DEFAULT_CONFIG_VIEW carries the master limiter defaults (match PluginSetti
     assert.equal(DEFAULT_CONFIG_VIEW.limiterCeilingIndex, 1);
 });
 
+test('DEFAULT_CONFIG_VIEW defaults outputMode to bot (match PluginSettings)', () => {
+    // Older saved settings carry no outputMode; the bridge must default to the
+    // Discord-bot path so they behave exactly as before.
+    assert.equal(DEFAULT_CONFIG_VIEW.outputMode, 'bot');
+});
+
 test('config is a single op, not per-knob setters', () => {
     assert.equal(Op.SetConfig, 'SetConfig');
     const values = new Set<string>(Object.values(Op));

@@ -15,6 +15,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     event Action Disconnected;
 
     Task ConnectAsync(PluginSettings config);
+    // Bring the bridge up in local-output mode: spawn + configure, no Discord login.
+    // The config's OutputMode="local" makes the bridge play on the local device.
+    // Returns whether the local device actually came up (the bridge confirms it on
+    // SetConfig), so callers route audio only when there is something live to play it.
+    Task<bool> StartLocalAsync(PluginSettings config);
     Task SetConfigAsync(PluginSettings config);
     Task<bool> IsConnectedAsync();
     Task<string[]> GetServersAsync();

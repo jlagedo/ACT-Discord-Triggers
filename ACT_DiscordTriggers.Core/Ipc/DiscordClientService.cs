@@ -28,6 +28,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     // Resolve the ONNX synth descriptor here (where PluginSettings + the catalog
     // are both in scope) so DiscordClient stays decoupled from the concrete POCO.
     public Task ConnectAsync(PluginSettings config) => DiscordClient.ConnectAsync(config, OnnxSynthParams.Resolve(config));
+    public Task<bool> StartLocalAsync(PluginSettings config) => DiscordClient.StartLocalAsync(config, OnnxSynthParams.Resolve(config));
     public Task SetConfigAsync(PluginSettings config) => DiscordClient.SetConfigAsync(config, OnnxSynthParams.Resolve(config));
     public Task<bool> IsConnectedAsync() => DiscordClient.IsConnectedAsync();
     public Task<string[]> GetServersAsync() => DiscordClient.GetServersAsync();

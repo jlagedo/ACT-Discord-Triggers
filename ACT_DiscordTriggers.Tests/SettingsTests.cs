@@ -92,7 +92,7 @@ namespace ACT_DiscordTriggers.Tests {
       using (var t = new TempDir()) {
         var store = StoreAt(t.File("c.xml"));
         var original = new PluginSettings {
-          BotToken = "tok", BotStatus = "hi", AutoConnect = true,
+          BotToken = "tok", BotStatus = "hi", AutoConnect = true, OutputMode = "local",
           TtsVoice = "Microsoft Zira Desktop", TtsVolume = 7, TtsSpeed = 13,
           TtsEngine = "onnx", OnnxFamily = "kokoro", OnnxVoice = "kokoro-0",
           TtsThreads = 4, ModelsDir = @"D:\voices",
@@ -106,6 +106,7 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal(original.BotToken, loaded.BotToken);
         Assert.Equal(original.BotStatus, loaded.BotStatus);
         Assert.Equal(original.AutoConnect, loaded.AutoConnect);
+        Assert.Equal(original.OutputMode, loaded.OutputMode);
         Assert.Equal(original.TtsVoice, loaded.TtsVoice);
         Assert.Equal(original.TtsVolume, loaded.TtsVolume);
         Assert.Equal(original.TtsSpeed, loaded.TtsSpeed);

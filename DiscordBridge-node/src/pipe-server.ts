@@ -37,6 +37,10 @@ export interface SpeakMeta { reqId: number; recvT: number }
 export interface Host {
     setNotifier(fn: Notifier): void;
     setConfig(config: BridgeConfigView, ttsParams?: Record<string, string>): void;
+    // Whether local sound-device output is currently running (outputMode='local'
+    // with the device successfully opened). Read right after setConfig so the
+    // SetConfig reply can tell the plugin whether local output actually came up.
+    isLocalOutputActive(): boolean;
     connect(): Promise<OpResult>;
     disconnect(): Promise<void>;
     isConnected(): boolean;
@@ -79,6 +83,7 @@ function parseConfig(raw: Record<string, unknown>): BridgeConfigView {
     return {
         botToken: asString(raw['botToken'], d.botToken),
         botStatus: asString(raw['botStatus'], d.botStatus),
+        outputMode: asString(raw['outputMode'], d.outputMode),
         randomFx: asBool(raw['randomFx'], d.randomFx),
         fxChance: asNumber(raw['fxChance']) ?? d.fxChance,
         normalize: asBool(raw['normalize'], d.normalize),
@@ -223,7 +228,18 @@ export class PipeServer {
                         ? rawParams as Record<string, string>
                         : undefined;
                     this.host.setConfig(cfg, ttsParams);
-                    await this._result(reqId, true, '');
+                    // In local-output mode the device is brought up synchronously
+                    // inside setConfig and can fail (no device, addon missing). Fail
+                    // the SetConfig result via the existing ok/error envelope so the
+                    // plugin — which only knows it *asked* for local mode — learns
+                    // whether the device actually opened and can decide whether to
+                    // route ACT's audio. Bot mode is always ok here.
+                    if (cfg.outputMode === 'local' && !this.host.isLocalOutputActive()) {
+                        await this._result(reqId, false,
+                            'Local audio output failed to start — no output device, or the audio addon is missing.');
+                    } else {
+                        await this._result(reqId, true, '');
+                    }
                     break;
                 }
                 case Op.Connect: {

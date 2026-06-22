@@ -39,10 +39,12 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public ObservableCollection<OnnxVoiceItem> OnnxVoices { get; } = new ObservableCollection<OnnxVoiceItem>();
     public ObservableCollection<LogEntry> LogEntries { get; } = new ObservableCollection<LogEntry>();
 
-    // Raised when a channel is (re)joined/left so the view can swap ACT's
+    // Raised when audio output becomes active/inactive so the view can swap ACT's
     // PlayTtsMethod/PlaySoundMethod delegates (kept out of the VM to stay ACT-free).
-    public event Action JoinedChannel;
-    public event Action LeftChannel;
+    // "Active" = a joined Discord channel (bot mode) OR a running local device
+    // (local mode), so the same delegate swap serves both output targets.
+    public event Action OutputActivated;
+    public event Action OutputDeactivated;
 
     public DiscordTriggersViewModel(IDiscordService discord, SettingsStore store) {
       this.discord = discord;
@@ -52,6 +54,34 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       this.discord.Log += OnLog;
       this.discord.Disconnected += OnDisconnected;
     }
+
+    // --- Output mode ------------------------------------------------------------
+    // "bot" streams audio to a Discord voice channel; "local" plays it on this PC's
+    // default sound device (no token/channel/login). Paired bools let the Main-tab
+    // choice-cards two-way bind without a converter. Changing the mode at runtime
+    // tears down the active path and, for local, brings the bridge up immediately.
+    private string outputMode = "bot";   // "bot" | "local"
+    public string OutputMode {
+      get => outputMode;
+      set {
+        if (!SetProperty(ref outputMode, value)) return;
+        OnPropertyChanged(nameof(IsBotMode));
+        OnPropertyChanged(nameof(IsLocalMode));
+        OnPropertyChanged(nameof(CanConnect));
+        ConnectCommand.NotifyCanExecuteChanged();
+        // Load sets the mode under suppressPush; Initialize does the initial bring-up.
+        if (!suppressPush) _ = ApplyOutputModeAsync();
+      }
+    }
+    public bool IsBotMode { get => outputMode == "bot"; set { if (value) OutputMode = "bot"; } }
+    public bool IsLocalMode { get => outputMode == "local"; set { if (value) OutputMode = "local"; } }
+
+    // Unified "audio output is live" flag — true once a Discord channel is joined or
+    // the local device is running. Drives the Test gate and is flipped only through
+    // ActivateOutput/DeactivateOutput so the ACT delegate swap fires once per change.
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
+    private bool outputActive;
 
     // --- Settings-backed properties ---------------------------------------------
     // Source-generated (no side effects): the value lives in the generated field and
@@ -264,8 +294,9 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private bool isConnected;
 
     // CanExecute can't express negation directly, so expose the inverse for the
-    // Connect command (and any view that wants it).
-    public bool CanConnect => !IsConnected;
+    // Connect command (and any view that wants it). Only meaningful in bot mode —
+    // local output has no Discord connection to make.
+    public bool CanConnect => !IsConnected && IsBotMode;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(JoinCommand))]
@@ -319,7 +350,6 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // ObservableCollections / restoring ACT delegates must happen on the UI thread.
     private void ResetConnectionState() {
       OnUi(() => {
-        bool wasJoined = CanLeave;
         IsConnected = false;
         CanJoin = false;
         CanLeave = false;
@@ -327,9 +357,57 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Channels.Clear();
         SelectedServer = null;
         SelectedChannel = null;
-        // If we were in a voice channel, hand ACT's TTS/sound delegates back.
-        if (wasJoined) LeftChannel?.Invoke();
+        // If output was live (joined channel or local device), hand ACT's TTS/sound
+        // delegates back. Idempotent, so a double reset is harmless.
+        DeactivateOutput();
       });
+    }
+
+    // Flip the unified output-active flag and raise the matching event exactly once
+    // per transition, so the view swaps ACT's delegates a single time. Used by both
+    // the bot-join path and the local-output path.
+    private void ActivateOutput() {
+      if (OutputActive) return;
+      OutputActive = true;
+      OutputActivated?.Invoke();
+    }
+
+    private void DeactivateOutput() {
+      if (!OutputActive) return;
+      OutputActive = false;
+      OutputDeactivated?.Invoke();
+    }
+
+    // Runtime output-mode switch: drop the active path (revert delegates + clear any
+    // bot connection UI), tear the bridge down so the next mode starts from a clean
+    // process, then — for local — bring the bridge straight back up on the device.
+    // Bot mode leaves the bridge down; the user connects explicitly (or AutoConnect
+    // does on the next launch).
+    private async Task ApplyOutputModeAsync() {
+      Log("Output mode: " + (IsLocalMode ? "Local (this PC)" : "Discord bot") + ".");
+      ResetConnectionState();
+      try {
+        await discord.DeinitAsync();
+      } catch (Exception ex) {
+        Log("Output mode switch teardown error: " + ex.Message);
+      }
+      if (IsLocalMode) await StartLocalOutputAsync();
+    }
+
+    // Bring the bridge online in local-output mode and route ACT's callouts to it.
+    // The bridge plays everything on the local device — no channel/login — so output
+    // is "active" once the bridge confirms the device opened. If it didn't (no device,
+    // audio addon missing), leave output inactive so ACT keeps its own playback rather
+    // than routing callouts to a bridge that can't play them.
+    private async Task StartLocalOutputAsync() {
+      try {
+        Log("Starting local audio output…");
+        bool live = await discord.StartLocalAsync(ToSettings());
+        if (live) OnUi(ActivateOutput);
+        else Log("Local audio output did not start — check that an output device is available.");
+      } catch (Exception ex) {
+        Log("Local audio output failed to start: " + ex.Message);
+      }
     }
 
     [RelayCommand(CanExecute = nameof(CanJoin))]
@@ -338,7 +416,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       if (await discord.JoinChannelAsync(SelectedServer, SelectedChannel)) {
         CanLeave = true;
         Log("Joined channel " + SelectedChannel + " on " + SelectedServer + ".");
-        JoinedChannel?.Invoke();
+        ActivateOutput();
       } else {
         Log("Unable to join channel. Does your bot have permission to join this channel?");
         CanJoin = true;
@@ -353,7 +431,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         await discord.LeaveChannelAsync();
         CanJoin = true;
         Log("Left channel.");
-        LeftChannel?.Invoke();
+        DeactivateOutput();
       } catch (Exception ex) {
         Log("Error leaving channel. Possible connection issue.");
         CanLeave = true;
@@ -362,10 +440,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- Text-to-Speech page actions --------------------------------------------
-    // Test plays a sample through the bot, so it requires being in a voice channel
-    // (CanLeave) and a ready voice — a selected SAPI voice, or an installed ONNX one.
+    // Test plays a sample through the active output, so it requires output to be live
+    // (a joined channel in bot mode, or the local device in local mode) and a ready
+    // voice — a selected SAPI voice, or an installed ONNX one.
     public bool CanTest =>
-      CanLeave && (IsOnnx ? SelectedVoiceInstalled : !string.IsNullOrEmpty(TtsVoice));
+      OutputActive && (IsOnnx ? SelectedVoiceInstalled : !string.IsNullOrEmpty(TtsVoice));
 
     [RelayCommand(CanExecute = nameof(CanTest))]
     private async Task Test() {
@@ -551,7 +630,10 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       }
       Log("ONNX " + OnnxFamily + " voices: " + InstallCountText() + " in " + ModelsDir + ".");
 
-      if (AutoConnect) _ = ConnectAsync();
+      // Local-output mode brings the bridge up immediately (no Connect click needed);
+      // bot mode honours AutoConnect.
+      if (IsLocalMode) _ = StartLocalOutputAsync();
+      else if (AutoConnect) _ = ConnectAsync();
     }
 
     public void Save() => store.Save(ToSettings());
@@ -636,6 +718,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void FromSettings(PluginSettings s) {
       suppressPush = true;
       try {
+        OutputMode = s.OutputMode ?? "bot";
         BotToken = s.BotToken ?? "";
         BotStatus = s.BotStatus ?? "";
         AutoConnect = s.AutoConnect;
@@ -660,6 +743,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     private PluginSettings ToSettings() => new PluginSettings {
+      OutputMode = OutputMode,
       BotToken = BotToken,
       BotStatus = BotStatus,
       AutoConnect = AutoConnect,
