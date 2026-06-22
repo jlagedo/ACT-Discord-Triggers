@@ -118,6 +118,16 @@ keeps ACT on net48 while staying current with Discord. The full design rationale
 and alternatives considered are documented in
 [`CLAUDE.md`](CLAUDE.md).
 
+### The audio chain
+
+How a trigger becomes Opus packets — the complete signal flow from C# synthesis
+through the bridge's DSP (r8brain resampling, LUFS auto-leveling, the float64
+mix bus, the look-ahead master limiter) to the Discord voice socket, with
+diagrams and a full numeric reference — is documented for contributors and
+audio engineers in [`docs/AUDIO-CHAIN.md`](docs/AUDIO-CHAIN.md). The ranked
+roadmap for taking the realtime path pro-grade lives in
+[`docs/AUDIO-PIPELINE.md`](docs/AUDIO-PIPELINE.md).
+
 ### Building
 
 One command from a clean clone produces `release/` with everything an end user
