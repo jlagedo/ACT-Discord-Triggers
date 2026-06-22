@@ -1,7 +1,7 @@
 // Manual TTS probe: synthesize one line with an installed ONNX voice and write a
 // WAV you can listen to. Exercises the exact bridge synthesis path (OnnxTts +
-// the discord-host mono->stereo->48k conversion), so what you hear is what the
-// bot would send to Discord.
+// the discord-host resample-mono-to-48k then duplicate-to-stereo conversion), so
+// what you hear is what the bot would send to Discord.
 //
 //   npm run tts:probe -- --model "E:\...\vits-piper-pt_BR-faber-medium" --text "Cuidado!"
 //   npm run tts:probe -- --model "E:\...\kokoro-multi-lang-v1_0" --family kokoro --sid 42 --lang pt-br
@@ -10,7 +10,8 @@
 //        --speed 0..20 --threads N --text "..." --out <file.wav>
 
 import { OnnxTts, type OnnxSynthConfig } from '../src/tts.js';
-import { monoFloat32ToStereoF32, resampleStereoF32 } from '../src/discord-host.js';
+import { monoFloat32ToStereoF32 } from '../src/discord-host.js';
+import { resampleMono, initResampler } from '../src/resample.js';
 import { floatToInt16 } from '../src/audio-format.js';
 import { writeWav16 } from '../src/wav-write.js';
 import { resolve } from 'node:path';
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         return;
     }
+    await initResampler();
     process.stdout.write(`Synthesizing with ${tts.describe()} ...\n`);
     const t0 = process.hrtime.bigint();
     const audio = await tts.synth(text);
@@ -51,8 +53,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    const stereo = monoFloat32ToStereoF32(audio.samples);
-    const final = resampleStereoF32(stereo, audio.sampleRate, 48000);
+    const final = monoFloat32ToStereoF32(resampleMono(audio.samples, audio.sampleRate, 48000));
     writeWav16(out, floatToInt16(final), { sampleRate: 48000, channels: 2 });
 
     const audioMs = (audio.samples.length / audio.sampleRate) * 1000;

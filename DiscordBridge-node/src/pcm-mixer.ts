@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 
 import * as log from './file-log.js';
 import { floatToInt16 } from './audio-format.js';
+import { LookaheadLimiter } from './limiter.js';
 
 // Audio format invariants — the bridge is hard-wired to 48 kHz / stereo end-to-
 // end. Voices are interleaved float32 (the pipeline's internal currency); the
@@ -76,6 +77,15 @@ export class PcmMixer extends Readable {
     private voices: Voice[] = [];
     private totalQueued = 0; // float bytes of unconsumed audio across all voices
     private readonly acc = new Float64Array(CHUNK_SAMPLES);
+
+    // Master look-ahead brickwall limiter on the summed bus, applied to `acc`
+    // right before the single int16 quantization. Bypassed until configured: a
+    // bare mixer is a pure summing bus (preserving the sample-exact mix contract
+    // its unit tests assert), and discord-host enables it from the live config on
+    // join + on every change. A look-ahead limiter delays the signal even at
+    // unity gain, so leaving it off by default keeps an unconfigured mixer
+    // delay-free.
+    private limiter: LookaheadLimiter | null = null;
 
     addVoice(samples: Float32Array, meta?: AddVoiceMeta): AddVoiceResult {
         // Defensive: an odd sample count would leave a dangling mono sample.
@@ -156,6 +166,17 @@ export class PcmMixer extends Readable {
         this.totalQueued = 0;
     }
 
+    // Enable/disable the master bus limiter and set its true-peak ceiling
+    // (linear, 1.0 == 0 dBFS). Called by discord-host from the live config on
+    // join and whenever the limiter settings change. Enabling (re)allocates and
+    // resets the limiter so a fresh stream starts from unity + silence; toggling
+    // off drops it (the bus reverts to a plain sum + the floatToInt16 backstop).
+    configureLimiter(enabled: boolean, ceilingLinear: number): void {
+        if (!enabled) { this.limiter = null; return; }
+        if (!this.limiter) this.limiter = new LookaheadLimiter(ceilingLinear);
+        else this.limiter.setCeiling(ceilingLinear);
+    }
+
     // Exposed for unit tests; not part of the AudioResource contract.
     get voiceCount(): number { return this.voices.length; }
     get queuedBytes(): number { return this.totalQueued; }
@@ -163,7 +184,11 @@ export class PcmMixer extends Readable {
     // Exposed for unit tests so they can drive one chunk at a time without
     // wrestling with Readable buffering semantics. Returns one s16le chunk.
     _mixOneChunk(): Buffer {
-        if (this.voices.length === 0) return Buffer.alloc(CHUNK_BYTES);
+        // With the limiter active the bus is never silent — its delay line and
+        // release envelope have to keep running on silence, so an empty voice
+        // list still has to flow through process() (which emits delayed silence)
+        // rather than short-circuiting.
+        if (this.voices.length === 0 && !this.limiter) return Buffer.alloc(CHUNK_BYTES);
 
         this.acc.fill(0);
 
@@ -217,6 +242,13 @@ export class PcmMixer extends Readable {
             }
         }
         this.voices.length = write;
+
+        // Master bus limiter (look-ahead brickwall) rides the summed float bus
+        // down to a true-peak-safe ceiling before quantization, so overlapping
+        // voices that sum past full scale are ridden down smoothly instead of
+        // hard-clipping at the int16 edge. floatToInt16's clamp stays as the
+        // absolute backstop (float epsilon / limiter disabled).
+        if (this.limiter) this.limiter.process(this.acc);
 
         // The pipeline's single int16 quantization: sum bus (float64) -> s16le.
         return floatToInt16(this.acc, Buffer.allocUnsafe(CHUNK_BYTES));

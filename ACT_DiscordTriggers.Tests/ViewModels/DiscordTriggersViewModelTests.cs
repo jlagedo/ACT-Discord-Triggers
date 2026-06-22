@@ -98,6 +98,27 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     [Fact]
+    public void LimiterCeilingIndex_ClampsToRange() {
+      var vm = NewVm(new FakeDiscordService(), TempStore());
+      vm.LimiterCeilingIndex = 99;
+      Assert.Equal(PluginSettings.LimiterCeilingIndexMax, vm.LimiterCeilingIndex);
+      vm.LimiterCeilingIndex = -3;
+      Assert.Equal(PluginSettings.LimiterCeilingIndexMin, vm.LimiterCeilingIndex);
+    }
+
+    [Fact]
+    public void Initialize_LoadsLimiterSettings_IntoProperties() {
+      var store = TempStore();
+      store.Save(new PluginSettings { LimiterEnabled = false, LimiterCeilingIndex = 3 });
+      var vm = NewVm(new FakeDiscordService(), store);
+
+      vm.Initialize();
+
+      Assert.False(vm.LimiterEnabled);
+      Assert.Equal(3, vm.LimiterCeilingIndex);
+    }
+
+    [Fact]
     public async Task Connect_WhenNotConnected_CallsConnectWithCurrentSettings() {
       var fake = new FakeDiscordService { IsConnectedResult = false };
       var vm = NewVm(fake, TempStore());

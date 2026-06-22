@@ -3,6 +3,7 @@ import * as log from './file-log.js';
 import { DiscordHost } from './discord-host.js';
 import { PipeServer } from './pipe-server.js';
 import { warmupDecoders } from './audio-decode.js';
+import { initResampler } from './resample.js';
 
 async function main(): Promise<void> {
     log.init();
@@ -58,12 +59,14 @@ async function main(): Promise<void> {
         });
     });
 
-    // Instantiate the audio decoders' WASM before announcing readiness. This
-    // moves codec compile cost off the first trigger's hot path, and — because
-    // it runs before BRIDGE_READY — makes the build self-test a real packaging
-    // gate: an unresolvable codec WASM throws here, so no BRIDGE_READY is
-    // printed and build.ps1 fails loudly instead of shipping a broken bundle.
-    await warmupDecoders();
+    // Instantiate the audio decoders' and the resampler's WASM before announcing
+    // readiness. This moves WASM compile cost off the first trigger's hot path,
+    // and — because it runs before BRIDGE_READY — makes the build self-test a real
+    // packaging gate: an unresolvable/unstaged WASM throws here, so no
+    // BRIDGE_READY is printed and build.ps1 fails loudly instead of shipping a
+    // broken bundle. initResampler() also primes the module the sync resample
+    // functions assume is loaded.
+    await Promise.all([warmupDecoders(), initResampler()]);
 
     // Plugin's BridgeProcess.cs scans stdout for line starting with "BRIDGE_READY".
     process.stdout.write(`BRIDGE_READY pipe=${pipeName}\n`);

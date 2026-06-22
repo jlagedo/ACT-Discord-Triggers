@@ -1,17 +1,22 @@
 // Auto-leveling (loudness normalization) for trigger playback. Some sounds come
 // in mastered hot and others whisper-quiet; after a random effect the spread is
-// worse still (echo/reverb tails drop RMS, distortion pushes it up). This brings
-// each clip toward one target loudness so the user isn't reaching for the volume
-// knob between triggers.
+// worse still (echo/reverb tails drop loudness, distortion pushes it up). This
+// brings each clip toward one target loudness so the user isn't reaching for the
+// volume knob between triggers.
 //
 // It's per-clip and offline: the whole 48 kHz interleaved float32 stereo buffer
 // is in hand before playback, so there's no streaming compressor to maintain —
-// just measure the clip, pick one gain, apply it. RMS (average energy) is the
-// loudness proxy because it tracks perceived volume far better than peak does;
-// the peak is only used as a brick-wall ceiling so a boost can never clip.
+// just measure the clip, pick one gain, apply it. The loudness proxy is ITU-R
+// BS.1770 K-weighting (LUFS) — see k-weighting.ts — which tracks perceived volume
+// across different spectra far better than broadband energy (a bass-heavy clip
+// and a speech clip that read equally loud also sound equally loud). The peak is
+// measured separately, broadband, and used only as a brick-wall ceiling so a
+// boost can never clip.
 //
 // discord-host applies this in _enqueue, AFTER any random effect, so the effect's
 // own level change is what gets corrected.
+
+import { kWeightedLoudnessLufs } from './k-weighting.js';
 
 export const FULL_SCALE = 32768; // |int16| range; one LSB == 1 / FULL_SCALE
 
@@ -38,15 +43,14 @@ export interface NormalizeResult {
     applied: boolean; // false → samples is the input buffer, untouched
 }
 
-// A pre-known loudness for the buffer, both linear and normalized to full scale
-// (1.0 == 0 dBFS), so normalizePcm16 can skip its measurement pass. Used for
-// neural-TTS clips whose loudness is baked per-voice in the catalog: the gain is
-// derived from these instead of scanning every sample, which is what lets the
-// synth path stream. Only valid when the buffer wasn't relevelled after baking
-// (e.g. a random effect) — the caller is responsible for that gate.
+// A pre-known loudness for the buffer, so normalizePcm16 can skip its measurement
+// pass. Used for neural-TTS clips whose loudness is baked per-voice in the catalog:
+// the gain is derived from these instead of scanning every sample, which is what
+// lets the synth path stream. Only valid when the buffer wasn't relevelled after
+// baking (e.g. a random effect) — the caller is responsible for that gate.
 export interface KnownLevel {
-    rms: number;  // 0..1
-    peak: number; // 0..1
+    rms: number;  // K-weighted loudness as a linear full-scale-equivalent (its dB value is LUFS)
+    peak: number; // broadband sample peak, 0..1 (1.0 == 0 dBFS)
 }
 
 export function dbToLinear(db: number): number {
@@ -59,30 +63,35 @@ export function linearToDb(x: number): number {
     return x > 0 ? 20 * Math.log10(x) : -Infinity;
 }
 
-// Measure an interleaved float32 stereo buffer's RMS and peak as linear fractions
-// of full scale (1.0 == 0 dBFS), both channels together (one coherent gain, not
-// per-channel balance). The same energy math `normalize` levels with, exposed so
-// offline tooling bakes voice loudness from the exact runtime numbers.
+// Measure an interleaved float32 stereo buffer's loudness and peak. `rms` is the
+// K-weighted (BS.1770 LUFS) loudness expressed as a linear full-scale-equivalent
+// — i.e. dbToLinear(L_K), so its dB value is the clip's LUFS and computeGain can
+// land it on a LUFS target with no extra conversion. `peak` is the broadband
+// sample peak (1.0 == 0 dBFS), the clip-safety ceiling, kept metric-independent.
+// The same math `normalize` levels with, exposed so offline tooling bakes voice
+// loudness from the exact runtime numbers.
 export function measureLevel(samples: Float32Array): { rms: number; peak: number } {
     const sampleCount = samples.length; // float samples across L+R
     if (sampleCount === 0) return { rms: 0, peak: 0 };
-    let sumSq = 0;
     let peak = 0;
     for (let i = 0; i < sampleCount; i++) {
-        const s = samples[i]!;
-        sumSq += s * s;
-        const a = s < 0 ? -s : s;
+        const a = Math.abs(samples[i]!);
         if (a > peak) peak = a;
     }
-    return { rms: Math.sqrt(sumSq / sampleCount), peak };
+    const lufs = kWeightedLoudnessLufs(samples);
+    const rms = Number.isFinite(lufs) ? dbToLinear(lufs) : 0;
+    return { rms, peak };
 }
 
 // The single gain decision, shared by the runtime-measure path and the streaming
-// fixed-gain path: land RMS on target, then clamp so it never exceeds the peak
-// ceiling (no clipping) nor the max-boost cap (no amplifying near-silence). rms
-// and peak are linear fractions of full scale (0..1). Returns 1 (no change) for a
-// silent/degenerate buffer. The streaming path folds this gain into the
-// mono->stereo conversion so a clip is leveled without a whole-buffer scan.
+// fixed-gain path: land loudness on target, then clamp so it never exceeds the
+// peak ceiling (no clipping) nor the max-boost cap (no amplifying near-silence).
+// `rms` is the K-weighted loudness as a linear full-scale-equivalent and
+// `targetDbfs` the LUFS target (negative), so dbToLinear(target)/rms is exactly
+// the gain that lands the clip at the target LUFS; `peak` is the broadband sample
+// peak (0..1). Returns 1 (no change) for a silent/degenerate buffer. The streaming
+// path folds this gain into the mono->stereo conversion so a clip is leveled
+// without a whole-buffer scan.
 export function computeGain(rms: number, peak: number, targetDbfs: number): number {
     if (rms < MIN_RMS || peak <= 0) return 1;
     const peakLimit = PEAK_CEILING / peak;
@@ -90,9 +99,10 @@ export function computeGain(rms: number, peak: number, targetDbfs: number): numb
 }
 
 // Normalize an interleaved float32 stereo buffer toward `targetDbfs` (a negative
-// dBFS value, e.g. -20). Measures RMS + peak across every sample (both channels
-// together — we want a single coherent gain, not per-channel balance changes),
-// then derives one gain bounded by the peak ceiling and the max-boost cap.
+// LUFS value, e.g. -17). Measures K-weighted loudness + broadband peak across
+// every sample (both channels together — we want a single coherent gain, not
+// per-channel balance changes), then derives one gain bounded by the peak ceiling
+// and the max-boost cap.
 // When `known` is supplied (a baked per-voice level), the measurement pass is
 // skipped and the gain is derived from it — same gain math, no buffer scan.
 // The result stays float (the peak ceiling already guarantees no sample exceeds

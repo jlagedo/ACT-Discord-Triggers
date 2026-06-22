@@ -259,3 +259,6 @@ ModelManifest.xml
 
 # Paket dependency manager
 .paket/paket.exe
+
+# Limiter E2E harness output (generated WAVs)
+DiscordBridge-node/.e2e-out/

@@ -10,8 +10,8 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// <see cref="PluginSettings.CurrentSchemaVersion"/>, by applying a chain of
   /// <see cref="ISettingsMigration"/> steps in order.
   ///
-  /// The registry holds one step (<see cref="V1ToV2"/>). Adding a future schema
-  /// change is the same three moves:
+  /// The registry holds the ordered steps (<see cref="V1ToV2"/>, <see cref="V2ToV3"/>).
+  /// Adding a future schema change is the same three moves:
   ///   1. Bump <see cref="PluginSettings.CurrentSchemaVersion"/>.
   ///   2. Add a class implementing <see cref="ISettingsMigration"/> whose
   ///      <c>FromVersion</c> is the prior version, mutating the XML DOM.
@@ -28,7 +28,7 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
 
     /// <summary>The shipping set of migrations, ordered by source version.</summary>
     public static IReadOnlyList<ISettingsMigration> DefaultMigrations { get; } =
-      new List<ISettingsMigration> { new V1ToV2() };
+      new List<ISettingsMigration> { new V1ToV2(), new V2ToV3() };
 
     public SettingsMigrator() : this(DefaultMigrations) { }
 

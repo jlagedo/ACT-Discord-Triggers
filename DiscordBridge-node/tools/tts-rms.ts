@@ -18,7 +18,13 @@
 //   npm run tts:rms -- --models E:\ai       # explicit models root
 //   npm run tts:rms -- --filter pt_BR       # only voices whose id contains the substring
 //   npm run tts:rms -- --json rms.json      # also write per-voice results as JSON (feeds baking)
+//   npm run tts:rms -- --bake               # write rmsDbfs/peakDbfs back into onnx-voices.json
 //   npm run tts:rms -- --lines 8 --threads 4
+//
+// --bake patches the catalog in place for the voices it measured (others are left
+// as-is), and prints the per-voice old->new rmsDbfs plus the mean delta — re-run it
+// after changing the loudness metric (e.g. broadband RMS -> K-weighted LUFS) and
+// commit the regenerated onnx-voices.json. Only installed voices can be re-baked.
 //
 // Models root resolution: --models, else ACT_DT_MODELS_DIR, else E:\ai.
 
@@ -70,11 +76,52 @@ interface VoiceResult {
     rtfMean: number;
 }
 
-function loadCatalog(): Voice[] {
+function catalogPath(): string {
     const here = dirname(fileURLToPath(import.meta.url));
-    const path = join(here, '..', '..', 'ACT_DiscordTriggers.Core', 'Tts', 'onnx-voices.json');
-    const file = JSON.parse(readFileSync(path, 'utf8')) as CatalogFile;
+    return join(here, '..', '..', 'ACT_DiscordTriggers.Core', 'Tts', 'onnx-voices.json');
+}
+
+function loadCatalog(): Voice[] {
+    const file = JSON.parse(readFileSync(catalogPath(), 'utf8')) as CatalogFile;
     return file.voices;
+}
+
+// Round to one decimal place, matching the catalog's existing dBFS precision.
+function round1(x: number): number {
+    return Math.round(x * 10) / 10;
+}
+
+// Patch onnx-voices.json in place: for each measured voice write the new K-weighted
+// loudness (rmsDbfs) and broadband peak (peakDbfs), leaving every other field and
+// every unmeasured voice untouched. Mutating existing values keeps JSON key order
+// and formatting stable. Returns how many voices were updated. Logs the per-voice
+// rmsDbfs delta (old -> new) so the metric shift — and any voices left stale
+// because their model isn't installed — is explicit.
+function bakeCatalog(results: VoiceResult[]): number {
+    const path = catalogPath();
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { voices: Array<Record<string, unknown>> };
+    const byId = new Map(results.map(r => [r.id, r]));
+    let updated = 0;
+    const deltas: number[] = [];
+    for (const v of doc.voices) {
+        const r = byId.get(String(v['id']));
+        if (!r) continue;
+        const oldRms = typeof v['rmsDbfs'] === 'number' ? v['rmsDbfs'] : NaN;
+        const newRms = round1(r.rmsMeanDb);
+        const newPeak = round1(r.peakMaxDb);
+        if (Number.isFinite(oldRms)) deltas.push(newRms - oldRms);
+        process.stdout.write(`  bake ${r.id.padEnd(38)} rmsDbfs ${f(oldRms).trim()} -> ${newRms}   peakDbfs -> ${newPeak}\n`);
+        v['rmsDbfs'] = newRms;
+        v['peakDbfs'] = newPeak;
+        updated++;
+    }
+    writeFileSync(path, JSON.stringify(doc, null, 2) + '\n', 'utf8');
+    const skipped = doc.voices.length - updated;
+    process.stdout.write(`\nBaked ${updated} voice(s) into ${path}; ${skipped} left unchanged (not measured / not installed).\n`);
+    if (deltas.length > 0) {
+        process.stdout.write(`rmsDbfs delta (new - old): mean ${f(mean(deltas), 5).trim()} dB over ${deltas.length} voice(s) — the metric calibration shift.\n`);
+    }
+    return updated;
 }
 
 // Mirror OnnxCatalog.IsInstalled: Kokoro needs model.onnx + voices.bin; Piper
@@ -200,6 +247,11 @@ async function main(): Promise<void> {
         const out = resolve(jsonOut);
         writeFileSync(out, JSON.stringify({ root, lines, results }, null, 2) + '\n', 'utf8');
         process.stdout.write(`\nWrote ${out}\n`);
+    }
+
+    if (process.argv.includes('--bake') && results.length > 0) {
+        process.stdout.write('\n=== Baking measured voices into the catalog ===\n');
+        bakeCatalog(results);
     }
 }
 

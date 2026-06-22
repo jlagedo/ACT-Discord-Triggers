@@ -71,6 +71,35 @@ test('negative saturation clips to -32768', () => {
     assert.ok(allSamplesEqual(chunk, -32768));
 });
 
+test('limiter enabled: summed over-ceiling voices are held at the ceiling (no hard clamp)', () => {
+    const m = new PcmMixer();
+    const ceilingLinear = 0.5; // 0.5 * 32768 = 16384 at the output
+    m.configureLimiter(true, ceilingLinear);
+    // Two ~0.9 voices sum to ~1.8 — well past full scale. Several chunks long so
+    // the bus has a steady region past the look-ahead delay + attack ramp.
+    m.addVoice(constStereo(29491, 960 * 5)); // 29491/32768 ≈ 0.9
+    m.addVoice(constStereo(29491, 960 * 5));
+
+    // Drive past the delay/attack, then inspect a settled chunk.
+    m._mixOneChunk();
+    m._mixOneChunk();
+    const settled = m._mixOneChunk(); // 3rd chunk: frames 1920..2879, fully settled
+    for (let i = 0; i < settled.length; i += 2) {
+        const s = settled.readInt16LE(i);
+        assert.notEqual(s, 32767, 'limiter engaged, must not reach the hard clamp');
+        assert.ok(Math.abs(s - 16384) <= 4, `held level ${s} off the -6 dBFS ceiling`);
+    }
+});
+
+test('limiter disabled by default: bus is a pure sum that still hard-clamps', () => {
+    // The default (unconfigured) mixer is delay-free and clamps as before, so the
+    // saturation contract above holds without a limiter in the way.
+    const m = new PcmMixer();
+    m.addVoice(constStereo(30000, 960));
+    m.addVoice(constStereo(10000, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 32767));
+});
+
 test('voice spanning 1.5 chunks: second chunk is half mixed, half silent', () => {
     const m = new PcmMixer();
     // 1440 frames = 1.5 chunks.

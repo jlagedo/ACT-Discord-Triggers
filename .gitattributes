@@ -1,0 +1,5 @@
+# XAML Styler (the format gate) emits CRLF on Windows and exposes no line-ending
+# option, so it flags any LF-checked-out .xaml file. Pin XAML to CRLF in the
+# working tree so every checkout — local and CI — matches what xstyler produces
+# and the format gate stays stable. Blobs are still normalized to LF in the repo.
+*.xaml text eol=crlf

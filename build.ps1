@@ -78,7 +78,8 @@ try {
         'libsodium-wrappers',
         'libsodium',
         'sherpa-onnx-node',
-        'sherpa-onnx-win-x64'
+        'sherpa-onnx-win-x64',
+        'r8brain-wasm'
     )
     $stageDir = 'dist\node_modules'
     foreach ($pkg in $externals) {

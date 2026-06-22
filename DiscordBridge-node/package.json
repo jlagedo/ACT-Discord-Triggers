@@ -12,7 +12,8 @@
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
     "tts:probe": "node --import tsx tools/tts-probe.ts",
     "tts:rms": "node --import tsx tools/tts-rms.ts",
-    "tts:stream-probe": "node --import tsx tools/tts-stream-probe.ts"
+    "tts:stream-probe": "node --import tsx tools/tts-stream-probe.ts",
+    "limiter:e2e": "node --import tsx tools/limiter-e2e.ts"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
@@ -20,6 +21,7 @@
     "discord.js": "^14.26.4",
     "libsodium-wrappers": "^0.8.4",
     "opusscript": "^0.1.1",
+    "r8brain-wasm": "github:jlagedo/r8brain-wasm#cafc8fe",
     "sherpa-onnx-node": "^1.13.3"
   },
   "devDependencies": {

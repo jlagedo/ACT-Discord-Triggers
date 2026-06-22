@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
     Op, PROTOCOL_VERSION, MAX_FRAME_BYTES, BINARY_SPEAK_PCM_HEADER_BYTES,
+    DEFAULT_CONFIG_VIEW,
 } from '../src/protocol.js';
 
 test('PROTOCOL_VERSION is a positive integer', () => {
@@ -40,6 +41,12 @@ test('there is exactly one response op and it is the single Result envelope', ()
     for (const v of Object.values(Op)) {
         if (v.endsWith('Result')) assert.equal(v, 'Result', `unexpected *Result op: ${v}`);
     }
+});
+
+test('DEFAULT_CONFIG_VIEW carries the master limiter defaults (match PluginSettings)', () => {
+    // These must mirror the C# PluginSettings defaults: limiter on, -1 dBTP tier.
+    assert.equal(DEFAULT_CONFIG_VIEW.limiterEnabled, true);
+    assert.equal(DEFAULT_CONFIG_VIEW.limiterCeilingIndex, 1);
 });
 
 test('config is a single op, not per-knob setters', () => {

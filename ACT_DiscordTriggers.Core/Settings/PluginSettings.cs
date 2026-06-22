@@ -19,15 +19,17 @@ namespace ACT_DiscordTriggers.Core.Settings {
     /// older files to this version. v1 is the first POCO format (the legacy
     /// control-keyed ACT format is treated as the pre-schema "v0").
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     // Valid ranges for the tunable integer settings — the single source of truth the
     // ViewModel clamps loaded/entered values to (and that the WinForms-era sliders used).
     public const int TtsVolumeMin = 0, TtsVolumeMax = 20;
     public const int TtsSpeedMin = 0, TtsSpeedMax = 20;
     public const int FxChanceMin = 0, FxChanceMax = 100;
-    public const int NormalizeTargetMin = 12, NormalizeTargetMax = 30;
+    public const int NormalizeTargetMin = 9, NormalizeTargetMax = 27; // |LUFS| magnitude
+    public const int NormalizeTargetDefault = 17; // recommended |LUFS| (-17 LUFS)
     public const int AudioQualityIndexMin = 0, AudioQualityIndexMax = 2; // 0=Low, 1=Medium, 2=High
+    public const int LimiterCeilingIndexMin = 0, LimiterCeilingIndexMax = 3; // -0.5/-1/-2/-3 dBTP, bridge-owned table
 
     // [JsonPropertyName] sets the wire names the node bridge reads (this whole POCO
     // is sent verbatim as the SetConfig payload). XML attributes drive on-disk
@@ -58,7 +60,13 @@ namespace ACT_DiscordTriggers.Core.Settings {
     [JsonPropertyName("randomFx")] public bool RandomFx { get; set; } = false;
     [JsonPropertyName("fxChance")] public int FxChance { get; set; } = 25;            // 0..100 (%)
     [JsonPropertyName("normalize")] public bool Normalize { get; set; } = true;
-    [JsonPropertyName("normalizeTarget")] public int NormalizeTarget { get; set; } = 20;     // 12..30, positive dB magnitude
+    [JsonPropertyName("normalizeTarget")] public int NormalizeTarget { get; set; } = NormalizeTargetDefault;     // 9..27, positive |LUFS| magnitude (bridge negates to -17 LUFS)
     [JsonPropertyName("audioQualityIndex")] public int AudioQualityIndex { get; set; } = 1;  // 0=Low, 1=Medium, 2=High
+
+    // Master bus look-ahead limiter (bridge-applied on the summed mix, independent
+    // of Normalize). LimiterCeilingIndex picks a true-peak ceiling from the
+    // bridge's dBTP table; index 1 == -1 dBTP.
+    [JsonPropertyName("limiterEnabled")] public bool LimiterEnabled { get; set; } = true;
+    [JsonPropertyName("limiterCeilingIndex")] public int LimiterCeilingIndex { get; set; } = 1; // 0..3, default -1 dBTP
   }
 }

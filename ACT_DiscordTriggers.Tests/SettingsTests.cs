@@ -98,6 +98,7 @@ namespace ACT_DiscordTriggers.Tests {
           TtsThreads = 4, ModelsDir = @"D:\voices",
           RandomFx = true, FxChance = 42, Normalize = false,
           NormalizeTarget = 15, AudioQualityIndex = 2,
+          LimiterEnabled = false, LimiterCeilingIndex = 3,
         };
         store.Save(original);
 
@@ -118,6 +119,8 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal(original.Normalize, loaded.Normalize);
         Assert.Equal(original.NormalizeTarget, loaded.NormalizeTarget);
         Assert.Equal(original.AudioQualityIndex, loaded.AudioQualityIndex);
+        Assert.Equal(original.LimiterEnabled, loaded.LimiterEnabled);
+        Assert.Equal(original.LimiterCeilingIndex, loaded.LimiterCeilingIndex);
         Assert.Equal(PluginSettings.CurrentSchemaVersion, loaded.SchemaVersion);
       }
     }
@@ -156,7 +159,7 @@ namespace ACT_DiscordTriggers.Tests {
     }
 
     // A new-format v1 file (pre-ONNX fields) with real user data, to prove the
-    // v1 -> v2 upgrade preserves existing settings instead of resetting to defaults.
+    // v1 -> current upgrade preserves existing settings instead of resetting to defaults.
     private const string V1Xml =
 @"<?xml version=""1.0"" encoding=""utf-8""?>
 <DiscordTriggersSettings SchemaVersion=""1"">
@@ -174,7 +177,7 @@ namespace ACT_DiscordTriggers.Tests {
 </DiscordTriggersSettings>";
 
     [Fact]
-    public void Load_V1File_UpgradesToV2_PreservesFields_AndDefaultsOnnx() {
+    public void Load_V1File_UpgradesToCurrent_PreservesFields_AndDefaultsOnnx() {
       using (var t = new TempDir()) {
         var path = t.File("c.xml");
         File.WriteAllText(path, V1Xml, new UTF8Encoding(false));
@@ -185,15 +188,21 @@ namespace ACT_DiscordTriggers.Tests {
         Assert.Equal("KEEP-ME", loaded.BotToken);
         Assert.Equal("Microsoft Zira Desktop", loaded.TtsVoice);
         Assert.Equal(7, loaded.TtsVolume);
-        // New ONNX fields land on their defaults.
+        // New ONNX fields (v1 -> v2) land on their defaults.
         Assert.Equal("sapi", loaded.TtsEngine);
         Assert.Equal("piper", loaded.OnnxFamily);
         Assert.Equal("vits-piper-pt_BR-faber-medium", loaded.OnnxVoice);
         Assert.Equal(4, loaded.TtsThreads);
         Assert.Equal("", loaded.ModelsDir);
-        Assert.Equal(2, loaded.SchemaVersion);
-        // The store rewrites the upgraded doc back to disk at v2.
-        Assert.Equal("2", XDocument.Load(path).Root.Attribute("SchemaVersion").Value);
+        // The v2 -> v3 metric change shifts the auto-level target down by the
+        // calibration offset (broadband RMS -> K-weighted LUFS), so the old 20
+        // becomes 17 — keeping the same perceived speech level.
+        Assert.Equal(17, loaded.NormalizeTarget);
+        Assert.Equal(PluginSettings.CurrentSchemaVersion, loaded.SchemaVersion);
+        // The store rewrites the upgraded doc back to disk at the current version.
+        Assert.Equal(
+          PluginSettings.CurrentSchemaVersion.ToString(),
+          XDocument.Load(path).Root.Attribute("SchemaVersion").Value);
       }
     }
 
@@ -287,7 +296,7 @@ namespace ACT_DiscordTriggers.Tests {
       // existing v1 files would throw on load and reset to defaults (wiping the token).
       var doc = XDocument.Parse("<DiscordTriggersSettings SchemaVersion=\"1\" />");
 
-      bool changed = new SettingsMigrator().MigrateInPlace(doc); // target = current (2)
+      bool changed = new SettingsMigrator().MigrateInPlace(doc, targetVersion: 2); // just the v1 -> v2 step
 
       Assert.True(changed);
       Assert.Equal("2", doc.Root.Attribute("SchemaVersion").Value);
@@ -296,6 +305,33 @@ namespace ACT_DiscordTriggers.Tests {
       Assert.Equal("vits-piper-pt_BR-faber-medium", doc.Root.Element("OnnxVoice").Value);
       Assert.Equal("4", doc.Root.Element("TtsThreads").Value);
       Assert.NotNull(doc.Root.Element("ModelsDir"));
+    }
+
+    [Fact]
+    public void Migrator_V2ToV3_ShiftsNormalizeTargetForTheLufsMetric() {
+      // v2 -> v3 lowers the stored auto-level target by the calibration offset so an
+      // upgrading user's speech stays at the same level once the loudness metric
+      // becomes K-weighted LUFS (the voice catalog is re-baked to match).
+      var doc = XDocument.Parse(
+        "<DiscordTriggersSettings SchemaVersion=\"2\"><NormalizeTarget>20</NormalizeTarget></DiscordTriggersSettings>");
+
+      bool changed = new SettingsMigrator().MigrateInPlace(doc, targetVersion: 3);
+
+      Assert.True(changed);
+      Assert.Equal("3", doc.Root.Attribute("SchemaVersion").Value);
+      Assert.Equal("17", doc.Root.Element("NormalizeTarget").Value);
+    }
+
+    [Fact]
+    public void Migrator_V2ToV3_ClampsShiftedTargetIntoTheNewRange() {
+      // The old minimum (12) shifted down by 3 would be 9 — the new minimum — and a
+      // hand-edited value below that must not escape the range.
+      var doc = XDocument.Parse(
+        "<DiscordTriggersSettings SchemaVersion=\"2\"><NormalizeTarget>10</NormalizeTarget></DiscordTriggersSettings>");
+
+      new SettingsMigrator().MigrateInPlace(doc, targetVersion: 3);
+
+      Assert.Equal("9", doc.Root.Element("NormalizeTarget").Value); // 10 - 3 = 7 -> clamped to 9
     }
 
     // ---- Migration logging -----------------------------------------------

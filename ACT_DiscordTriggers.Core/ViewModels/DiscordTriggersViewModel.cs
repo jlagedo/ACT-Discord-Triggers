@@ -96,16 +96,35 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [ObservableProperty] private bool normalize = true;
     partial void OnNormalizeChanged(bool value) => ScheduleConfigPush();
 
-    private int normalizeTarget = 20;
+    private int normalizeTarget = PluginSettings.NormalizeTargetDefault;
     public int NormalizeTarget {
       get => normalizeTarget;
-      set => SetClamped(ref normalizeTarget, value, PluginSettings.NormalizeTargetMin, PluginSettings.NormalizeTargetMax, push: true, dependentLabel: nameof(NormalizeTargetLabel));
+      set {
+        if (SetClamped(ref normalizeTarget, value, PluginSettings.NormalizeTargetMin, PluginSettings.NormalizeTargetMax, push: true, dependentLabel: nameof(NormalizeTargetLabel)))
+          OnPropertyChanged(nameof(IsNormalizeTargetCustom));
+      }
     }
+
+    // True when the target is off its recommended value — drives the "Recommended" reset chip's enabled state.
+    public bool IsNormalizeTargetCustom => NormalizeTarget != PluginSettings.NormalizeTargetDefault;
+
+    [RelayCommand]
+    private void ResetNormalizeTarget() => NormalizeTarget = PluginSettings.NormalizeTargetDefault;
 
     private int audioQualityIndex = 1;
     public int AudioQualityIndex {
       get => audioQualityIndex;
       set => SetClamped(ref audioQualityIndex, value, PluginSettings.AudioQualityIndexMin, PluginSettings.AudioQualityIndexMax, push: true, dependentLabel: nameof(ShowHighQualityWarning));
+    }
+
+    // Master bus limiter (independent of Normalize). Enable toggle + ceiling tier.
+    [ObservableProperty] private bool limiterEnabled = true;
+    partial void OnLimiterEnabledChanged(bool value) => ScheduleConfigPush();
+
+    private int limiterCeilingIndex = 1; // -1 dBTP
+    public int LimiterCeilingIndex {
+      get => limiterCeilingIndex;
+      set => SetClamped(ref limiterCeilingIndex, value, PluginSettings.LimiterCeilingIndexMin, PluginSettings.LimiterCeilingIndexMax, push: true);
     }
 
     // --- ONNX TTS (persisted in PluginSettings; bridge-relevant fields push) -----
@@ -230,7 +249,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
 
     // --- Computed (presentation) ------------------------------------------------
     public string FxChanceLabel => "FX Chance: " + FxChance + "%";
-    public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " dBFS";
+    public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " LUFS";
     // The High tier may exceed an unboosted channel's 96 kbps cap; the view shows a warning.
     public bool ShowHighQualityWarning => AudioQualityIndex == PluginSettings.AudioQualityIndexMax;
 
@@ -633,6 +652,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Normalize = s.Normalize;
         NormalizeTarget = s.NormalizeTarget;
         AudioQualityIndex = s.AudioQualityIndex;
+        LimiterEnabled = s.LimiterEnabled;
+        LimiterCeilingIndex = s.LimiterCeilingIndex;
       } finally {
         suppressPush = false;
       }
@@ -655,6 +676,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       Normalize = Normalize,
       NormalizeTarget = NormalizeTarget,
       AudioQualityIndex = AudioQualityIndex,
+      LimiterEnabled = LimiterEnabled,
+      LimiterCeilingIndex = LimiterCeilingIndex,
     };
 
     // --- Debounced config pushes ------------------------------------------------
