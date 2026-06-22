@@ -23,12 +23,17 @@ Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
 
 ## Screenshots
 
-| General — connect & join | Text-to-Speech — engine & voice | Sound — effects & leveling |
-| :---: | :---: | :---: |
-| ![General settings tab](docs/screenshot-general.png) | ![Text-to-Speech settings tab](docs/screenshot-tts.png) | ![Sound settings tab](docs/screenshot-sound.png) |
+| Main — output mode | General — connect & join |
+| :---: | :---: |
+| ![Main settings tab](docs/screenshot-main.png) | ![General settings tab](docs/screenshot-general.png) |
+| **Text-to-Speech — engine & voice** | **Sound — effects & leveling** |
+| ![Text-to-Speech settings tab](docs/screenshot-tts.png) | ![Sound settings tab](docs/screenshot-sound.png) |
 
 ## Features
 
+- 🖥️ **Two output modes** — stream triggers to a **Discord voice channel** for
+  the whole party, or play them **locally on this PC's speakers** with no bot or
+  Discord login required. Switch on the **Main** tab.
 - 🔊 **TTS in voice chat** — fire trigger text-to-speech straight into a Discord
   voice channel.
 - 🧠 **Neural voices** — an optional **ONNX** engine plays natural-sounding
@@ -41,8 +46,12 @@ Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
   queueing, so nothing gets dropped or delayed.
 - 🎲 **Random sound effects** — optionally add a random audio effect (echo,
   reverb, pitch-shift, and more) to triggers as they play.
-- 📈 **Auto-leveling** — automatically evens out the volume so every callout
-  and sound plays at a consistent level.
+- 📈 **Auto-leveling** — perceptual **LUFS** loudness matching evens out the
+  volume so every callout and sound plays at a consistent level.
+- 🎛️ **Master limiter** — a look-ahead brickwall limiter rides overlapping
+  triggers down to a true-peak-safe ceiling, so simultaneous sounds never clip.
+- 📡 **Selectable audio quality** — choose the Discord voice bitrate (48 / 96 /
+  128 kbps) to trade bandwidth for clarity.
 - 🔐 **Discord DAVE support** — speaks Discord's end-to-end voice encryption,
   which is now required to join voice channels.
 
