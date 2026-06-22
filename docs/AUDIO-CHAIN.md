@@ -332,7 +332,8 @@ sequenceDiagram
     S-->>H: synth resolves
     H->>R: flush() tail
     H->>H: declickOut on final buf
-    H->>M: appendToVoice(final) ; closeVoice
+    H->>M: appendToVoice(final)
+    H->>M: closeVoice
 ```
 
 Key mechanics:
