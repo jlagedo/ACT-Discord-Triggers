@@ -96,11 +96,20 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [ObservableProperty] private bool normalize = true;
     partial void OnNormalizeChanged(bool value) => ScheduleConfigPush();
 
-    private int normalizeTarget = 20;
+    private int normalizeTarget = PluginSettings.NormalizeTargetDefault;
     public int NormalizeTarget {
       get => normalizeTarget;
-      set => SetClamped(ref normalizeTarget, value, PluginSettings.NormalizeTargetMin, PluginSettings.NormalizeTargetMax, push: true, dependentLabel: nameof(NormalizeTargetLabel));
+      set {
+        if (SetClamped(ref normalizeTarget, value, PluginSettings.NormalizeTargetMin, PluginSettings.NormalizeTargetMax, push: true, dependentLabel: nameof(NormalizeTargetLabel)))
+          OnPropertyChanged(nameof(IsNormalizeTargetCustom));
+      }
     }
+
+    // True when the target is off its recommended value — drives the "Recommended" reset chip's enabled state.
+    public bool IsNormalizeTargetCustom => NormalizeTarget != PluginSettings.NormalizeTargetDefault;
+
+    [RelayCommand]
+    private void ResetNormalizeTarget() => NormalizeTarget = PluginSettings.NormalizeTargetDefault;
 
     private int audioQualityIndex = 1;
     public int AudioQualityIndex {
@@ -240,7 +249,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
 
     // --- Computed (presentation) ------------------------------------------------
     public string FxChanceLabel => "FX Chance: " + FxChance + "%";
-    public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " dBFS";
+    public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " LUFS";
     // The High tier may exceed an unboosted channel's 96 kbps cap; the view shows a warning.
     public bool ShowHighQualityWarning => AudioQualityIndex == PluginSettings.AudioQualityIndexMax;
 

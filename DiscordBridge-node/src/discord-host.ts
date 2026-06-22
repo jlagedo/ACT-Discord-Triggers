@@ -156,7 +156,7 @@ export class DiscordHost implements Host {
 
     // The whole plugin config, pushed via SetConfig. Defaults apply until the
     // first config frame lands. The bridge owns all interpretation: it rolls the
-    // fx dice (randomFx/fxChance), negates normalizeTarget to dBFS, and maps
+    // fx dice (randomFx/fxChance), negates normalizeTarget to a LUFS target, and maps
     // audioQualityIndex to an Opus bitrate.
     private config: BridgeConfigView = DEFAULT_CONFIG_VIEW;
 
@@ -477,7 +477,7 @@ export class DiscordHost implements Host {
         // Auto-level AFTER the effect so the effect's own level change is what we
         // correct — a distortion hit that came out hot, or an echo tail that
         // dropped the average, both land near the target loudness. The config
-        // carries a positive magnitude; negate it to a dBFS RMS target.
+        // carries a positive magnitude; negate it to a LUFS loudness target.
         //
         // For neural-TTS clips the caller passes the voice's baked level, letting
         // normalize skip its whole-buffer scan — but only when no effect ran, since
@@ -489,7 +489,7 @@ export class DiscordHost implements Host {
                 const norm = normalize(buf, targetDb, known);
                 if (norm.applied) {
                     buf = norm.samples;
-                    log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${targetDb}dBFS`);
+                    log.info(`normalize reqId=${reqId} gain=${norm.gain.toFixed(3)} target=${targetDb}LUFS`);
                 }
             } catch (e) {
                 log.error('normalize failed; playing un-leveled', e);

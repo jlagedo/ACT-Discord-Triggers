@@ -49,7 +49,7 @@ ingest                          per-clip (_enqueue)           mix bus           
 ──────────────────────────      ─────────────────────────     ──────────────────────     ──────
 SpeakPcm  s16→f32 ───────┐
 SpeakFile decode→resample├──▶ FX → normalize → declick ──▶  PcmMixer sum → limiter  ──▶ Opus
-SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64) → s16            (bitrate)
+SpeakText ONNX→resample──┘             (LUFS)    (lin fade)   (float64) → s16            (bitrate)
 ```
 
 **Ingest → 48k float stereo**
@@ -67,9 +67,10 @@ SpeakText ONNX→resample──┘      (RMS)    (RMS)    (lin fade)   (float64)
 **Per-clip processing** (`_enqueue`, off the realtime loop, once per fire):
 - **Random FX** (`effects.ts`) — opt-in, dice-rolled per clip; applied to
   `SpeakPcm`/`SpeakFile` only (TTS is skipped). Output stays float, may run hot.
-- **Normalize** (`normalize.ts`) — per-clip RMS auto-level toward a dBFS target,
-  bounded by a peak ceiling (no clip) and a max-boost cap (don't amplify silence).
-  Runs *after* FX so the effect's own level change is what gets corrected.
+- **Normalize** (`normalize.ts`) — per-clip K-weighted (BS.1770 LUFS) auto-level
+  toward a LUFS target, bounded by a broadband peak ceiling (no clip) and a
+  max-boost cap (don't amplify silence). Runs *after* FX so the effect's own level
+  change is what gets corrected.
 - **Declick** (`declick.ts`) — short linear fade in (2 ms) / out (5 ms) so edge
   samples ramp from/to zero instead of stepping against the mixer's silence.
 
@@ -201,16 +202,28 @@ overlapping / DC / Nyquist / transient signals, writes WAVs, asserts zero clippi
 
 ### P2 — pro-level correctness
 
-#### 3. K-weighted (LUFS) loudness 🔵 — Effort: S–M
+#### 3. K-weighted (LUFS) loudness 🟢 — Effort: S–M
 **Measure loudness with ITU-R BS.1770 K-weighting instead of broadband RMS.**
 
-`measureLevel` / `computeGain` (`normalize.ts`) use plain RMS. RMS over-weights
-low frequencies, so a bass-heavy SFX and a speech callout normalized to the same
-RMS won't *sound* equally loud — exactly the consistency problem normalize exists
-to solve. K-weighting (a ~1.5 kHz high-shelf + ~100 Hz high-pass before the
-mean-square, ~10 lines of biquad) makes auto-leveling perceptually uniform across
-the varied trigger library. Baked per-voice TTS levels need re-measuring under the
-new metric.
+Done. `k-weighting.ts` implements the BS.1770-4 cascade (a high-shelf "head"
+filter + a ~38 Hz RLB high-pass biquad per channel at 48 kHz, then a
+channel-summed mean square with the −0.691 LUFS offset, ungated — the right fit
+for short per-clip leveling). `measureLevel` (`normalize.ts`) now returns that
+K-weighted loudness as a linear full-scale-equivalent (its dB value is LUFS) in
+the `rms` field, with `peak` kept as the unchanged broadband sample peak; so
+`computeGain`, the silence gate, and the streaming fixed-gain path are untouched —
+`dbToLinear(target)/rms` lands the clip on a LUFS target directly. Bass-heavy SFX
+and speech callouts that read equal now *sound* equal.
+
+The target is user-facing LUFS: the auto-level slider is labeled LUFS, the default
+re-tuned to −17 LUFS (≈ the old −20 dBFS for speech), and a `PluginSettings`
+v2→v3 migration shifts existing saved targets down by the calibration offset so an
+upgrade keeps the same speech level while non-speech clips get correctly
+re-weighted. Per-voice neural-TTS levels are re-baked under the new metric via
+`npm run tts:rms -- --bake` (only `rmsDbfs` shifts; `peakDbfs` is
+metric-independent). Coverage: `tests/k-weighting.test.ts` (tonal invariants — LF
+reads quieter, HF louder, 1 kHz at the calibration point) + the retuned
+`tests/normalize.test.ts`; C# `Migrator_V2ToV3_*` tests.
 
 #### 4. True-peak ceiling 🟢 — Effort: S (with P1.2)
 **Headroom-based inter-sample-peak margin on the bus limiter.**
@@ -270,11 +283,12 @@ lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
 2. **Master limiter** (P1.2) 🟢 + **true-peak ceiling** (P2.4) 🟢 — self-contained,
    kills overlap clipping; done in `limiter.ts`, true-peak folded in via the −1 dBTP
    default ceiling.
-3. **K-weighted loudness** (P2.3) + re-bake voice levels — next up.
-4. **Cosine declick + DC-block** (P3.6/7) — cheap polish, bundle together.
+3. **K-weighted loudness** (P2.3) 🟢 — done in `k-weighting.ts` + `normalize.ts`;
+   target relabeled LUFS, voice catalog re-baked via `tts:rms -- --bake`.
+4. **Cosine declick + DC-block** (P3.6/7) — cheap polish, bundle together; next up.
 5. **FX anti-aliasing / Opus CTLs** (P2.5 / P3.9) as time allows.
 
-P1.1 + P1.2 together moved the realtime path from clean-amateur to pro-grade.
+P1.1 + P1.2 + P2.3 together moved the realtime path from clean-amateur to pro-grade.
 
 ---
 
@@ -284,7 +298,7 @@ P1.1 + P1.2 together moved the realtime path from clean-amateur to pro-grade.
 |------|------|-----------|
 | Heavy per-fire DSP blocks the single thread → mixer underrun | P1.1 | r8brain runs 500–2000× realtime; resample at enqueue not `_read`; `worker_thread` relief valve |
 | Limiter adds latency to the realtime path | P1.2 🟢 | Resolved: ~2 ms look-ahead (`LOOKAHEAD_FRAMES = 96`) buffered across 20 ms chunks; negligible next to voice RTT + the 20 ms Opus framing |
-| Re-baking voice levels under LUFS drifts existing loudness | P2.3 | Re-measure all catalog voices in one pass with the new metric |
+| Re-baking voice levels under LUFS drifts existing loudness | P2.3 🟢 | Resolved: `tts:rms -- --bake` re-measures installed voices in one pass; the v2→v3 settings migration shifts the target by the same calibration offset so speech level is preserved; only installed voices re-bake (run reports updated vs. skipped) |
 | r8brain `.wasm` not inlined → unstaged/unloaded at runtime | P1.1 | Pin SHA in `package.json`; esbuild `external` + `build.ps1 $externals` must agree; `initResampler()` before `BRIDGE_READY` makes the self-test the gate |
 | Protocol drift (C# vs TS) if any item adds an op | any | Update both sides + version bump + tests, per CLAUDE.md |
 

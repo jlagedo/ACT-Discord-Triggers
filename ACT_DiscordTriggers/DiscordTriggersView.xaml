@@ -604,19 +604,8 @@
                                     Placement="Bottom"
                                     PlacementTarget="{Binding ElementName=TestHelp}"
                                     StaysOpen="False">
-                                    <Border
-                                        MaxWidth="260"
-                                        Margin="0,6,8,8"
-                                        Padding="12,10"
-                                        Background="{StaticResource Card}"
-                                        BorderBrush="{StaticResource CardBorder}"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Effect="{StaticResource FlyoutShadow}">
-                                        <TextBlock
-                                            Foreground="{StaticResource TextSecondary}"
-                                            Text="Test plays through the bot. Connect and join a voice channel on the General page first."
-                                            TextWrapping="Wrap" />
+                                    <Border Style="{StaticResource HelpFlyout}">
+                                        <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Test plays through the bot. Connect and join a voice channel on the General page first." />
                                     </Border>
                                 </Popup>
                             </StackPanel>
@@ -700,14 +689,34 @@
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Wand}">
                             <HeaderedContentControl.Header>
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Random sound effects" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Random sound effects" />
+                                        <ToggleButton
+                                            x:Name="RandomFxHelp"
+                                            Margin="4,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource HelpGlyphButton}" />
+                                        <Popup
+                                            AllowsTransparency="True"
+                                            IsOpen="{Binding IsChecked, ElementName=RandomFxHelp}"
+                                            Placement="Bottom"
+                                            PlacementTarget="{Binding ElementName=RandomFxHelp}"
+                                            StaysOpen="False">
+                                            <Border Style="{StaticResource HelpFlyout}">
+                                                <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Now and then, a trigger's sound is swapped for a random one from your effects. The chance below sets how often that happens — set it to 0 to keep the original sound every time." />
+                                            </Border>
+                                        </Popup>
+                                    </StackPanel>
                                     <TextBlock Style="{StaticResource CardDesc}" Text="Occasionally play a random effect." />
                                 </StackPanel>
                             </HeaderedContentControl.Header>
                             <CheckBox IsChecked="{Binding RandomFx}" Style="{StaticResource ToggleSwitch}" />
                         </HeaderedContentControl>
 
-                        <HeaderedContentControl Header="{Binding FxChanceLabel}" Style="{StaticResource SettingsCard}">
+                        <HeaderedContentControl
+                            Header="{Binding FxChanceLabel}"
+                            IsEnabled="{Binding RandomFx}"
+                            Style="{StaticResource SettingsCard}">
                             <Slider
                                 Width="200"
                                 Maximum="100"
@@ -718,25 +727,78 @@
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Level}">
                             <HeaderedContentControl.Header>
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Auto-level volume" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Auto-level volume" />
+                                        <ToggleButton
+                                            x:Name="NormalizeHelp"
+                                            Margin="4,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource HelpGlyphButton}" />
+                                        <Popup
+                                            AllowsTransparency="True"
+                                            IsOpen="{Binding IsChecked, ElementName=NormalizeHelp}"
+                                            Placement="Bottom"
+                                            PlacementTarget="{Binding ElementName=NormalizeHelp}"
+                                            StaysOpen="False">
+                                            <Border Style="{StaticResource HelpFlyout}">
+                                                <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Measures how loud each sound actually feels (LUFS, the broadcast loudness standard) and nudges its volume toward one target, so a quiet callout and a punchy effect come through at an even level. The target below is that loudness, on a negative scale — a larger number is quieter." />
+                                            </Border>
+                                        </Popup>
+                                    </StackPanel>
                                     <TextBlock Style="{StaticResource CardDesc}" Text="Even out loud and quiet sounds." />
                                 </StackPanel>
                             </HeaderedContentControl.Header>
                             <CheckBox IsChecked="{Binding Normalize}" Style="{StaticResource ToggleSwitch}" />
                         </HeaderedContentControl>
 
-                        <HeaderedContentControl Header="{Binding NormalizeTargetLabel}" Style="{StaticResource SettingsCard}">
+                        <HeaderedContentControl IsEnabled="{Binding Normalize}" Style="{StaticResource SettingsCard}">
+                            <HeaderedContentControl.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource CardTitle}"
+                                        Text="{Binding NormalizeTargetLabel}" />
+                                    <Button
+                                        Margin="10,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Command="{Binding ResetNormalizeTargetCommand}"
+                                        Content="Recommended"
+                                        IsEnabled="{Binding IsNormalizeTargetCustom}"
+                                        Style="{StaticResource RecommendedChip}"
+                                        ToolTip="Set to the recommended -17 LUFS" />
+                                </StackPanel>
+                            </HeaderedContentControl.Header>
+                            <!--  Ticks=17 marks the recommended -17 LUFS on the rail (PluginSettings.NormalizeTargetDefault).  -->
                             <Slider
                                 Width="200"
-                                Maximum="30"
-                                Minimum="12"
+                                Maximum="27"
+                                Minimum="9"
+                                Style="{StaticResource RecommendedSlider}"
+                                Ticks="17"
                                 Value="{Binding NormalizeTarget}" />
                         </HeaderedContentControl>
 
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.TopSpeed}">
                             <HeaderedContentControl.Header>
                                 <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Master limiter" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Master limiter" />
+                                        <ToggleButton
+                                            x:Name="LimiterHelp"
+                                            Margin="4,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource HelpGlyphButton}" />
+                                        <Popup
+                                            AllowsTransparency="True"
+                                            IsOpen="{Binding IsChecked, ElementName=LimiterHelp}"
+                                            Placement="Bottom"
+                                            PlacementTarget="{Binding ElementName=LimiterHelp}"
+                                            StaysOpen="False">
+                                            <Border Style="{StaticResource HelpFlyout}">
+                                                <TextBlock Style="{StaticResource HelpFlyoutText}" Text="When several sounds play at once their volumes stack up and can clip — a harsh, distorted crackle. The limiter smoothly rides those peaks down to a safe ceiling instead. The ceiling below is how close to maximum it allows; -1 dB suits most setups, and a lower ceiling leaves more safety margin." />
+                                            </Border>
+                                        </Popup>
+                                    </StackPanel>
                                     <TextBlock Style="{StaticResource CardDesc}" Text="Stop overlapping sounds from clipping." />
                                 </StackPanel>
                             </HeaderedContentControl.Header>
@@ -755,10 +817,30 @@
                             </ComboBox>
                         </HeaderedContentControl>
 
-                        <HeaderedContentControl
-                            Header="Audio quality"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Quality}">
+                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Quality}">
+                            <HeaderedContentControl.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource CardTitle}"
+                                        Text="Audio quality" />
+                                    <ToggleButton
+                                        x:Name="QualityHelp"
+                                        Margin="4,0,0,0"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource HelpGlyphButton}" />
+                                    <Popup
+                                        AllowsTransparency="True"
+                                        IsOpen="{Binding IsChecked, ElementName=QualityHelp}"
+                                        Placement="Bottom"
+                                        PlacementTarget="{Binding ElementName=QualityHelp}"
+                                        StaysOpen="False">
+                                        <Border Style="{StaticResource HelpFlyout}">
+                                            <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Sets how much detail the bot's audio keeps when it's sent to Discord (the Opus bitrate). Higher sounds clearer but uses more bandwidth, and 128 kbps only works on channels that support it — a boosted server." />
+                                        </Border>
+                                    </Popup>
+                                </StackPanel>
+                            </HeaderedContentControl.Header>
                             <ComboBox Width="220" SelectedIndex="{Binding AudioQualityIndex}">
                                 <ComboBoxItem>Low (48 kbps)</ComboBoxItem>
                                 <ComboBoxItem>Medium (96 kbps)</ComboBoxItem>
