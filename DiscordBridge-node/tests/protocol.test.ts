@@ -55,6 +55,12 @@ test('DEFAULT_CONFIG_VIEW defaults outputMode to bot (match PluginSettings)', ()
     assert.equal(DEFAULT_CONFIG_VIEW.outputMode, 'bot');
 });
 
+test('DEFAULT_CONFIG_VIEW defaults localOutputVolume to 100 (match PluginSettings)', () => {
+    // Additive field: older configs carry no localOutputVolume, so the bridge must
+    // default to 100 % (unity gain) — local playback unchanged from full scale.
+    assert.equal(DEFAULT_CONFIG_VIEW.localOutputVolume, 100);
+});
+
 test('config is a single op, not per-knob setters', () => {
     assert.equal(Op.SetConfig, 'SetConfig');
     const values = new Set<string>(Object.values(Op));

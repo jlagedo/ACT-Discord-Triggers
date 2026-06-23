@@ -134,6 +134,14 @@ namespace ACT_DiscordTriggers.Tests {
         }
 
         [Fact]
+        public void PluginSettings_defaults_localOutputVolume_to_100() {
+            // Additive field — older files have no localOutputVolume; a fresh POCO must
+            // default to 100 % (unity) so local playback is unattenuated by default.
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(new PluginSettings(), opts));
+            Assert.Equal(100, doc.RootElement.GetProperty("localOutputVolume").GetInt32());
+        }
+
+        [Fact]
         public void All_op_constants_are_distinct() {
             var ops = typeof(Op).GetFields()
                 .Where(f => f.IsLiteral && f.FieldType == typeof(string))

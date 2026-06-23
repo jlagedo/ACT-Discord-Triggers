@@ -257,8 +257,8 @@ test('SetConfig: forwards parsed config view to host.setConfig; result ok=true',
     assert.deepEqual(call.args[0], {
         botToken: 'tok-x', botStatus: 'Online', randomFx: true, fxChance: 50,
         normalize: false, normalizeTarget: 18, audioQualityIndex: 2,
-        // outputMode + limiter fields absent from the incoming config -> bridge defaults them.
-        outputMode: 'bot', limiterEnabled: true, limiterCeilingIndex: 1,
+        // outputMode + localOutputVolume + limiter fields absent from the incoming config -> bridge defaults them.
+        outputMode: 'bot', localOutputVolume: 100, limiterEnabled: true, limiterCeilingIndex: 1,
     });
 });
 

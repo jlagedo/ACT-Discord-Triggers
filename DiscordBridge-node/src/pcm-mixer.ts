@@ -87,6 +87,10 @@ export class PcmMixer extends Readable {
     // delay-free.
     private limiter: LookaheadLimiter | null = null;
 
+    // Linear output gain on the summed bus (1.0 == unity). Local-output sets this
+    // from the user's playback-volume slider; bot mixers leave it at unity.
+    private masterGain = 1.0;
+
     addVoice(samples: Float32Array, meta?: AddVoiceMeta): AddVoiceResult {
         // Defensive: an odd sample count would leave a dangling mono sample.
         // Callers always emit whole stereo frames, so this only fires on a
@@ -177,6 +181,11 @@ export class PcmMixer extends Readable {
         else this.limiter.setCeiling(ceilingLinear);
     }
 
+    // Linear output gain on the summed bus (1.0 == unity, a true no-op). Set from
+    // the local-output path so host playback can be attenuated; bot mixers stay at
+    // unity. Applied pre-limiter so the limiter still protects the post-volume peak.
+    setMasterGain(linear: number): void { this.masterGain = linear; }
+
     // Exposed for unit tests; not part of the AudioResource contract.
     get voiceCount(): number { return this.voices.length; }
     get queuedBytes(): number { return this.totalQueued; }
@@ -242,6 +251,12 @@ export class PcmMixer extends Readable {
             }
         }
         this.voices.length = write;
+
+        // Master output volume (local-mode playback gain). Pre-limiter so the
+        // limiter still rides the post-volume peak; unity is a true no-op.
+        if (this.masterGain !== 1.0) {
+            for (let i = 0; i < this.acc.length; i++) this.acc[i]! *= this.masterGain;
+        }
 
         // Master bus limiter (look-ahead brickwall) rides the summed float bus
         // down to a true-peak-safe ceiling before quantization, so overlapping

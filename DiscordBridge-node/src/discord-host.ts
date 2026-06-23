@@ -202,6 +202,9 @@ export class DiscordHost implements Host {
         if (config.audioQualityIndex !== prev.audioQualityIndex) this._applyBitrate();
         if (config.limiterEnabled !== prev.limiterEnabled
             || config.limiterCeilingIndex !== prev.limiterCeilingIndex) this._applyLimiter();
+        // Re-apply the local playback volume when the slider moves while local
+        // output is live. The bot mixer never reads it (left at unity).
+        if (this.localOutput && config.localOutputVolume !== prev.localOutputVolume) this._applyLocalVolume();
         // Start/stop the local sound device on an outputMode transition. 'local'
         // brings up its own mixer + device immediately (no Discord login needed);
         // switching away tears it down. prev defaults to 'bot', so a first config of
@@ -221,6 +224,7 @@ export class DiscordHost implements Host {
         if (this.localOutput) return;
         try {
             this.localOutput = this.makeLocalOutput(this._createMixer());
+            this._applyLocalVolume();
             this.localOutput.start();
             log.info('local output mode active');
         } catch (e) {
@@ -301,6 +305,18 @@ export class DiscordHost implements Host {
         this.mixer.configureLimiter(enabled, ceiling);
         log.info(`bus limiter enabled=${enabled} ceiling=${ceiling.toFixed(3)} ` +
             `(${LIMITER_CEILINGS_DB[this.config.limiterCeilingIndex] ?? DEFAULT_LIMITER_CEILING_DB}dBTP)`);
+    }
+
+    // Push the local playback volume (0..100 %) onto the live mixer as a linear bus
+    // gain. The percent is shaped by a square-law audio taper so the slider feels
+    // natural (100 -> unity, 0 -> silent). Local-output only; the bot mixer stays at
+    // unity. No-op when there's no mixer yet.
+    private _applyLocalVolume(): void {
+        if (!this.mixer) return;
+        const pct = Math.max(0, Math.min(100, this.config.localOutputVolume ?? 100));
+        const gain = (pct / 100) ** 2;
+        this.mixer.setMasterGain(gain);
+        log.info(`local output volume ${pct}% -> gain=${gain.toFixed(3)}`);
     }
 
     async connect(): Promise<OpResult> {

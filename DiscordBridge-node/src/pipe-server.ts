@@ -89,6 +89,7 @@ function parseConfig(raw: Record<string, unknown>): BridgeConfigView {
         botToken: asString(raw['botToken'], d.botToken),
         botStatus: asString(raw['botStatus'], d.botStatus),
         outputMode: asString(raw['outputMode'], d.outputMode),
+        localOutputVolume: asNumber(raw['localOutputVolume']) ?? d.localOutputVolume,
         randomFx: asBool(raw['randomFx'], d.randomFx),
         fxChance: asNumber(raw['fxChance']) ?? d.fxChance,
         normalize: asBool(raw['normalize'], d.normalize),

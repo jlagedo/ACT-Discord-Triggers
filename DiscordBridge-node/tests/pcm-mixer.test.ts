@@ -100,6 +100,53 @@ test('limiter disabled by default: bus is a pure sum that still hard-clamps', ()
     assert.ok(allSamplesEqual(m._mixOneChunk(), 32767));
 });
 
+test('master gain attenuates the summed bus (local playback volume)', () => {
+    const m = new PcmMixer();
+    m.setMasterGain(0.5);
+    m.addVoice(constStereo(1000, 960));
+    // 1000 * 0.5 = 500 at the output.
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 500));
+});
+
+test('master gain 1.0 is a true no-op (bit-identical to no gain)', () => {
+    const withGain = new PcmMixer();
+    withGain.setMasterGain(1.0);
+    withGain.addVoice(constStereo(1234, 960));
+    const a = withGain._mixOneChunk();
+
+    const noGain = new PcmMixer();
+    noGain.addVoice(constStereo(1234, 960));
+    const b = noGain._mixOneChunk();
+
+    assert.ok(a.equals(b));
+});
+
+test('master gain 0 silences the bus', () => {
+    const m = new PcmMixer();
+    m.setMasterGain(0);
+    m.addVoice(constStereo(32000, 960));
+    assert.ok(allSamplesEqual(m._mixOneChunk(), 0));
+});
+
+test('master gain applies pre-limiter: attenuated bus stays under the ceiling', () => {
+    // Gain rides the summed voices down before the limiter, so a level that would
+    // otherwise hit the ceiling lands below it without the limiter ever engaging.
+    const m = new PcmMixer();
+    m.configureLimiter(true, 0.5); // ceiling at 16384
+    m.setMasterGain(0.25);
+    m.addVoice(constStereo(29491, 960 * 5)); // ~0.9 fullscale
+    m.addVoice(constStereo(29491, 960 * 5));
+    m._mixOneChunk();
+    m._mixOneChunk();
+    const settled = m._mixOneChunk();
+    // 0.9+0.9 = 1.8, * 0.25 = 0.45 fullscale ≈ 14745, comfortably under 16384.
+    for (let i = 0; i < settled.length; i += 2) {
+        const s = settled.readInt16LE(i);
+        assert.ok(s < 16384, `pre-limiter gain held ${s} below the ceiling`);
+        assert.ok(Math.abs(s - 14745) <= 64, `settled near 0.45 fullscale, got ${s}`);
+    }
+});
+
 test('voice spanning 1.5 chunks: second chunk is half mixed, half silent', () => {
     const m = new PcmMixer();
     // 1440 frames = 1.5 chunks.

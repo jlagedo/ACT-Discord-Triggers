@@ -92,6 +92,10 @@ export interface BridgeConfigView {
     // Discord login needed). The bridge starts/stops the local device when this
     // field transitions in SetConfig. Additive — defaults to 'bot' when missing.
     outputMode: string;        // 'bot' | 'local'
+    // Local-mode playback volume, 0..100 (%). The bridge shapes it into a linear
+    // bus gain (square-law taper) applied only to the local-output mixer; ignored
+    // in bot mode. Additive — defaults to 100 (unity) when missing.
+    localOutputVolume: number; // 0..100 (%)
     randomFx: boolean;
     fxChance: number;          // 0..100 (%)
     normalize: boolean;
@@ -111,6 +115,7 @@ export const DEFAULT_CONFIG_VIEW: BridgeConfigView = {
     botToken: '',
     botStatus: '',
     outputMode: 'bot',
+    localOutputVolume: 100,
     randomFx: false,
     fxChance: 25,
     normalize: true,

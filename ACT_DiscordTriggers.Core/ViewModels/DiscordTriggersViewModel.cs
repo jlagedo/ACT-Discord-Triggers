@@ -154,6 +154,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       set => SetClamped(ref limiterCeilingIndex, value, PluginSettings.LimiterCeilingIndexMin, PluginSettings.LimiterCeilingIndexMax, push: true);
     }
 
+    // Local-mode playback volume (0..100 %). Only meaningful when OutputMode is
+    // "local"; the bridge applies it to the local-output mixer (bot mode ignores it).
+    private int localOutputVolume = PluginSettings.LocalOutputVolumeDefault;
+    public int LocalOutputVolume {
+      get => localOutputVolume;
+      set => SetClamped(ref localOutputVolume, value, PluginSettings.LocalOutputVolumeMin, PluginSettings.LocalOutputVolumeMax, push: true, dependentLabel: nameof(LocalOutputVolumeLabel));
+    }
+
     // --- ONNX TTS (persisted in PluginSettings; bridge-relevant fields push) -----
     // Engine and Quality are single-value choices exposed as paired bools so the
     // choice-cards / segmented RadioButtons can two-way bind without a converter:
@@ -264,6 +272,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // --- Computed (presentation) ------------------------------------------------
     public string FxChanceLabel => "FX Chance: " + FxChance + "%";
     public string NormalizeTargetLabel => "Auto-level Target: -" + NormalizeTarget + " LUFS";
+    public string LocalOutputVolumeLabel => "Local playback volume: " + LocalOutputVolume + "%";
     // The High tier may exceed an unboosted channel's 96 kbps cap; the view shows a warning.
     public bool ShowHighQualityWarning => AudioQualityIndex == PluginSettings.AudioQualityIndexMax;
 
@@ -716,6 +725,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       suppressPush = true;
       try {
         OutputMode = s.OutputMode ?? "bot";
+        LocalOutputVolume = s.LocalOutputVolume;
         BotToken = s.BotToken ?? "";
         BotStatus = s.BotStatus ?? "";
         AutoConnect = s.AutoConnect;
@@ -741,6 +751,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
 
     private PluginSettings ToSettings() => new PluginSettings {
       OutputMode = OutputMode,
+      LocalOutputVolume = LocalOutputVolume,
       BotToken = BotToken,
       BotStatus = BotStatus,
       AutoConnect = AutoConnect,

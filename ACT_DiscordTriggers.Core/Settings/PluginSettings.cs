@@ -30,6 +30,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
     public const int NormalizeTargetDefault = 17; // recommended |LUFS| (-17 LUFS)
     public const int AudioQualityIndexMin = 0, AudioQualityIndexMax = 2; // 0=Low, 1=Medium, 2=High
     public const int LimiterCeilingIndexMin = 0, LimiterCeilingIndexMax = 3; // -0.5/-1/-2/-3 dBTP, bridge-owned table
+    public const int LocalOutputVolumeMin = 0, LocalOutputVolumeMax = 100, LocalOutputVolumeDefault = 100; // local-mode playback %, 100 = unity
 
     // [JsonPropertyName] sets the wire names the node bridge reads (this whole POCO
     // is sent verbatim as the SetConfig payload). XML attributes drive on-disk
@@ -44,6 +45,11 @@ namespace ACT_DiscordTriggers.Core.Settings {
     // The bridge reads this from SetConfig and starts/stops the local device on a
     // transition. Additive field — defaults to "bot" for older saved settings.
     [JsonPropertyName("outputMode")] public string OutputMode { get; set; } = "bot";  // "bot" | "local"
+
+    // Local-mode playback volume (0..100 %). The bridge shapes it into a linear bus
+    // gain applied only to the local-output mixer; bot mode ignores it (Discord has
+    // its own per-listener volume). Additive — defaults to 100 (unity).
+    [JsonPropertyName("localOutputVolume")] public int LocalOutputVolume { get; set; } = LocalOutputVolumeDefault;  // 0..100
 
     // --- Connection ---
     [JsonPropertyName("botToken")] public string BotToken { get; set; } = "";
