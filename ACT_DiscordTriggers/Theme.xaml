@@ -1121,7 +1121,6 @@
         ============================================================
     -->
     <Style x:Key="EngineChoiceCard" TargetType="RadioButton">
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="VerticalContentAlignment" Value="Top" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
