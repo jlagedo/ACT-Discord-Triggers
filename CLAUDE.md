@@ -39,13 +39,13 @@ CI:
 
 ## Output modes (bot vs local)
 
-The plugin has two output targets, chosen on the **Main** tab (`PluginSettings.OutputMode` = `"bot"` | `"local"`, default `"bot"`; rides in `SetConfig` as `outputMode`):
+The plugin has two output targets, chosen on the **Output** tab (`PluginSettings.OutputMode` = `"bot"` | `"local"`, default `"bot"`; rides in `SetConfig` as `outputMode`):
 - **`bot`** — the bridge streams the mix to a Discord voice channel (spawn → Hello → SetConfig → `Connect` login → `JoinChannel`). Original behaviour.
 - **`local`** — the bridge plays the same mix on the host's default sound device with **no Discord login/channel**. The bridge comes up via `DiscordClient.StartLocalAsync` (spawn → Hello → SetConfig, **skipping** `Connect`); the C# VM brings it online ASAP on plugin init / mode-select. `discord-host` starts/stops local output on the `outputMode` transition in `setConfig`; `_guardPlayback` accepts playback when `localOutput` is live.
 
 Local playback uses **`audify`** (RtAudio/WASAPI), an N-API prebuilt addon loaded lazily in `local-output.ts` (`createRequire(__filename)`, like sherpa in `tts.ts`) so the bridge still starts if it's absent. `LocalOutput` opens a 48k/stereo/s16 output stream and feeds it one `PcmMixer._mixOneChunk()` per `frameOutputCallback` — the device clock drives the pull, the mirror of how prism's Opus encoder pulls the mixer in bot mode. The whole DSP pipeline (decode/synth → resample → fx → normalize → declick → mix → master limiter) is shared by both modes. `audify` + its `bindings` loader are esbuild externals staged into `dist/node_modules` by `build.ps1 $externals`.
 
-The VM raises `OutputActivated`/`OutputDeactivated` (was `JoinedChannel`/`LeftChannel`) when output goes live/idle in **either** mode; the view swaps ACT's `PlayTtsMethod`/`PlaySoundMethod` on those. In local mode the Discord-only **General** tab is hidden (`IsBotMode`).
+The VM raises `OutputActivated`/`OutputDeactivated` (was `JoinedChannel`/`LeftChannel`) when output goes live/idle in **either** mode; the view swaps ACT's `PlayTtsMethod`/`PlaySoundMethod` on those. The **Output** tab carries the output-mode choice plus the selected mode's destination setup: its Discord-only sections (connection, voice channel, audio quality) fold away via `IsBotMode` in local mode, and the local-playback section folds via `IsLocalMode` in bot mode.
 
 ## Architecture: two processes
 

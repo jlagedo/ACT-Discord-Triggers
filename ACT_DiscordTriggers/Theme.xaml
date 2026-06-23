@@ -222,7 +222,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Padding" Value="14,7" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
@@ -253,7 +252,6 @@
                             <Setter TargetName="bd" Property="Background" Value="{StaticResource DisabledBg}" />
                             <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource DisabledBg}" />
                             <Setter Property="Foreground" Value="{StaticResource DisabledText}" />
-                            <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -299,7 +297,6 @@
                             <Setter TargetName="bd" Property="Background" Value="{StaticResource DisabledBg}" />
                             <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource DisabledBg}" />
                             <Setter Property="Foreground" Value="{StaticResource DisabledText}" />
-                            <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -639,7 +636,6 @@
         ============================================================
     -->
     <Style x:Key="ToggleSwitch" TargetType="CheckBox">
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
@@ -687,7 +683,6 @@
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="track" Property="BorderBrush" Value="{StaticResource DisabledText}" />
                             <Setter TargetName="knob" Property="Fill" Value="{StaticResource DisabledText}" />
-                            <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -704,7 +699,6 @@
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="Height" Value="20" />
         <Setter Property="Width" Value="20" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
@@ -852,7 +846,6 @@
 
     <!--  Small pill that resets a value to its recommended setting (sits by the field's label).  -->
     <Style x:Key="RecommendedChip" TargetType="Button">
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Foreground" Value="{StaticResource Accent}" />
         <Setter Property="FontSize" Value="12" />
@@ -890,7 +883,6 @@
     <Style x:Key="NavTab" TargetType="TabItem">
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
         <Setter Property="FontSize" Value="14" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
@@ -1176,7 +1168,6 @@
     <Style x:Key="SegmentButton" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
         <Setter Property="FontSize" Value="13" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -1220,7 +1211,6 @@
     <Style x:Key="HelpGlyphButton" TargetType="ToggleButton">
         <Setter Property="Width" Value="22" />
         <Setter Property="Height" Value="22" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -1300,7 +1290,6 @@
         <Setter Property="Height" Value="32" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -1354,7 +1343,6 @@
     <Style x:Key="PickerListItem" TargetType="ListBoxItem">
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
         <Setter Property="Padding" Value="10,7" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">
@@ -1391,7 +1379,6 @@
     <!--  Quiet disclosure toggle ("Advanced") — chevron + label, no card chrome; the chevron rotates open.  -->
     <Style x:Key="DisclosureToggle" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
-        <Setter Property="Cursor" Value="Hand" />
         <Setter Property="HorizontalAlignment" Value="Left" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Template">

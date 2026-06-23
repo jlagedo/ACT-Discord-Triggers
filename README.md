@@ -23,17 +23,19 @@ Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
 
 ## Screenshots
 
-| Main — output mode | General — connect & join |
+<!-- Screenshots predate the Output-tab merge (Main + General → Output) and need regeneration. -->
+
+| Output — mode & connection | Output — voice channel |
 | :---: | :---: |
-| ![Main settings tab](docs/screenshot-main.png) | ![General settings tab](docs/screenshot-general.png) |
-| **Text-to-Speech — engine & voice** | **Sound — effects & leveling** |
+| ![Output settings tab — output mode](docs/screenshot-main.png) | ![Output settings tab — Discord connection](docs/screenshot-general.png) |
+| **Text-to-Speech — engine & voice** | **Sound — effects & mastering** |
 | ![Text-to-Speech settings tab](docs/screenshot-tts.png) | ![Sound settings tab](docs/screenshot-sound.png) |
 
 ## Features
 
 - 🖥️ **Two output modes** — stream triggers to a **Discord voice channel** for
   the whole party, or play them **locally on this PC's speakers** with no bot or
-  Discord login required. Switch on the **Main** tab.
+  Discord login required. Switch on the **Output** tab.
 - 🔊 **TTS in voice chat** — fire trigger text-to-speech straight into a Discord
   voice channel.
 - 🧠 **Neural voices** — an optional **ONNX** engine plays natural-sounding

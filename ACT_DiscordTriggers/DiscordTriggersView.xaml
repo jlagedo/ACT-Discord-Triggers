@@ -160,11 +160,11 @@
             </ListView>
         </DockPanel>
 
-        <!--  Left-rail navigation (General / Sound / Information) over the remaining area.  -->
+        <!--  Left-rail navigation (Output / Text-to-Speech / Sound / Information) over the remaining area.  -->
         <TabControl Style="{StaticResource NavTabControl}" TabStripPlacement="Left">
 
-            <!--  ===== Main =====  -->
-            <TabItem Header="Main" Tag="{StaticResource Icon.Home}">
+            <!--  ===== Output ===== (output mode + the selected mode's destination setup)  -->
+            <TabItem Header="Output" Tag="{StaticResource Icon.Home}">
                 <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="640">
 
@@ -198,7 +198,7 @@
                                     <TextBlock
                                         Margin="0,6,0,0"
                                         Style="{StaticResource CardDesc}"
-                                        Text="Speak through a Discord voice channel. Set up the bot on the General tab." />
+                                        Text="Speak through a Discord voice channel. Set up the bot below." />
                                 </StackPanel>
                             </RadioButton>
                             <RadioButton
@@ -229,154 +229,207 @@
                             </RadioButton>
                         </UniformGrid>
 
-                        <!--  Local-mode notice: how it behaves, shown only in local mode.  -->
-                        <Border
-                            Margin="0,4,0,0"
-                            Style="{StaticResource InfoCallout}"
-                            Visibility="{Binding IsLocalMode, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Style="{StaticResource CardDesc}" Text="Local output starts as soon as it's selected. All TTS and trigger sounds — including neural voices and effects — play on this PC's default output device." />
-                        </Border>
+                        <!--  Discord (bot) destination — connection, channel, transport quality. Hidden in local mode.  -->
+                        <StackPanel Visibility="{Binding IsBotMode, Converter={StaticResource BoolToVis}}">
 
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Discord connection" />
 
-            <!--  ===== General ===== (Discord-only; hidden in local-output mode)  -->
-            <TabItem
-                Header="General"
-                Tag="{StaticResource Icon.General}"
-                Visibility="{Binding IsBotMode, Converter={StaticResource BoolToVis}}">
-                <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
-                    <StackPanel MaxWidth="640">
-
-                        <TextBlock
-                            Margin="2,0,0,8"
-                            Style="{StaticResource SectionHeader}"
-                            Text="Discord connection" />
-
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Key}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Bot token" />
-                                    <TextBlock Style="{StaticResource CardDesc}" Text="Used to sign in to your Discord bot." />
-                                </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <PasswordBox Width="220" local:PasswordBoxBinding.BoundPassword="{Binding BotToken, UpdateSourceTrigger=PropertyChanged}" />
-                        </HeaderedContentControl>
-
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.PlugConnected}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Connection" />
-                                    <StackPanel Margin="0,3,0,0" Orientation="Horizontal">
-                                        <Grid
-                                            Width="14"
-                                            Height="14"
-                                            VerticalAlignment="Center">
-                                            <Ellipse Style="{StaticResource StatusHalo}" />
-                                            <Ellipse Style="{StaticResource StatusDot}" />
-                                        </Grid>
-                                        <TextBlock Style="{StaticResource StatusText}" />
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Key}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Bot token" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="Used to sign in to your Discord bot." />
                                     </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <PasswordBox Width="220" local:PasswordBoxBinding.BoundPassword="{Binding BotToken, UpdateSourceTrigger=PropertyChanged}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.PlugConnected}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Connection" />
+                                        <StackPanel Margin="0,3,0,0" Orientation="Horizontal">
+                                            <Grid
+                                                Width="14"
+                                                Height="14"
+                                                VerticalAlignment="Center">
+                                                <Ellipse Style="{StaticResource StatusHalo}" />
+                                                <Ellipse Style="{StaticResource StatusDot}" />
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource StatusText}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <!--  Connect / Disconnect share the slot; IsConnected toggles which is shown.  -->
+                                <Grid>
+                                    <Button
+                                        MinWidth="120"
+                                        Command="{Binding ConnectCommand}"
+                                        Content="Connect">
+                                        <Button.Style>
+                                            <Style BasedOn="{StaticResource PrimaryButton}" TargetType="Button">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                    <Button
+                                        MinWidth="120"
+                                        Command="{Binding DisconnectCommand}"
+                                        Content="Disconnect">
+                                        <Button.Style>
+                                            <Style BasedOn="{StaticResource {x:Type Button}}" TargetType="Button">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </Grid>
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.AutoConnect}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Connect automatically" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="Reconnect when ACT starts." />
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <CheckBox IsChecked="{Binding AutoConnect}" Style="{StaticResource ToggleSwitch}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Chat}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Bot status message" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="Shown on the bot's Discord profile." />
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <TextBox Width="220" Text="{Binding BotStatus, UpdateSourceTrigger=PropertyChanged}" />
+                            </HeaderedContentControl>
+
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Voice channel" />
+
+                            <HeaderedContentControl
+                                Header="Server"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Server}">
+                                <ComboBox
+                                    Width="220"
+                                    ItemsSource="{Binding Servers}"
+                                    SelectedItem="{Binding SelectedServer}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl
+                                Header="Channel"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Channel}">
+                                <ComboBox
+                                    Width="220"
+                                    ItemsSource="{Binding Channels}"
+                                    SelectedItem="{Binding SelectedChannel}" />
+                            </HeaderedContentControl>
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Voice}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CardTitle}" Text="Voice connection" />
+                                        <TextBlock Style="{StaticResource CardDesc}" Text="Join or leave the selected channel." />
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button
+                                        MinWidth="120"
+                                        Command="{Binding JoinCommand}"
+                                        Content="Join channel"
+                                        Style="{StaticResource PrimaryButton}" />
+                                    <Button
+                                        MinWidth="120"
+                                        Margin="8,0,0,0"
+                                        Command="{Binding LeaveCommand}"
+                                        Content="Leave" />
                                 </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <!--  Connect / Disconnect share the slot; IsConnected toggles which is shown.  -->
-                            <Grid>
-                                <Button
-                                    MinWidth="120"
-                                    Command="{Binding ConnectCommand}"
-                                    Content="Connect">
-                                    <Button.Style>
-                                        <Style BasedOn="{StaticResource PrimaryButton}" TargetType="Button">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                                <Button
-                                    MinWidth="120"
-                                    Command="{Binding DisconnectCommand}"
-                                    Content="Disconnect">
-                                    <Button.Style>
-                                        <Style BasedOn="{StaticResource {x:Type Button}}" TargetType="Button">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                </Button>
-                            </Grid>
-                        </HeaderedContentControl>
+                            </HeaderedContentControl>
 
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.AutoConnect}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Connect automatically" />
-                                    <TextBlock Style="{StaticResource CardDesc}" Text="Reconnect when ACT starts." />
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Discord audio quality" />
+
+                            <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Quality}">
+                                <HeaderedContentControl.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource CardTitle}"
+                                            Text="Audio quality" />
+                                        <ToggleButton
+                                            x:Name="QualityHelp"
+                                            Margin="4,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource HelpGlyphButton}" />
+                                        <Popup
+                                            AllowsTransparency="True"
+                                            IsOpen="{Binding IsChecked, ElementName=QualityHelp}"
+                                            Placement="Bottom"
+                                            PlacementTarget="{Binding ElementName=QualityHelp}"
+                                            StaysOpen="False">
+                                            <Border Style="{StaticResource HelpFlyout}">
+                                                <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Sets how much detail the bot's audio keeps when it's sent to Discord (the Opus bitrate). Higher sounds clearer but uses more bandwidth, and 128 kbps only works on channels that support it — a boosted server." />
+                                            </Border>
+                                        </Popup>
+                                    </StackPanel>
+                                </HeaderedContentControl.Header>
+                                <ComboBox Width="220" SelectedIndex="{Binding AudioQualityIndex}">
+                                    <ComboBoxItem>Low (48 kbps)</ComboBoxItem>
+                                    <ComboBoxItem>Medium (96 kbps)</ComboBoxItem>
+                                    <ComboBoxItem>High (128 kbps)</ComboBoxItem>
+                                </ComboBox>
+                            </HeaderedContentControl>
+
+                            <Border Style="{StaticResource InfoCallout}" Visibility="{Binding ShowHighQualityWarning, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock
+                                        Margin="0,1,10,0"
+                                        VerticalAlignment="Top"
+                                        Foreground="{StaticResource Accent}"
+                                        Style="{StaticResource IconGlyph}"
+                                        Text="{StaticResource Icon.Info}" />
+                                    <TextBlock
+                                        MaxWidth="460"
+                                        Foreground="{StaticResource TextPrimary}"
+                                        Text="High quality needs a Discord channel that supports 128 kbps (a boosted server)."
+                                        TextWrapping="Wrap" />
                                 </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <CheckBox IsChecked="{Binding AutoConnect}" Style="{StaticResource ToggleSwitch}" />
-                        </HeaderedContentControl>
+                            </Border>
 
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Chat}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Bot status message" />
-                                    <TextBlock Style="{StaticResource CardDesc}" Text="Shown on the bot's Discord profile." />
-                                </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <TextBox Width="220" Text="{Binding BotStatus, UpdateSourceTrigger=PropertyChanged}" />
-                        </HeaderedContentControl>
+                        </StackPanel>
 
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="Voice channel" />
+                        <!--  Local (this PC) destination — playback notice + output volume. Hidden in bot mode.  -->
+                        <StackPanel Visibility="{Binding IsLocalMode, Converter={StaticResource BoolToVis}}">
 
-                        <HeaderedContentControl
-                            Header="Server"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Server}">
-                            <ComboBox
-                                Width="220"
-                                ItemsSource="{Binding Servers}"
-                                SelectedItem="{Binding SelectedServer}" />
-                        </HeaderedContentControl>
+                            <Border Margin="0,4,0,0" Style="{StaticResource InfoCallout}">
+                                <TextBlock Style="{StaticResource CardDesc}" Text="Local output starts as soon as it's selected. All TTS and trigger sounds — including neural voices and effects — play on this PC's default output device." />
+                            </Border>
 
-                        <HeaderedContentControl
-                            Header="Channel"
-                            Style="{StaticResource SettingsCard}"
-                            Tag="{StaticResource Icon.Channel}">
-                            <ComboBox
-                                Width="220"
-                                ItemsSource="{Binding Channels}"
-                                SelectedItem="{Binding SelectedChannel}" />
-                        </HeaderedContentControl>
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Local playback" />
 
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Voice}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource CardTitle}" Text="Voice connection" />
-                                    <TextBlock Style="{StaticResource CardDesc}" Text="Join or leave the selected channel." />
-                                </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <StackPanel Orientation="Horizontal">
-                                <Button
-                                    MinWidth="120"
-                                    Command="{Binding JoinCommand}"
-                                    Content="Join channel"
-                                    Style="{StaticResource PrimaryButton}" />
-                                <Button
-                                    MinWidth="120"
-                                    Margin="8,0,0,0"
-                                    Command="{Binding LeaveCommand}"
-                                    Content="Leave" />
-                            </StackPanel>
-                        </HeaderedContentControl>
+                            <HeaderedContentControl
+                                Header="{Binding LocalOutputVolumeLabel}"
+                                Style="{StaticResource SettingsCard}"
+                                Tag="{StaticResource Icon.Sound}">
+                                <Slider
+                                    Width="200"
+                                    Maximum="100"
+                                    Minimum="0"
+                                    Value="{Binding LocalOutputVolume}" />
+                            </HeaderedContentControl>
+
+                        </StackPanel>
 
                     </StackPanel>
                 </ScrollViewer>
@@ -666,7 +719,14 @@
                             <HeaderedContentControl.Header>
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource CardTitle}" Text="Test voice" />
-                                    <TextBlock Style="{StaticResource CardDesc}" Text="Plays a sample line through the bot." />
+                                    <TextBlock
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Plays a sample line through the bot."
+                                        Visibility="{Binding IsBotMode, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock
+                                        Style="{StaticResource CardDesc}"
+                                        Text="Plays a sample line on this PC."
+                                        Visibility="{Binding IsLocalMode, Converter={StaticResource BoolToVis}}" />
                                 </StackPanel>
                             </HeaderedContentControl.Header>
                             <StackPanel Orientation="Horizontal">
@@ -678,7 +738,8 @@
                                 <ToggleButton
                                     x:Name="TestHelp"
                                     Margin="6,0,0,0"
-                                    Style="{StaticResource HelpGlyphButton}" />
+                                    Style="{StaticResource HelpGlyphButton}"
+                                    Visibility="{Binding IsBotMode, Converter={StaticResource BoolToVis}}" />
                                 <Popup
                                     AllowsTransparency="True"
                                     IsOpen="{Binding IsChecked, ElementName=TestHelp}"
@@ -686,7 +747,7 @@
                                     PlacementTarget="{Binding ElementName=TestHelp}"
                                     StaysOpen="False">
                                     <Border Style="{StaticResource HelpFlyout}">
-                                        <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Test plays through the bot. Connect and join a voice channel on the General page first." />
+                                        <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Test plays through the bot. Connect and join a voice channel on the Output tab first." />
                                     </Border>
                                 </Popup>
                             </StackPanel>
@@ -762,29 +823,10 @@
                 <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="640">
 
-                        <!--  Local-mode playback volume: only this PC's output device has no per-listener volume (Discord does), so the slider is shown only in local mode.  -->
-                        <StackPanel Visibility="{Binding IsLocalMode, Converter={StaticResource BoolToVis}}">
-                            <TextBlock
-                                Margin="2,0,0,8"
-                                Style="{StaticResource SectionHeader}"
-                                Text="Local playback" />
-
-                            <HeaderedContentControl
-                                Header="{Binding LocalOutputVolumeLabel}"
-                                Style="{StaticResource SettingsCard}"
-                                Tag="{StaticResource Icon.Sound}">
-                                <Slider
-                                    Width="200"
-                                    Maximum="100"
-                                    Minimum="0"
-                                    Value="{Binding LocalOutputVolume}" />
-                            </HeaderedContentControl>
-                        </StackPanel>
-
                         <TextBlock
                             Margin="2,0,0,8"
                             Style="{StaticResource SectionHeader}"
-                            Text="Effects &amp; leveling" />
+                            Text="Effects" />
 
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Wand}">
                             <HeaderedContentControl.Header>
@@ -823,6 +865,8 @@
                                 Minimum="0"
                                 Value="{Binding FxChance}" />
                         </HeaderedContentControl>
+
+                        <TextBlock Style="{StaticResource SectionHeader}" Text="Mastering" />
 
                         <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Level}">
                             <HeaderedContentControl.Header>
@@ -916,53 +960,6 @@
                                 <ComboBoxItem>-3 dB</ComboBoxItem>
                             </ComboBox>
                         </HeaderedContentControl>
-
-                        <HeaderedContentControl Style="{StaticResource SettingsCard}" Tag="{StaticResource Icon.Quality}">
-                            <HeaderedContentControl.Header>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource CardTitle}"
-                                        Text="Audio quality" />
-                                    <ToggleButton
-                                        x:Name="QualityHelp"
-                                        Margin="4,0,0,0"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource HelpGlyphButton}" />
-                                    <Popup
-                                        AllowsTransparency="True"
-                                        IsOpen="{Binding IsChecked, ElementName=QualityHelp}"
-                                        Placement="Bottom"
-                                        PlacementTarget="{Binding ElementName=QualityHelp}"
-                                        StaysOpen="False">
-                                        <Border Style="{StaticResource HelpFlyout}">
-                                            <TextBlock Style="{StaticResource HelpFlyoutText}" Text="Sets how much detail the bot's audio keeps when it's sent to Discord (the Opus bitrate). Higher sounds clearer but uses more bandwidth, and 128 kbps only works on channels that support it — a boosted server." />
-                                        </Border>
-                                    </Popup>
-                                </StackPanel>
-                            </HeaderedContentControl.Header>
-                            <ComboBox Width="220" SelectedIndex="{Binding AudioQualityIndex}">
-                                <ComboBoxItem>Low (48 kbps)</ComboBoxItem>
-                                <ComboBoxItem>Medium (96 kbps)</ComboBoxItem>
-                                <ComboBoxItem>High (128 kbps)</ComboBoxItem>
-                            </ComboBox>
-                        </HeaderedContentControl>
-
-                        <Border Style="{StaticResource InfoCallout}" Visibility="{Binding ShowHighQualityWarning, Converter={StaticResource BoolToVis}}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock
-                                    Margin="0,1,10,0"
-                                    VerticalAlignment="Top"
-                                    Foreground="{StaticResource Accent}"
-                                    Style="{StaticResource IconGlyph}"
-                                    Text="{StaticResource Icon.Info}" />
-                                <TextBlock
-                                    MaxWidth="460"
-                                    Foreground="{StaticResource TextPrimary}"
-                                    Text="High quality needs a Discord channel that supports 128 kbps (a boosted server)."
-                                    TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
 
                     </StackPanel>
                 </ScrollViewer>
