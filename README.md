@@ -23,11 +23,9 @@ Works with ACT **Custom Triggers**, **Triggernometry**, and **Triggevent**.
 
 ## Screenshots
 
-<!-- Screenshots predate the Output-tab merge (Main + General → Output) and need regeneration. -->
-
-| Output — mode & connection | Output — voice channel |
+| Output — Discord bot | Output — this PC (local) |
 | :---: | :---: |
-| ![Output settings tab — output mode](docs/screenshot-main.png) | ![Output settings tab — Discord connection](docs/screenshot-general.png) |
+| ![Output tab in Discord bot mode — connection, voice channel, audio quality](docs/screenshot-main.png) | ![Output tab in local mode — local playback volume](docs/screenshot-general.png) |
 | **Text-to-Speech — engine & voice** | **Sound — effects & mastering** |
 | ![Text-to-Speech settings tab](docs/screenshot-tts.png) | ![Sound settings tab](docs/screenshot-sound.png) |
 
