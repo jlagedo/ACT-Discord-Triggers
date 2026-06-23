@@ -4,6 +4,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Serialization;
+using ACT_DiscordTriggers.Core.Ipc;
 using ACT_DiscordTriggers.Core.Settings.Migrations;
 
 namespace ACT_DiscordTriggers.Core.Settings {
@@ -31,15 +32,15 @@ namespace ACT_DiscordTriggers.Core.Settings {
     private static readonly XmlSerializer Serializer = new XmlSerializer(typeof(PluginSettings));
 
     private readonly string configPath;
-    private readonly Action<string> log;
+    private readonly Action<string, LogLevel> log;
     private readonly SettingsMigrator migrator;
 
-    public SettingsStore(string configDirectory, string fileName, Action<string> log = null)
+    public SettingsStore(string configDirectory, string fileName, Action<string, LogLevel> log = null)
       : this(Path.Combine(configDirectory, fileName),
              new SettingsMigrator(SettingsMigrator.DefaultMigrations, log), log) { }
 
     /// <summary>Test seam: full path + custom migrator.</summary>
-    public SettingsStore(string configPath, SettingsMigrator migrator, Action<string> log = null) {
+    public SettingsStore(string configPath, SettingsMigrator migrator, Action<string, LogLevel> log = null) {
       this.configPath = configPath;
       this.migrator = migrator ?? new SettingsMigrator();
       this.log = log;
@@ -59,13 +60,13 @@ namespace ACT_DiscordTriggers.Core.Settings {
         if (File.Exists(LegacyBackupPath)) {
           var bak = TryParse(LegacyBackupPath);
           if (bak != null && LegacyConfigImporter.IsLegacy(bak)) {
-            Log("Primary config unreadable; recovering from " + Path.GetFileName(LegacyBackupPath));
+            Log("Primary config unreadable; recovering from " + Path.GetFileName(LegacyBackupPath), LogLevel.Warn);
             var recovered = LegacyConfigImporter.Import(bak);
             TrySave(recovered); // rewrite is best-effort; the in-memory result is still good
             return recovered;
           }
         }
-        Log("Config unreadable; starting with defaults.");
+        Log("Config unreadable; starting with defaults.", LogLevel.Error);
         return new PluginSettings();
       }
 
@@ -87,7 +88,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
             // We read what we can, but the NEXT Save rewrites at v{Current}, dropping any
             // field this build doesn't know about. Read-only here, so nothing is lost yet.
             Log("Config is schema v" + fromVersion + " but this build is v" + PluginSettings.CurrentSchemaVersion
-                + "; newer-only settings will be dropped on the next save.");
+                + "; newer-only settings will be dropped on the next save.", LogLevel.Warn);
           }
           bool changed = migrator.MigrateInPlace(doc);
           var settings = Deserialize(doc);
@@ -98,12 +99,12 @@ namespace ACT_DiscordTriggers.Core.Settings {
           }
           return settings;
         } catch (Exception ex) {
-          Log("Failed to migrate/parse config; starting with defaults. " + ex.Message);
+          Log("Failed to migrate/parse config; starting with defaults. " + ex.Message, LogLevel.Error);
           return new PluginSettings();
         }
       }
 
-      Log("Unrecognised config format; starting with defaults.");
+      Log("Unrecognised config format; starting with defaults.", LogLevel.Warn);
       return new PluginSettings();
     }
 
@@ -142,7 +143,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
     // and the next interactive Save will retry.
     private void TrySave(PluginSettings settings) {
       try { Save(settings); }
-      catch (Exception ex) { Log("Could not rewrite config (will retry on next save): " + ex.Message); }
+      catch (Exception ex) { Log("Could not rewrite config (will retry on next save): " + ex.Message, LogLevel.Warn); }
     }
 
     private void BackupLegacyOnce() {
@@ -150,7 +151,7 @@ namespace ACT_DiscordTriggers.Core.Settings {
         if (!File.Exists(LegacyBackupPath))
           File.Copy(configPath, LegacyBackupPath, false);
       } catch (Exception ex) {
-        Log("Could not back up legacy config: " + ex.Message);
+        Log("Could not back up legacy config: " + ex.Message, LogLevel.Warn);
       }
     }
 
@@ -171,8 +172,8 @@ namespace ACT_DiscordTriggers.Core.Settings {
         return Serializer.Deserialize(reader) as PluginSettings;
     }
 
-    private void Log(string message) {
-      try { log?.Invoke("[settings] " + message); } catch { /* logging must never break load/save */ }
+    private void Log(string message, LogLevel level = LogLevel.Info) {
+      try { log?.Invoke("[settings] " + message, level); } catch { /* logging must never break load/save */ }
     }
   }
 }

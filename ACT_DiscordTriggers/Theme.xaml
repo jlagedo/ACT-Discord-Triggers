@@ -45,6 +45,8 @@
     <!--  Connection status — calm green when live, muted red when not.  -->
     <SolidColorBrush x:Key="StatusOnline" Color="#27AE60" />
     <SolidColorBrush x:Key="StatusOffline" Color="#CF5B4E" />
+    <!--  Diagnostics severity — amber warning (red reuses StatusOffline for errors).  -->
+    <SolidColorBrush x:Key="StatusWarning" Color="#B8730A" />
 
     <!--  Elevation reserved for transient surfaces (combo flyout) — cards stay flat in Fluent.  -->
     <DropShadowEffect
@@ -1060,6 +1062,19 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+        <!--
+            Severity colouring: Warn amber, Error red; Info keeps the default TextSecondary.
+            Style triggers outrank the template's IsSelected trigger, so a flagged row keeps
+            its colour even when selected. Bound to LogEntry.Level (the row's DataContext).
+        -->
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Level}" Value="Warn">
+                <Setter Property="Foreground" Value="{StaticResource StatusWarning}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Level}" Value="Error">
+                <Setter Property="Foreground" Value="{StaticResource StatusOffline}" />
+            </DataTrigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="LogList" TargetType="ListView">

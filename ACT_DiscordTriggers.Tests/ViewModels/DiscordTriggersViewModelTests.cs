@@ -25,7 +25,7 @@ namespace ACT_DiscordTriggers.Tests {
     private static SettingsStore TempStore() {
       string dir = Path.Combine(Path.GetTempPath(), "actdt-vmtest-" + Guid.NewGuid().ToString("N"));
       Directory.CreateDirectory(dir);
-      return new SettingsStore(dir, "test.config.xml", _ => { });
+      return new SettingsStore(dir, "test.config.xml", (_, __) => { });
     }
 
     [Fact]
@@ -502,7 +502,7 @@ namespace ACT_DiscordTriggers.Tests {
 
     private sealed class FakeDiscordService : IDiscordService {
       public event Action BotReady;
-      public event Action<string> Log;
+      public event Action<string, LogLevel> Log;
       public event Action Disconnected;
 
       public bool IsConnectedResult;

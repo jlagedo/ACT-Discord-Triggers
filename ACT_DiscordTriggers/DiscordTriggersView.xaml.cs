@@ -36,7 +36,7 @@ namespace ACT_DiscordTriggers {
 
       discordService = new DiscordClientService();
       string configDir = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Config");
-      var store = new SettingsStore(configDir, $"{configName}.config.xml", msg => vm?.Log(msg));
+      var store = new SettingsStore(configDir, $"{configName}.config.xml", (msg, level) => vm?.Log(msg, level));
       vm = new DiscordTriggersViewModel(discordService, store);
       DataContext = vm;
 
@@ -59,13 +59,13 @@ namespace ACT_DiscordTriggers {
         ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;
         ActGlobals.oFormActMain.PlaySoundMethod = oldSound;
       } catch (Exception ex) {
-        DiagnosticsLog.Append("Error restoring ACT delegates on exit: " + ex);
+        DiagnosticsLog.Append("Error restoring ACT delegates on exit: " + ex, LogLevel.Error);
         try { ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error restoring ACT delegates on Discord plugin exit."); } catch { }
       }
       // Detach the static DiscordClient.BotReady/Log subscriptions synchronously, before
       // the async bridge shutdown below, so a deferred continuation can't leave a stale
       // handler bound to a disposed view across a plugin reload.
-      try { discordService?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Append("Error disposing Discord service on exit: " + ex); }
+      try { discordService?.Dispose(); } catch (Exception ex) { DiagnosticsLog.Append("Error disposing Discord service on exit: " + ex, LogLevel.Error); }
       if (vm != null) {
         vm.OutputActivated -= OnOutputActivated;
         vm.OutputDeactivated -= OnOutputDeactivated;
@@ -149,7 +149,7 @@ namespace ACT_DiscordTriggers {
       try {
         picked = VistaFolderPicker.PickFolder(ActGlobals.oFormActMain.Handle, title, current);
       } catch (Exception ex) {
-        DiagnosticsLog.Append("Modern folder picker failed, falling back to classic dialog: " + ex);
+        DiagnosticsLog.Append("Modern folder picker failed, falling back to classic dialog: " + ex, LogLevel.Warn);
         picked = PickFolderClassic(title, current);
       }
       if (!string.IsNullOrEmpty(picked) && vm != null)

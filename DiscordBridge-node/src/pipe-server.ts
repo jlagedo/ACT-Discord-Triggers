@@ -20,6 +20,11 @@ import pkg from '../package.json' with { type: 'json' };
 
 const BRIDGE_VERSION: string = pkg.version;
 
+// Outbound backpressure cap: max frames allowed to sit in the write queue before
+// further Log notifications are dropped (Result/BotReady/Disconnected are never
+// dropped). Bounds bridge memory if the plugin stops draining the pipe.
+export const MAX_QUEUED_LOG_FRAMES = 2000;
+
 export { Op, PROTOCOL_VERSION };
 
 export type Notifier = (n: Notification) => void;
@@ -97,23 +102,37 @@ function parseConfig(raw: Record<string, unknown>): BridgeConfigView {
 export class PipeServer {
     private readonly socket: Socket;
     private readonly host: Host;
-    private readBuf: Buffer;
+    // Inbound accumulator: the received chunks plus their running byte total.
+    // Frames are consumed by copying exactly the bytes one frame needs out of the
+    // front of the list (see _consume), so each inbound byte is copied once — not
+    // once per following chunk as a single growing Buffer.concat would. That keeps
+    // reassembly of multi-MB binary SpeakPcm frames linear instead of quadratic.
+    private chunks: Buffer[];
+    private buffered: number;
     private writeQueue: Promise<void>;
     private closed: boolean;
+    // Outbound backpressure accounting (see _sendFrame): frames queued but not yet
+    // written, and the count of Logs dropped while the queue was saturated.
+    private outboundQueued: number;
+    private droppedLogs: number;
 
     constructor(socket: Socket, host: Host) {
         this.socket = socket;
         this.host = host;
-        this.readBuf = Buffer.alloc(0);
+        this.chunks = [];
+        this.buffered = 0;
         this.writeQueue = Promise.resolve();
         this.closed = false;
+        this.outboundQueued = 0;
+        this.droppedLogs = 0;
     }
 
     run(): void {
         this.host.setNotifier((notif: Notification) => { void this._sendFrame(notif); });
 
         this.socket.on('data', (chunk: Buffer) => {
-            this.readBuf = Buffer.concat([this.readBuf, chunk]);
+            this.chunks.push(chunk);
+            this.buffered += chunk.length;
             this._tryReadFrames();
         });
         this.socket.on('error', (err: Error) => {
@@ -130,32 +149,73 @@ export class PipeServer {
     }
 
     private _tryReadFrames(): void {
-        while (this.readBuf.length >= 4) {
-            const len = this.readBuf.readUInt32LE(0);
+        while (this.buffered >= 4) {
+            // The 4-byte length prefix must be contiguous to read it; coalesce the
+            // front chunks if a prefix happens to straddle a chunk boundary (rare).
+            this._coalesceFront(4);
+            const len = this.chunks[0]!.readUInt32LE(0);
             if (len <= 0 || len > MAX_FRAME_BYTES) {
                 log.error(`invalid frame length ${len}; closing pipe`);
                 try { this.socket.destroy(); } catch { /* ignore */ }
                 this.closed = true;
                 return;
             }
-            if (this.readBuf.length < 4 + len) return;
-            const payload = this.readBuf.subarray(4, 4 + len);
-            this.readBuf = this.readBuf.subarray(4 + len);
+            const total = 4 + len;
+            if (this.buffered < total) return;
+            // _consume returns a freshly-allocated standalone Buffer holding exactly
+            // these `total` bytes, so the payload view is safe for the audio player
+            // to retain — it shares no backing store with future reads.
+            const frame = this._consume(total);
+            const payload = frame.subarray(4, total);
             const first = payload[0];
             // Fire-and-forget so a slow handler doesn't block reads.
             if (first === FRAME_JSON_MARKER) {
                 this._handleJsonFrame(payload.toString('utf8'))
                     .catch((e: unknown) => log.error('json handler crash', e));
             } else if (first === FRAME_BINARY_SPEAK_PCM) {
-                // Copy out of the read buffer slice so subsequent reads don't
-                // overwrite the bytes the audio player is holding onto.
-                const frame = Buffer.from(payload);
-                this._handleBinarySpeakPcm(frame)
+                this._handleBinarySpeakPcm(payload)
                     .catch((e: unknown) => log.error('binary handler crash', e));
             } else {
                 log.error(`unknown frame marker 0x${(first ?? 0).toString(16)}; dropping`);
             }
         }
+    }
+
+    // Ensure chunks[0] holds at least `n` contiguous bytes by merging it with the
+    // chunks that follow. Only used for the 4-byte length prefix, so `n` is tiny
+    // and this is a no-op in the common case (the first chunk already has it).
+    private _coalesceFront(n: number): void {
+        if (this.chunks[0]!.length >= n) return;
+        let acc = this.chunks[0]!;
+        let i = 1;
+        while (acc.length < n && i < this.chunks.length) {
+            acc = Buffer.concat([acc, this.chunks[i]!]);
+            i++;
+        }
+        this.chunks.splice(0, i, acc);
+    }
+
+    // Remove and return exactly `total` bytes from the front of the chunk list as
+    // one contiguous Buffer. Any remainder of the last consumed chunk is sliced
+    // back as the new head chunk. Each byte is copied at most once.
+    private _consume(total: number): Buffer {
+        const out = Buffer.allocUnsafe(total);
+        let written = 0;
+        while (written < total) {
+            const head = this.chunks[0]!;
+            const need = total - written;
+            if (head.length <= need) {
+                head.copy(out, written);
+                written += head.length;
+                this.chunks.shift();
+            } else {
+                head.copy(out, written, 0, need);
+                this.chunks[0] = head.subarray(need);
+                written += need;
+            }
+        }
+        this.buffered -= total;
+        return out;
     }
 
     private async _handleBinarySpeakPcm(payload: Buffer): Promise<void> {
@@ -322,6 +382,15 @@ export class PipeServer {
     }
 
     private _sendFrame(obj: OutboundFrame): Promise<void> {
+        // Backpressure: Log notifications are server-pushed with no flow control, so
+        // a peer that stops draining the pipe could let them buffer without bound.
+        // Once the write queue is saturated, drop Logs (counting them for a later
+        // summary) rather than grow memory. Result/BotReady/Disconnected are never
+        // dropped — they carry correctness, not just diagnostics.
+        if (obj.op === Op.Log && this.outboundQueued >= MAX_QUEUED_LOG_FRAMES) {
+            this.droppedLogs++;
+            return Promise.resolve();
+        }
         // Scrub Log notifications before they leave the bridge: their message can
         // carry a discord.js error string, and these end up in the plugin's
         // shared diagnostics. Other frames (Result, BotReady, Disconnected) never
@@ -332,19 +401,40 @@ export class PipeServer {
         // Serialize writes so frames can't interleave. Length + body go in a
         // single socket.write so the kernel either flushes both or fails both —
         // a torn frame (header without body) is impossible with one syscall.
+        this.outboundQueued++;
         this.writeQueue = this.writeQueue.then(() => new Promise<void>((resolve) => {
-            if (this.closed || !this.socket.writable) { resolve(); return; }
+            const done = (): void => {
+                this.outboundQueued--;
+                this._maybeReportDroppedLogs();
+                resolve();
+            };
+            if (this.closed || !this.socket.writable) { done(); return; }
             try {
                 const json = Buffer.from(JSON.stringify(outbound), 'utf8');
                 const frame = Buffer.alloc(4 + json.length);
                 frame.writeUInt32LE(json.length, 0);
                 json.copy(frame, 4);
-                this.socket.write(frame, () => resolve());
+                this.socket.write(frame, () => done());
             } catch (e) {
                 log.error('sendFrame failed', e);
-                resolve();
+                done();
             }
         }));
         return this.writeQueue;
+    }
+
+    // Once the outbound queue fully drains after Logs were dropped under
+    // backpressure, emit a single summary so the gap is visible without
+    // re-flooding the pipe. The queue is empty here, so this Log clears the cap.
+    private _maybeReportDroppedLogs(): void {
+        if (this.outboundQueued === 0 && this.droppedLogs > 0) {
+            const n = this.droppedLogs;
+            this.droppedLogs = 0;
+            void this._sendFrame({
+                op: Op.Log,
+                level: 'Warn',
+                message: `${n} log line(s) dropped under backpressure`,
+            });
+        }
     }
 }

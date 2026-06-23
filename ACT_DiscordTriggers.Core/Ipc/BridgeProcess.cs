@@ -78,8 +78,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 var lineTask = process.StandardOutput.ReadLineAsync();
                 var remaining = deadline - DateTime.UtcNow;
                 if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
-                var done = await Task.WhenAny(lineTask, Task.Delay(remaining)).ConfigureAwait(false);
-                if (done != lineTask) {
+                if (!await TaskTimeout.CompletesWithinAsync(lineTask, remaining).ConfigureAwait(false)) {
                     throw new TimeoutException("Bridge did not signal ready within " + to.TotalSeconds + "s.");
                 }
                 string line = await lineTask.ConfigureAwait(false);

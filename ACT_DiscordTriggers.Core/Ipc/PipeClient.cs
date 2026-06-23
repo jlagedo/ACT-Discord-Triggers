@@ -50,8 +50,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             try {
                 await SendFrameAsync(request).ConfigureAwait(false);
                 var to = timeout ?? TimeSpan.FromSeconds(60);
-                var done = await Task.WhenAny(tcs.Task, Task.Delay(to)).ConfigureAwait(false);
-                if (done != tcs.Task) {
+                if (!await TaskTimeout.CompletesWithinAsync(tcs.Task, to).ConfigureAwait(false)) {
                     throw new TimeoutException($"Bridge request '{request.GetType().Name}' timed out after {to.TotalSeconds:0}s.");
                 }
                 var element = await tcs.Task.ConfigureAwait(false);
@@ -90,8 +89,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 await SendBinaryFrameAsync(payload).ConfigureAwait(false);
 
                 var to = timeout ?? TimeSpan.FromSeconds(60);
-                var done = await Task.WhenAny(tcs.Task, Task.Delay(to)).ConfigureAwait(false);
-                if (done != tcs.Task) {
+                if (!await TaskTimeout.CompletesWithinAsync(tcs.Task, to).ConfigureAwait(false)) {
                     throw new TimeoutException($"Bridge request 'SpeakPcm' timed out after {to.TotalSeconds:0}s.");
                 }
                 var element = await tcs.Task.ConfigureAwait(false);
@@ -145,8 +143,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         // correct teardown.
         private async Task WriteWithTimeoutAsync(byte[] buf, int offset, int count) {
             var writeTask = pipe.WriteAsync(buf, offset, count);
-            var winner = await Task.WhenAny(writeTask, Task.Delay(WriteTimeoutMs)).ConfigureAwait(false);
-            if (winner != writeTask) {
+            if (!await TaskTimeout.CompletesWithinAsync(writeTask, TimeSpan.FromMilliseconds(WriteTimeoutMs)).ConfigureAwait(false)) {
                 try { pipe.Dispose(); } catch { }
                 // Observe the orphaned write so its eventual fault doesn't surface
                 // as an unobserved task exception.
@@ -197,21 +194,52 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             return payload;
         }
 
+        // Test seam: register a pending request and return its task so a unit test can
+        // assert how a dispatched frame resolves (or fails to resolve) it without a
+        // live pipe. DispatchJsonFrame below is internal for the same reason.
+        internal Task<JsonElement> RegisterPendingForTest(int reqId) {
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pending[reqId] = tcs;
+            return tcs.Task;
+        }
+
         private void DispatchFrame(byte[] payload) {
             if (payload.Length == 0) return;
             byte first = payload[0];
             if (first == FrameJsonMarker) {
                 DispatchJsonFrame(Encoding.UTF8.GetString(payload));
             } else {
-                // Bridge never pushes binary frames; drop unexpected non-JSON
-                // frames. The JSON Log path is the ordinary diagnostic channel.
+                // Bridge never pushes binary frames; drop unexpected non-JSON frames.
+                // This is now the only truly silent drop — a malformed JSON frame is
+                // logged (and may fail its caller) in DispatchJsonFrame.
             }
         }
 
-        private void DispatchJsonFrame(string json) {
+        // Run a notification handler off the read loop (see the deadlock note in
+        // DispatchJsonFrame). A handler bug must never fault the read loop, so the
+        // throw is contained — but logged, not silently swallowed, so a broken UI
+        // handler is diagnosable from the unified log.
+        private static void RunHandlerSafe(Action body, string label) {
+            Task.Run(() => {
+                try {
+                    body();
+                } catch (Exception ex) {
+                    DiagnosticsLog.Append("Notification handler '" + label + "' threw: " + ex, LogLevel.Error);
+                }
+            });
+        }
+
+        internal void DispatchJsonFrame(string json) {
+            // Captured before the body so the catch can fault the right pending request:
+            // a frame that parses far enough to expose its reqId but then fails should
+            // fail its caller fast, not leave it blocked until the request timeout.
+            int? reqId = null;
             try {
                 using (var doc = JsonDocument.Parse(json)) {
                     var root = doc.RootElement;
+                    if (root.TryGetProperty("reqId", out var rEarly) && rEarly.ValueKind == JsonValueKind.Number) {
+                        reqId = rEarly.GetInt32();
+                    }
                     if (!root.TryGetProperty("op", out var opElem)) return;
                     string op = opElem.GetString() ?? "";
 
@@ -223,31 +251,39 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     switch (op) {
                         case Op.BotReady: {
                             var handler = OnBotReady;
-                            if (handler != null) Task.Run(() => { try { handler(); } catch { } });
+                            if (handler != null) RunHandlerSafe(() => handler(), Op.BotReady);
                             return;
                         }
                         case Op.Log: {
                             string msg = root.TryGetProperty("message", out var m) ? (m.GetString() ?? "") : "";
                             string lvl = root.TryGetProperty("level", out var l) ? (l.GetString() ?? "Info") : "Info";
                             var handler = OnLog;
-                            if (handler != null) Task.Run(() => { try { handler(msg, lvl); } catch { } });
+                            if (handler != null) RunHandlerSafe(() => handler(msg, lvl), Op.Log);
                             return;
                         }
                         case Op.Disconnected: {
                             string reason = root.TryGetProperty("reason", out var rs) ? (rs.GetString() ?? "") : "";
                             var handler = OnDisconnected;
-                            if (handler != null) Task.Run(() => { try { handler(reason); } catch { } });
+                            if (handler != null) RunHandlerSafe(() => handler(reason), Op.Disconnected);
                             return;
                         }
                     }
 
-                    int? reqId = root.TryGetProperty("reqId", out var r) && r.ValueKind == JsonValueKind.Number
-                        ? r.GetInt32() : (int?)null;
                     if (reqId.HasValue && pending.TryRemove(reqId.Value, out var tcs)) {
                         tcs.TrySetResult(root.Clone());
                     }
                 }
-            } catch { }
+            } catch (Exception ex) {
+                // A frame we couldn't parse or route. Never silent: record it so a
+                // dropped response is diagnosable, and if the frame carried a reqId,
+                // fault that pending request so its caller fails fast instead of
+                // blocking the full request timeout. (Unknown-op frames are dropped by
+                // the early returns above, not here — those are by design.)
+                DiagnosticsLog.Append("Pipe frame parse error: " + ex, LogLevel.Error);
+                if (reqId.HasValue && pending.TryRemove(reqId.Value, out var tcs)) {
+                    tcs.TrySetException(new IOException("Malformed bridge response frame: " + ex.Message));
+                }
+            }
         }
 
         private void FailAllPending(string reason) {

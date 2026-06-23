@@ -768,62 +768,70 @@ export class DiscordHost implements Host {
             consume(monoFloat32ToStereoF32(rs.r.push(samples), gain));
         };
 
-        let audio;
-        let synthErr: unknown = null;
+        // The mixer voice and the native resampler must be released even if the
+        // drain/finalize below throws — otherwise a synth failure leaks a finite
+        // voice slot (the mixer caps at 64) and a WASM resampler. The detached
+        // caller (`speakText`) only logs the crash; it can't clean these up.
         try {
-            audio = await this.onnxTts.synth(text, (samples, srcRate) => {
-                streamedAny = true;
-                feed(samples, srcRate);
-            });
-        } catch (e) {
-            synthErr = e;
-        }
-
-        // If sherpa didn't stream (single-shot onProgress), still play the whole
-        // resolved buffer through the same path so the callout isn't silent.
-        if (!streamedAny && audio && audio.samples.length > 0) {
-            feed(audio.samples, audio.sampleRate);
-        }
-        // Drain the resampler tail and emit the final (declick-out) buffer.
-        if (rs.r) consume(monoFloat32ToStereoF32(rs.r.flush(), gain));
-        flushPending(true);
-        if (mixer && handle) mixer.closeVoice(handle);
-
-        // Capture the exact played audio as one WAV (preserves the sink contract).
-        // The parts are float; convert the concatenation once to s16le for the file.
-        if (this.sink && sinkParts.length > 0) {
+            let audio;
+            let synthErr: unknown = null;
             try {
-                const path = this.sink.write(`SpeakText-${reqId}`, floatToInt16(concatF32(sinkParts)));
-                log.info(`audio sink: SpeakText reqId=${reqId} -> ${path}`);
+                audio = await this.onnxTts.synth(text, (samples, srcRate) => {
+                    streamedAny = true;
+                    feed(samples, srcRate);
+                });
             } catch (e) {
-                log.error('audio sink write failed', e);
+                synthErr = e;
             }
-        }
 
-        // A mid-utterance synth throw can land after chunks already streamed into
-        // the live voice. Those can't be unplayed, and the holdback already
-        // declick-faded the tail, so the partial callout ends cleanly instead of
-        // clicking — report it as played (the listener heard the callout) with a
-        // warning. Only a throw before any audio is a hard failure, matching the
-        // buffered path's "nothing played" behavior.
-        if (synthErr) {
-            if (sinkParts.length === 0) {
-                this._sendLog('Warn', `ONNX synthesis failed; nothing played: ${log.errMsg(synthErr)}`);
-                return { ok: false, error: log.errMsg(synthErr) };
+            // If sherpa didn't stream (single-shot onProgress), still play the whole
+            // resolved buffer through the same path so the callout isn't silent.
+            if (!streamedAny && audio && audio.samples.length > 0) {
+                feed(audio.samples, audio.sampleRate);
             }
-            this._sendLog('Warn', 'ONNX synthesis failed mid-utterance; played the partial callout.');
-            log.info(`SpeakText(stream) reqId=${reqId} partial err=${log.errMsg(synthErr)}`);
+            // Drain the resampler tail and emit the final (declick-out) buffer.
+            if (rs.r) consume(monoFloat32ToStereoF32(rs.r.flush(), gain));
+            flushPending(true);
+
+            // Capture the exact played audio as one WAV (preserves the sink contract).
+            // The parts are float; convert the concatenation once to s16le for the file.
+            if (this.sink && sinkParts.length > 0) {
+                try {
+                    const path = this.sink.write(`SpeakText-${reqId}`, floatToInt16(concatF32(sinkParts)));
+                    log.info(`audio sink: SpeakText reqId=${reqId} -> ${path}`);
+                } catch (e) {
+                    log.error('audio sink write failed', e);
+                }
+            }
+
+            // A mid-utterance synth throw can land after chunks already streamed into
+            // the live voice. Those can't be unplayed, and the holdback already
+            // declick-faded the tail, so the partial callout ends cleanly instead of
+            // clicking — report it as played (the listener heard the callout) with a
+            // warning. Only a throw before any audio is a hard failure, matching the
+            // buffered path's "nothing played" behavior.
+            if (synthErr) {
+                if (sinkParts.length === 0) {
+                    this._sendLog('Warn', `ONNX synthesis failed; nothing played: ${log.errMsg(synthErr)}`);
+                    return { ok: false, error: log.errMsg(synthErr) };
+                }
+                this._sendLog('Warn', 'ONNX synthesis failed mid-utterance; played the partial callout.');
+                log.info(`SpeakText(stream) reqId=${reqId} partial err=${log.errMsg(synthErr)}`);
+                return { ok: true, error: '' };
+            }
+            if (sinkParts.length === 0) {
+                this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
+                return { ok: false, error: 'ONNX synthesis produced no audio' };
+            }
+            if (meta) {
+                const total = (performance.now() - meta.recvT).toFixed(1);
+                log.info(`SpeakText(stream) reqId=${reqId} voice=${this.onnxTts.describe()} gain=${gain.toFixed(3)} recv->done=${total}ms ${this._pingStr()}`);
+            }
             return { ok: true, error: '' };
+        } finally {
+            if (mixer && handle) mixer.closeVoice(handle);
+            rs.r?.dispose();
         }
-        if (sinkParts.length === 0) {
-            this._sendLog('Warn', 'ONNX synthesis produced no audio; skipped.');
-            return { ok: false, error: 'ONNX synthesis produced no audio' };
-        }
-        if (meta) {
-            const total = (performance.now() - meta.recvT).toFixed(1);
-            log.info(`SpeakText(stream) reqId=${reqId} voice=${this.onnxTts.describe()} gain=${gain.toFixed(3)} recv->done=${total}ms ${this._pingStr()}`);
-        }
-        return { ok: true, error: '' };
     }
 
     private _startPingLog(): void {

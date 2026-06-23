@@ -71,10 +71,14 @@ namespace ACT_DiscordTriggers.Core.Ipc {
 
         // Append one line. Thread-safe; callable from any thread (the bridge's Log
         // notifications arrive on thread-pool threads). Never blocks on disk — lines
-        // are batched and flushed in bulk.
-        public static void Append(string text) {
+        // are batched and flushed in bulk. Warn/Error get a severity token after the
+        // timestamp (Info stays unmarked to keep the routine log quiet); the token
+        // sits *after* the leading timestamp, so MergeInterleave's TsLen-prefix parse
+        // and chronological ordering are unaffected.
+        public static void Append(string text, LogLevel level = LogLevel.Info) {
             if (text == null) return;
-            string line = DateTime.Now.ToString(TsFormat, CultureInfo.InvariantCulture) + " " + text;
+            string tag = level == LogLevel.Error ? "ERROR " : level == LogLevel.Warn ? "WARN " : "";
+            string line = DateTime.Now.ToString(TsFormat, CultureInfo.InvariantCulture) + " " + tag + text;
             lock (gate) {
                 if (!initialized) return;
                 buffer.Add(line);

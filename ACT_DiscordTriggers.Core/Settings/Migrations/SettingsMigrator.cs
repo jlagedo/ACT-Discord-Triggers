@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
+using ACT_DiscordTriggers.Core.Ipc;
 
 namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// <summary>
@@ -24,7 +25,7 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
   /// </summary>
   public class SettingsMigrator {
     private readonly List<ISettingsMigration> migrations;
-    private readonly Action<string> log;
+    private readonly Action<string, LogLevel> log;
 
     /// <summary>The shipping set of migrations, ordered by source version.</summary>
     public static IReadOnlyList<ISettingsMigration> DefaultMigrations { get; } =
@@ -33,7 +34,7 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
     public SettingsMigrator() : this(DefaultMigrations) { }
 
     /// <summary>Test seam: supply a custom migration set (and optional log sink).</summary>
-    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations, Action<string> log = null) {
+    public SettingsMigrator(IEnumerable<ISettingsMigration> migrations, Action<string, LogLevel> log = null) {
       this.migrations = migrations?.OrderBy(m => m.FromVersion).ToList()
                         ?? new List<ISettingsMigration>();
       this.log = log;
@@ -57,7 +58,7 @@ namespace ACT_DiscordTriggers.Core.Settings.Migrations {
           throw new SettingsMigrationException(
             $"No migration registered from schema version {version} to {version + 1}.");
         }
-        log?.Invoke($"Applying settings migration v{version} -> v{version + 1}.");
+        log?.Invoke($"Applying settings migration v{version} -> v{version + 1}.", LogLevel.Info);
         step.Apply(root);
         version++;
         root.SetAttributeValue("SchemaVersion", version);

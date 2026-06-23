@@ -33,8 +33,23 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         // drop back to the disconnected state.
         public static event Action Disconnected;
 
-        public delegate void BotMessage(string message);
+        public delegate void BotMessage(string message, LogLevel level);
         public static event BotMessage Log;
+
+        // The single funnel for every line this facade emits to the UI. Callers pass
+        // the severity (default Info); the level rides the Log event to the ViewModel,
+        // which colours the row and tags the file line.
+        private static void Emit(string message, LogLevel level = LogLevel.Info) => Log?.Invoke(message, level);
+
+        // Exception funnel: the UI gets a short, human line; the diagnostics file gets
+        // the full exception (type + inner + stack) via a direct Append so the detail
+        // survives even though the Log event only carries the short text. The VM's
+        // funnel still echoes the short line to the file — that one-line echo is
+        // intentional; don't "simplify" this into a second full-exception append.
+        private static void EmitError(string userMessage, Exception ex) {
+            DiagnosticsLog.Append(userMessage + " | " + ex, LogLevel.Error);
+            Emit(userMessage + ": " + ex.Message, LogLevel.Error);
+        }
 
         public static void SetBridgePath(string dir) {
             bridgeDir = dir;
@@ -65,25 +80,26 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             // Race guard: a fast double-click on Connect would otherwise spawn two
             // node.exe processes since the long async work below runs unlocked.
             if (Interlocked.CompareExchange(ref connectInProgress, 1, 0) != 0) {
-                Log?.Invoke("Connection already in progress.");
+                Emit("Connection already in progress.");
                 return false;
             }
             try {
                 lock (lifecycleLock) {
                     if (pipeClient != null) {
-                        Log?.Invoke("Already connected.");
+                        Emit("Already connected.");
                         return false;
                     }
                 }
                 if (string.IsNullOrEmpty(bridgeDir)) {
-                    Log?.Invoke("Bridge directory not configured. Internal error.");
+                    Emit("Bridge directory not configured. Internal error.", LogLevel.Error);
                     return false;
                 }
 
                 BridgeProcess localBridge = new BridgeProcess();
-                localBridge.OnStderr += msg => Log?.Invoke("[bridge] " + msg);
+                localBridge.OnStderr += msg => Emit("[bridge] " + msg);
                 localBridge.OnExited += code => {
-                    Log?.Invoke($"Bridge process exited (code {code}).");
+                    // A clean exit (code 0) is routine teardown; any other code is a crash.
+                    Emit($"Bridge process exited (code {code}).", code == 0 ? LogLevel.Info : LogLevel.Error);
                     CleanupAfterPipeBroken();
                 };
 
@@ -91,17 +107,17 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 try {
                     pipe = await localBridge.StartAndConnectAsync(bridgeDir).ConfigureAwait(false);
                 } catch (Exception ex) {
-                    Log?.Invoke("Failed to start bridge: " + ex.Message);
+                    EmitError("Failed to start bridge", ex);
                     try { localBridge.Dispose(); } catch { }
                     return false;
                 }
 
                 PipeClient localClient = new PipeClient(pipe);
-                localClient.OnLog += (msg, lvl) => Log?.Invoke(msg);
+                localClient.OnLog += (msg, lvl) => Emit(msg, LogLevels.ParseWire(lvl));
                 localClient.OnBotReady += () => BotReady?.Invoke();
-                localClient.OnDisconnected += reason => Log?.Invoke("Discord disconnected: " + reason);
+                localClient.OnDisconnected += reason => Emit("Discord disconnected: " + reason, LogLevel.Warn);
                 localClient.OnPipeBroken += reason => {
-                    Log?.Invoke("Bridge connection lost: " + reason);
+                    Emit("Bridge connection lost: " + reason, LogLevel.Warn);
                     CleanupAfterPipeBroken();
                 };
                 localClient.Start();
@@ -117,12 +133,12 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                         new HelloRequest { ProtocolVersion = ProtocolConstants.Version },
                         TimeSpan.FromSeconds(10)).ConfigureAwait(false);
                 } catch (Exception ex) {
-                    Log?.Invoke("Bridge handshake error: " + ex.Message);
+                    EmitError("Bridge handshake error", ex);
                     CleanupAfterPipeBroken();
                     return false;
                 }
                 if (!hello.Ok) {
-                    Log?.Invoke("Bridge handshake failed: " + hello.Error);
+                    Emit("Bridge handshake failed: " + hello.Error, LogLevel.Error);
                     CleanupAfterPipeBroken();
                     return false;
                 }
@@ -138,9 +154,9 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                         new SetConfigRequest<TConfig> { Config = config, TtsParams = ttsParams },
                         TimeSpan.FromSeconds(5)).ConfigureAwait(false);
                     localOk = setCfg.Ok;
-                    if (!setCfg.Ok) Log?.Invoke("SetConfig: " + setCfg.Error);
+                    if (!setCfg.Ok) Emit("SetConfig: " + setCfg.Error, LogLevel.Error);
                 } catch (Exception ex) {
-                    Log?.Invoke("SetConfig failed: " + ex.Message);
+                    EmitError("SetConfig failed", ex);
                 }
 
                 // Local-output mode stops here: no Discord login follows. Report
@@ -154,18 +170,18 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                         // Login failed (e.g. bad token). Tear the bridge down so the
                         // user can retry with a new token — otherwise the stale
                         // pipeClient makes the next Connect bail with "Already connected."
-                        Log?.Invoke("Discord login failed: " + connect.Error);
+                        Emit("Discord login failed: " + connect.Error, LogLevel.Error);
                         CleanupAfterPipeBroken();
                         return false;
                     }
                 } catch (Exception ex) {
-                    Log?.Invoke("Discord login error: " + ex.Message);
+                    EmitError("Discord login error", ex);
                     CleanupAfterPipeBroken();
                     return false;
                 }
                 return true;
             } catch (Exception ex) {
-                Log?.Invoke("Connect error: " + ex.Message);
+                EmitError("Connect error", ex);
                 return false;
             } finally {
                 Interlocked.Exchange(ref connectInProgress, 0);
@@ -183,7 +199,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     new SetConfigRequest<TConfig> { Config = config, TtsParams = ttsParams },
                     TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             } catch (Exception ex) {
-                Log?.Invoke("SetConfig failed: " + ex.Message);
+                EmitError("SetConfig failed", ex);
             }
         }
 
@@ -255,7 +271,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     new GetServersRequest()).ConfigureAwait(false);
                 return resp.Data?.Servers ?? new string[0];
             } catch (Exception ex) {
-                Log?.Invoke("GetServersAsync failed: " + ex.Message);
+                EmitError("GetServersAsync failed", ex);
                 return new string[0];
             }
         }
@@ -268,7 +284,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     new GetChannelsRequest { Server = server }).ConfigureAwait(false);
                 return resp.Data?.Channels ?? new string[0];
             } catch (Exception ex) {
-                Log?.Invoke("GetChannelsAsync failed: " + ex.Message);
+                EmitError("GetChannelsAsync failed", ex);
                 return new string[0];
             }
         }
@@ -276,7 +292,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
         public static async Task<bool> JoinChannel(string server, string channel) {
             var pc = pipeClient;
             if (pc == null) {
-                Log?.Invoke("Cannot join channel: bridge not connected.");
+                Emit("Cannot join channel: bridge not connected.", LogLevel.Warn);
                 return false;
             }
             try {
@@ -284,11 +300,11 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                     new JoinChannelRequest { Server = server, Channel = channel },
                     TimeSpan.FromSeconds(15)).ConfigureAwait(false);
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
-                    Log?.Invoke("JoinChannel failed: " + resp.Error);
+                    Emit("JoinChannel failed: " + resp.Error, LogLevel.Error);
                 }
                 return resp.Ok;
             } catch (Exception ex) {
-                Log?.Invoke("JoinChannel error: " + ex.Message);
+                EmitError("JoinChannel error", ex);
                 return false;
             }
         }
@@ -300,7 +316,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 await pc.SendAsync<BridgeResponse>(
                     new LeaveChannelRequest(), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
             } catch (Exception ex) {
-                Log?.Invoke("LeaveChannelAsync failed: " + ex.Message);
+                EmitError("LeaveChannelAsync failed", ex);
             }
         }
 
@@ -334,14 +350,14 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                         pcm = ms.ToArray();
                     }
                 } catch (Exception ex) {
-                    Log?.Invoke("TTS synthesis failed: " + ex.Message);
+                    EmitError("TTS synthesis failed", ex);
                     return;
                 }
                 swSynth.Stop();
                 var swIpc = Stopwatch.StartNew();
                 await SendSpeakPcmAsync(pcm).ConfigureAwait(false);
                 swIpc.Stop();
-                Log?.Invoke($"Speak timing: synth={swSynth.ElapsedMilliseconds}ms ipc={swIpc.ElapsedMilliseconds}ms bytes={pcm.Length}");
+                Emit($"Speak timing: synth={swSynth.ElapsedMilliseconds}ms ipc={swIpc.ElapsedMilliseconds}ms bytes={pcm.Length}");
             });
         }
 
@@ -371,7 +387,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
             IBridgeRequest req, string notConnected, string rejectedPrefix, string opName) {
             var pc = pipeClient;
             if (pc == null) {
-                Log?.Invoke(notConnected);
+                Emit(notConnected, LogLevel.Warn);
                 return;
             }
             var sw = Stopwatch.StartNew();
@@ -379,28 +395,28 @@ namespace ACT_DiscordTriggers.Core.Ipc {
                 var resp = await pc.SendAsync<BridgeResponse>(req, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 sw.Stop();
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
-                    Log?.Invoke(rejectedPrefix + resp.Error);
+                    Emit(rejectedPrefix + resp.Error, LogLevel.Error);
                 } else {
-                    Log?.Invoke($"{opName} timing: ipc={sw.ElapsedMilliseconds}ms");
+                    Emit($"{opName} timing: ipc={sw.ElapsedMilliseconds}ms");
                 }
             } catch (Exception ex) {
-                Log?.Invoke($"{opName} error: " + ex.Message);
+                EmitError($"{opName} error", ex);
             }
         }
 
         private static async Task SendSpeakPcmAsync(byte[] pcm) {
             var pc = pipeClient;
             if (pc == null) {
-                Log?.Invoke("Cannot send audio: bridge not connected.");
+                Emit("Cannot send audio: bridge not connected.", LogLevel.Warn);
                 return;
             }
             try {
                 var resp = await pc.SendSpeakPcmAsync(pcm, 48000, 16, 2, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 if (!resp.Ok && !string.IsNullOrEmpty(resp.Error)) {
-                    Log?.Invoke("Bridge audio rejected: " + resp.Error);
+                    Emit("Bridge audio rejected: " + resp.Error, LogLevel.Error);
                 }
             } catch (Exception ex) {
-                Log?.Invoke("SpeakPcm error: " + ex.Message);
+                EmitError("SpeakPcm error", ex);
             }
         }
     }

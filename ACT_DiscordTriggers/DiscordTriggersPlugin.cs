@@ -83,7 +83,10 @@ namespace ACT_DiscordTriggers {
           // already guarded), so resume off the UI thread.
           await view.OnPluginDeInitAsync().ConfigureAwait(false);
       } catch (Exception ex) {
-        try { DiagnosticsLog.Append("DeInit error: " + ex); DiagnosticsLog.Flush(); } catch { }
+        // Deliberate dual-channel: our diagnostics file is the primary record, but it
+        // may not finish flushing as the host tears the plugin down, so ACT's own
+        // exception log is the durable fallback. Keep both.
+        try { DiagnosticsLog.Append("DeInit error: " + ex, LogLevel.Error); DiagnosticsLog.Flush(); } catch { }
         try { ActGlobals.oFormActMain.WriteExceptionLog(ex, "Error de-initializing Discord plugin."); } catch { }
       } finally {
         // Flush + regenerate the unified diagnostics file one last time so it reflects

@@ -23,6 +23,14 @@ async function main(): Promise<void> {
 
     const server = net.createServer({ allowHalfOpen: false });
 
+    // Startup watchdog. Once a client connects, teardown rides the socket's
+    // close/error handlers; but before any client connects there is no such hook,
+    // so if the plugin host is hard-killed during the spawn -> connect window the
+    // bridge would be orphaned with nothing to close. Reap ourselves if no client
+    // shows up in time. Overridable via ACT_DT_STARTUP_TIMEOUT_MS (used by tests).
+    const startupTimeoutMs = Number(process.env.ACT_DT_STARTUP_TIMEOUT_MS) || 30000;
+    let startupTimer: ReturnType<typeof setTimeout> | null = null;
+
     server.on('error', (err: Error) => {
         log.error('pipe server error', err);
         process.stderr.write(`BRIDGE_FATAL ${log.redact(err.message)}\n`);
@@ -30,6 +38,7 @@ async function main(): Promise<void> {
     });
 
     server.on('connection', (socket: net.Socket) => {
+        if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
         log.info('client connected');
         // Stop accepting new clients (one plugin per bridge)
         server.close();
@@ -72,6 +81,13 @@ async function main(): Promise<void> {
     process.stdout.write(`BRIDGE_READY pipe=${pipeName}\n`);
     log.info('BRIDGE_READY printed; waiting for client');
 
+    // Arm the orphan watchdog now that we're announced and listening. Cleared the
+    // moment a client connects (see the connection handler above).
+    startupTimer = setTimeout(() => {
+        log.error(`no client connected within ${startupTimeoutMs}ms; exiting`);
+        process.exit(0);
+    }, startupTimeoutMs);
+
     const shutdown = async (sig: string): Promise<void> => {
         log.info(`signal ${sig}; shutting down`);
         try { await host.disconnect(); } catch { /* ignore */ }
@@ -91,8 +107,10 @@ async function main(): Promise<void> {
         process.exit(2);
     });
     process.on('unhandledRejection', (reason: unknown) => {
-        const detail = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
-        log.error('unhandledRejection: ' + detail);
+        // Log-only (no exit): unlike uncaughtException, a stray rejection doesn't
+        // necessarily corrupt bridge state. Route through error(msg, err) so stack
+        // formatting + secret redaction match every other error site.
+        log.error('unhandledRejection', reason);
     });
 }
 

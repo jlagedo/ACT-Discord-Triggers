@@ -91,6 +91,25 @@ namespace ACT_DiscordTriggers.Tests {
             Assert.Empty(Merge(null, null));
         }
 
+        [Fact]
+        public void Severity_token_after_timestamp_does_not_disturb_ordering() {
+            // DiagnosticsLog.Append writes "<timestamp> ERROR <text>" / "<timestamp> WARN <text>"
+            // for flagged lines. The token sits AFTER the leading timestamp, so the
+            // TsLen-prefix parse still sorts these chronologically with plain lines.
+            string plugin =
+                "2026-06-15 20:00:00.100 INFO routine\n" +
+                "2026-06-15 20:00:00.300 ERROR Connect failed | System.Exception: boom\n";
+            string bridge =
+                "2026-06-15 20:00:00.200 WARN bridge hiccup\n";
+
+            var merged = Merge(plugin, bridge);
+
+            Assert.Equal(3, merged.Count);
+            Assert.StartsWith("PLG | 2026-06-15 20:00:00.100 INFO routine", merged[0]);
+            Assert.StartsWith("BRG | 2026-06-15 20:00:00.200 WARN bridge hiccup", merged[1]);
+            Assert.StartsWith("PLG | 2026-06-15 20:00:00.300 ERROR Connect failed", merged[2]);
+        }
+
         private static string LastToken(string line) => line.Split(' ').Last();
     }
 }

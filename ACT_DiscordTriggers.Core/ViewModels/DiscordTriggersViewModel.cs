@@ -60,21 +60,18 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // default sound device (no token/channel/login). Paired bools let the Main-tab
     // choice-cards two-way bind without a converter. Changing the mode at runtime
     // tears down the active path and, for local, brings the bridge up immediately.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBotMode))]
+    [NotifyPropertyChangedFor(nameof(IsLocalMode))]
+    [NotifyPropertyChangedFor(nameof(CanConnect))]
+    [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
     private string outputMode = "bot";   // "bot" | "local"
-    public string OutputMode {
-      get => outputMode;
-      set {
-        if (!SetProperty(ref outputMode, value)) return;
-        OnPropertyChanged(nameof(IsBotMode));
-        OnPropertyChanged(nameof(IsLocalMode));
-        OnPropertyChanged(nameof(CanConnect));
-        ConnectCommand.NotifyCanExecuteChanged();
-        // Load sets the mode under suppressPush; Initialize does the initial bring-up.
-        if (!suppressPush) _ = ApplyOutputModeAsync();
-      }
+    // Load sets the mode under suppressPush; Initialize does the initial bring-up.
+    partial void OnOutputModeChanged(string value) {
+      if (!suppressPush) _ = ApplyOutputModeAsync();
     }
-    public bool IsBotMode { get => outputMode == "bot"; set { if (value) OutputMode = "bot"; } }
-    public bool IsLocalMode { get => outputMode == "local"; set { if (value) OutputMode = "local"; } }
+    public bool IsBotMode { get => OutputMode == "bot"; set { if (value) OutputMode = "bot"; } }
+    public bool IsLocalMode { get => OutputMode == "local"; set { if (value) OutputMode = "local"; } }
 
     // Unified "audio output is live" flag — true once a Discord channel is joined or
     // the local device is running. Drives the Test gate and is flipped only through
@@ -161,56 +158,48 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // Engine and Quality are single-value choices exposed as paired bools so the
     // choice-cards / segmented RadioButtons can two-way bind without a converter:
     // checking one sets the backing string, which re-raises both bools.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsOnnx))]
+    [NotifyPropertyChangedFor(nameof(IsSapi))]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadPrompt))]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadStrip))]
+    [NotifyPropertyChangedFor(nameof(DownloadButtonVisible))]
+    [NotifyCanExecuteChangedFor(nameof(TestCommand))]
     private string engine = "sapi";   // "sapi" | "onnx"
-    public string Engine {
-      get => engine;
-      set {
-        if (!SetProperty(ref engine, value)) return;
-        OnPropertyChanged(nameof(IsOnnx));
-        OnPropertyChanged(nameof(IsSapi));
-        OnPropertyChanged(nameof(ShowDownloadPrompt));
-        OnPropertyChanged(nameof(ShowDownloadStrip));
-        OnPropertyChanged(nameof(DownloadButtonVisible));
-        TestCommand.NotifyCanExecuteChanged();
-        ScheduleConfigPush();
-      }
-    }
-    public bool IsOnnx { get => engine == "onnx"; set { if (value) Engine = "onnx"; } }
-    public bool IsSapi { get => engine == "sapi"; set { if (value) Engine = "sapi"; } }
+    partial void OnEngineChanged(string value) => ScheduleConfigPush();
+    public bool IsOnnx { get => Engine == "onnx"; set { if (value) Engine = "onnx"; } }
+    public bool IsSapi { get => Engine == "sapi"; set { if (value) Engine = "sapi"; } }
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsPiper))]
+    [NotifyPropertyChangedFor(nameof(IsKokoro))]
+    [NotifyPropertyChangedFor(nameof(QualityDescription))]
     private string onnxFamily = "piper";   // "piper" | "kokoro" (the Quality toggle)
-    public string OnnxFamily {
-      get => onnxFamily;
-      set {
-        if (!SetProperty(ref onnxFamily, value)) return;
-        OnPropertyChanged(nameof(IsPiper));
-        OnPropertyChanged(nameof(IsKokoro));
-        OnPropertyChanged(nameof(QualityDescription));
-        RebuildOnnxVoices(value);   // re-selects, which refreshes the download row
-        ScheduleConfigPush();
-        // Load sets the family under suppressPush; Initialize logs the scan once instead.
-        if (!suppressPush) Log("Quality set to " + value + " — " + InstallCountText() + ".");
-      }
+    partial void OnOnnxFamilyChanged(string value) {
+      RebuildOnnxVoices(value);   // re-selects, which refreshes the download row
+      ScheduleConfigPush();
+      // Load sets the family under suppressPush; Initialize logs the scan once instead.
+      if (!suppressPush) Log("Quality set to " + value + " — " + InstallCountText() + ".");
     }
-    public bool IsPiper { get => onnxFamily == "piper"; set { if (value) OnnxFamily = "piper"; } }
-    public bool IsKokoro { get => onnxFamily == "kokoro"; set { if (value) OnnxFamily = "kokoro"; } }
+    public bool IsPiper { get => OnnxFamily == "piper"; set { if (value) OnnxFamily = "piper"; } }
+    public bool IsKokoro { get => OnnxFamily == "kokoro"; set { if (value) OnnxFamily = "kokoro"; } }
     public string QualityDescription => IsKokoro
       ? "Kokoro — most realistic; one 333 MB pack, heavier on CPU."
       : "Piper — light on CPU, ~150 ms per callout.";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(TestCommand))]
+    [NotifyPropertyChangedFor(nameof(SelectedVoiceInstalled))]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadPrompt))]
+    [NotifyPropertyChangedFor(nameof(ShowDownloadStrip))]
+    [NotifyPropertyChangedFor(nameof(DownloadButtonVisible))]
+    [NotifyPropertyChangedFor(nameof(DownloadNoticeText))]
+    [NotifyPropertyChangedFor(nameof(DownloadButtonText))]
+    [NotifyPropertyChangedFor(nameof(DownloadStatusText))]
     private OnnxVoiceItem selectedOnnxVoice;
     partial void OnSelectedOnnxVoiceChanged(OnnxVoiceItem value) {
       DownloadJustCompleted = false;   // a fresh pick clears the prior "ready" confirmation
-      OnPropertyChanged(nameof(SelectedVoiceInstalled));
-      OnPropertyChanged(nameof(ShowDownloadPrompt));
-      OnPropertyChanged(nameof(ShowDownloadStrip));
-      OnPropertyChanged(nameof(DownloadButtonVisible));
-      OnPropertyChanged(nameof(DownloadNoticeText));
-      OnPropertyChanged(nameof(DownloadButtonText));
-      OnPropertyChanged(nameof(DownloadStatusText));
-      ScheduleConfigPush();   // the picked voice (OnnxVoice id) rides in SetConfig
+      ScheduleConfigPush();            // the picked voice (OnnxVoice id) rides in SetConfig
     }
     public bool SelectedVoiceInstalled => SelectedOnnxVoice?.Installed == true;
     // The strip shows for an ONNX voice that isn't on disk yet (the needs-download button
@@ -251,20 +240,15 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     [ObservableProperty] private string downloadDoneText = "";
 
     // CPU threads (Advanced) — three discrete choices, same paired-bool pattern.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsThreads1))]
+    [NotifyPropertyChangedFor(nameof(IsThreads2))]
+    [NotifyPropertyChangedFor(nameof(IsThreads4))]
     private int ttsThreads = 4;
-    public int TtsThreads {
-      get => ttsThreads;
-      set {
-        if (!SetProperty(ref ttsThreads, value)) return;
-        OnPropertyChanged(nameof(IsThreads1));
-        OnPropertyChanged(nameof(IsThreads2));
-        OnPropertyChanged(nameof(IsThreads4));
-        ScheduleConfigPush();
-      }
-    }
-    public bool IsThreads1 { get => ttsThreads == 1; set { if (value) TtsThreads = 1; } }
-    public bool IsThreads2 { get => ttsThreads == 2; set { if (value) TtsThreads = 2; } }
-    public bool IsThreads4 { get => ttsThreads == 4; set { if (value) TtsThreads = 4; } }
+    partial void OnTtsThreadsChanged(int value) => ScheduleConfigPush();
+    public bool IsThreads1 { get => TtsThreads == 1; set { if (value) TtsThreads = 1; } }
+    public bool IsThreads2 { get => TtsThreads == 2; set { if (value) TtsThreads = 2; } }
+    public bool IsThreads4 { get => TtsThreads == 4; set { if (value) TtsThreads = 4; } }
 
     [ObservableProperty] private string modelsDir = "";
     partial void OnModelsDirChanged(string value) {
@@ -327,7 +311,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Log("Connecting to Discord...");
         await discord.ConnectAsync(ToSettings());
       } catch (Exception ex) {
-        Log("Connect failed: " + ex.Message);
+        Log("Connect failed", ex);
       }
     }
 
@@ -340,7 +324,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       try {
         await discord.DeinitAsync();
       } catch (Exception ex) {
-        Log("Disconnect error: " + ex.Message);
+        Log("Disconnect error", ex);
       }
     }
 
@@ -389,7 +373,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       try {
         await discord.DeinitAsync();
       } catch (Exception ex) {
-        Log("Output mode switch teardown error: " + ex.Message);
+        Log("Output mode switch teardown error", ex);
       }
       if (IsLocalMode) await StartLocalOutputAsync();
     }
@@ -404,9 +388,9 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Log("Starting local audio output…");
         bool live = await discord.StartLocalAsync(ToSettings());
         if (live) OnUi(ActivateOutput);
-        else Log("Local audio output did not start — check that an output device is available.");
+        else Log("Local audio output did not start — check that an output device is available.", LogLevel.Warn);
       } catch (Exception ex) {
-        Log("Local audio output failed to start: " + ex.Message);
+        Log("Local audio output failed to start", ex);
       }
     }
 
@@ -418,7 +402,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Log("Joined channel " + SelectedChannel + " on " + SelectedServer + ".");
         ActivateOutput();
       } else {
-        Log("Unable to join channel. Does your bot have permission to join this channel?");
+        Log("Unable to join channel. Does your bot have permission to join this channel?", LogLevel.Warn);
         CanJoin = true;
         await PopulateServersAsync();
       }
@@ -433,9 +417,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         Log("Left channel.");
         DeactivateOutput();
       } catch (Exception ex) {
-        Log("Error leaving channel. Possible connection issue.");
         CanLeave = true;
-        Log(ex.Message);
+        Log("Error leaving channel. Possible connection issue.", ex);
       }
     }
 
@@ -458,7 +441,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       try {
         await SpeakTextCoreAsync("Discord Triggers voice test.");
       } catch (Exception ex) {
-        Log("Test playback error: " + ex.Message);
+        Log("Test playback error", ex);
       }
     }
 
@@ -481,7 +464,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         // Progress<T> posts back to the captured UI SynchronizationContext, so updating
         // the observable DownloadProgress from the download thread is UI-safe.
         var progress = new Progress<double>(p => DownloadProgress = p);
-        await OnnxDownloader.DownloadAsync(item.Info, ModelsDir, progress, cts.Token, Log);
+        await OnnxDownloader.DownloadAsync(item.Info, ModelsDir, progress, cts.Token, msg => Log(msg));
 
         RefreshInstallState();
         Log("Downloaded " + item.Name + ".");
@@ -497,16 +480,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         DownloadDoneText = item.Name + " is ready.";
         DownloadJustCompleted = true;
       } catch (OperationCanceledException) {
-        Log("Download of " + item.Name + " was cancelled.");
+        Log("Download of " + item.Name + " was cancelled.", LogLevel.Warn);
       } catch (Exception ex) {
-        Log("Download of " + item.Name + " failed: " + ex.Message);
+        Log("Download of " + item.Name + " failed", ex);
       } finally {
         IsDownloading = false;
         if (downloadCts == cts) downloadCts = null;
         cts.Dispose();
-        OnPropertyChanged(nameof(ShowDownloadPrompt));
-        OnPropertyChanged(nameof(ShowDownloadStrip));
-        OnPropertyChanged(nameof(DownloadButtonVisible));
+        NotifyDownloadStateChanged();
       }
     }
 
@@ -516,6 +497,14 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private void RefreshInstallState() {
       var dir = OnnxCatalog.ResolveModelsDir(ModelsDir);
       foreach (var v in OnnxVoices) v.Installed = OnnxCatalog.IsInstalled(v.Info, dir);
+      NotifyDownloadStateChanged();
+    }
+
+    // Raise the download-strip + Test-gate notifications. Shared by RefreshInstallState
+    // (which mutates each OnnxVoiceItem.Installed directly, so the selectedOnnxVoice
+    // setter's attributes don't cover it) and the DownloadVoice completion path, so the
+    // two sites can't drift.
+    private void NotifyDownloadStateChanged() {
       OnPropertyChanged(nameof(SelectedVoiceInstalled));
       OnPropertyChanged(nameof(ShowDownloadPrompt));
       OnPropertyChanged(nameof(ShowDownloadStrip));
@@ -549,7 +538,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       var match = OnnxVoices.FirstOrDefault(
         x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
       if (match != null) { SelectedOnnxVoice = match; return; }
-      Log("Saved ONNX voice \"" + id + "\" is no longer available; using the default for " + OnnxFamily + ".");
+      Log("Saved ONNX voice \"" + id + "\" is no longer available; using the default for " + OnnxFamily + ".", LogLevel.Warn);
     }
 
     // --- Information-page actions (bound from the WPF view) ---------------------
@@ -580,7 +569,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       try {
         await SpeakTextCoreAsync(text).ConfigureAwait(false);
       } catch (Exception ex) {
-        Log("TTS playback error: " + ex.Message);
+        Log("TTS playback error", ex);
       }
     }
 
@@ -603,7 +592,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       try {
         await discord.SpeakFileAsync(path).ConfigureAwait(false);
       } catch (Exception ex) {
-        Log("Sound playback error: " + ex.Message);
+        Log("Sound playback error", ex);
       }
     }
 
@@ -656,14 +645,24 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- Logging ----------------------------------------------------------------
-    public void Log(string text) {
+    public void Log(string text, LogLevel level = LogLevel.Info) {
       // Capture to the diagnostics file first, off the UI thread, so a busy UI never
-      // delays or drops a line; UI display is a separate, best-effort concern.
-      DiagnosticsLog.Append(text);
-      OnUi(() => LogEntries.Add(new LogEntry(DateTime.Now, text)));
+      // delays or drops a line; UI display is a separate, best-effort concern. The
+      // level tags the file line and drives the row colour.
+      DiagnosticsLog.Append(text, level);
+      OnUi(() => LogEntries.Add(new LogEntry(DateTime.Now, text, level)));
     }
 
-    private void OnLog(string text) => Log(text);
+    // Exception overload: the UI/file row stays a short human line, while the file
+    // ALSO records the full exception (type + inner + stack) — the detail a user's
+    // diagnostics file needs that ex.Message alone drops. Defaults to Error since
+    // this overload exists for caught failures.
+    public void Log(string userText, Exception ex, LogLevel level = LogLevel.Error) {
+      DiagnosticsLog.Append(userText + " | " + ex, level);
+      OnUi(() => LogEntries.Add(new LogEntry(DateTime.Now, userText + ": " + ex.Message, level)));
+    }
+
+    private void OnLog(string text, LogLevel level) => Log(text, level);
 
     private void OnBotReady() {
       // Bridge notifications arrive on a thread-pool thread; marshal to the UI.
@@ -690,8 +689,7 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
           SelectedServer = Servers.Count > 0 ? Servers[0] : null;
         });
       } catch (Exception ex) {
-        Log("Error populating servers.");
-        Log(ex.Message);
+        Log("Error populating servers.", ex);
       }
     }
 
@@ -705,12 +703,11 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
             SelectedChannel = Channels[0];
             Log("Found " + Channels.Count + " available voice channel(s) for " + server);
           } else {
-            Log("Error: Could not find any available voice channels for " + server);
+            Log("Error: Could not find any available voice channels for " + server, LogLevel.Warn);
           }
         });
       } catch (Exception ex) {
-        Log("Error populating channels.");
-        Log(ex.Message);
+        Log("Error populating channels.", ex);
       }
     }
 

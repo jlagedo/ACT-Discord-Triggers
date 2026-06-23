@@ -10,6 +10,10 @@ let writing = false;
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
+// Latch so a persistently unwritable log path is reported once (to stderr, which
+// the plugin captures) instead of silently dropping every diagnostic line.
+let writeFailed = false;
+
 function exeDir(): string {
     // process.execPath is always node.exe (prod ships node.exe next to bundle.js,
     // dev runs via npm), so this falls back to the main script's cwd.
@@ -88,8 +92,15 @@ function drain(): void {
     if (writing || writeQueue.length === 0 || !logPath) return;
     writing = true;
     const batch = writeQueue.splice(0, writeQueue.length).join('');
-    fs.appendFile(logPath, batch, { encoding: 'utf8' }, () => {
+    fs.appendFile(logPath, batch, { encoding: 'utf8' }, (err) => {
         writing = false;
+        if (err && !writeFailed) {
+            writeFailed = true;
+            // stderr is allowed (only stdout is reserved for BRIDGE_READY). Report
+            // once so a broken log path is visible without spamming every line.
+            try { process.stderr.write(`BRIDGE_LOG_WRITE_FAILED ${redact(err.message)}\n`); }
+            catch { /* nothing more we can do */ }
+        }
         if (writeQueue.length > 0) drain();
     });
 }

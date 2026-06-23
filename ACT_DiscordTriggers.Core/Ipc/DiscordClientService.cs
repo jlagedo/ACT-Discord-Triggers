@@ -13,12 +13,12 @@ namespace ACT_DiscordTriggers.Core.Ipc {
     private readonly Action disconnectedHandler;
 
     public event Action BotReady;
-    public event Action<string> Log;
+    public event Action<string, LogLevel> Log;
     public event Action Disconnected;
 
     public DiscordClientService() {
       botReadyHandler = () => BotReady?.Invoke();
-      logHandler = msg => Log?.Invoke(msg);
+      logHandler = (msg, level) => Log?.Invoke(msg, level);
       disconnectedHandler = () => Disconnected?.Invoke();
       DiscordClient.BotReady += botReadyHandler;
       DiscordClient.Log += logHandler;

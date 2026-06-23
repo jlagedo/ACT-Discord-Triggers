@@ -341,7 +341,7 @@ namespace ACT_DiscordTriggers.Tests {
     public void Migrator_LogsEachStep() {
       var logs = new List<string>();
       var doc = XDocument.Parse("<DiscordTriggersSettings SchemaVersion=\"1\" />");
-      var migrator = new SettingsMigrator(new ISettingsMigration[] { new FakeV1ToV2() }, logs.Add);
+      var migrator = new SettingsMigrator(new ISettingsMigration[] { new FakeV1ToV2() }, (m, lvl) => logs.Add(m));
 
       migrator.MigrateInPlace(doc, targetVersion: 2);
 
@@ -355,7 +355,7 @@ namespace ACT_DiscordTriggers.Tests {
         File.WriteAllText(path, LegacyXml, new UTF8Encoding(false));
         var logs = new List<string>();
 
-        new SettingsStore(path, new SettingsMigrator(), logs.Add).Load();
+        new SettingsStore(path, new SettingsMigrator(), (m, lvl) => logs.Add(m)).Load();
 
         Assert.Contains(logs, l => l.Contains("Detected legacy"));
         Assert.Contains(logs, l => l.Contains("migrated"));

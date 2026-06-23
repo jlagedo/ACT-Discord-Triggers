@@ -9,7 +9,7 @@ namespace ACT_DiscordTriggers.Core.Ipc {
   // References only PluginSettings + BCL, so it source-links into the test project.
   public interface IDiscordService {
     event Action BotReady;
-    event Action<string> Log;
+    event Action<string, LogLevel> Log;
     // Raised when the bridge connection is lost (clean teardown, bridge exit, or a
     // broken pipe), so the UI can revert to a disconnected state.
     event Action Disconnected;

@@ -233,21 +233,36 @@ export class MonoStreamResampler {
         const expected = Math.floor(this.totalIn * this.ratio);
         let remaining = expected - this.emitted;
         const parts: Float32Array[] = [];
-        if (remaining > 0) {
-            const zeros = new Float64Array(MAX_IN);
-            let guard = 0;
-            while (remaining > 0 && guard++ < 100000) {
-                const n = rs.processInto(zeros, this.scratch);
-                if (n > 0) {
-                    const take = Math.min(n, remaining);
-                    parts.push(f64ToF32(this.scratch.subarray(0, take)));
-                    this.emitted += take;
-                    remaining -= take;
+        try {
+            if (remaining > 0) {
+                const zeros = new Float64Array(MAX_IN);
+                let guard = 0;
+                while (remaining > 0 && guard++ < 100000) {
+                    const n = rs.processInto(zeros, this.scratch);
+                    if (n > 0) {
+                        const take = Math.min(n, remaining);
+                        parts.push(f64ToF32(this.scratch.subarray(0, take)));
+                        this.emitted += take;
+                        remaining -= take;
+                    }
                 }
             }
+        } finally {
+            // Release the native resampler even if processInto throws mid-drain,
+            // so a synth failure can't leak the WASM resampler.
+            rs.destroy();
+            this.rs = null;
         }
-        rs.destroy();
-        this.rs = null;
         return parts.length === 0 ? new Float32Array(0) : concatF32(parts);
+    }
+
+    // Release the native resampler without draining. Idempotent — safe to call
+    // after flush() (which already released it) or on an error path that never
+    // reached flush().
+    dispose(): void {
+        if (this.rs) {
+            this.rs.destroy();
+            this.rs = null;
+        }
     }
 }

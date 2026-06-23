@@ -28,12 +28,12 @@ function makePipeName(suffix: string): string {
     return `bridge-test-${process.pid}-${Date.now()}-${suffix}`;
 }
 
-async function spawnBridge(suffix: string): Promise<Bridge> {
+async function spawnBridge(suffix: string, env?: Record<string, string>): Promise<Bridge> {
     const pipeName = makePipeName(suffix);
     const proc = spawn(
         process.execPath,
         ['--import', 'tsx', BRIDGE_ENTRY, pipeName],
-        { cwd: pkgRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+        { cwd: pkgRoot, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } },
     );
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -236,6 +236,25 @@ test('lifecycle: peer disconnect (without Shutdown) causes bridge to exit', skip
             )),
         ]);
         // Bridge exits cleanly (code 0); mirrors the .NET-side ReadFrameAsync→null behavior.
+        assert.equal(code, 0);
+    } finally {
+        await killIfAlive(bridge);
+    }
+});
+
+test('lifecycle: startup watchdog reaps the bridge if no client connects', skipOpts, async () => {
+    // Spawn with a short watchdog and deliberately never connect the pipe. The
+    // bridge must self-terminate (code 0) instead of orphaning — the spawn->connect
+    // window that a hard host-kill would otherwise leave dangling.
+    const bridge = await spawnBridge('watchdog', { ACT_DT_STARTUP_TIMEOUT_MS: '500' });
+    try {
+        const code = await Promise.race([
+            bridge.exited,
+            new Promise<number | null>((_r, rej) => setTimeout(
+                () => rej(new Error(`watchdog did not fire. stderr=${bridge.stderr.join('\n')}`)),
+                5000,
+            )),
+        ]);
         assert.equal(code, 0);
     } finally {
         await killIfAlive(bridge);

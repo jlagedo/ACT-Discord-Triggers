@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import type { Socket } from 'node:net';
 
-import { PipeServer, Op } from '../src/pipe-server.js';
+import { PipeServer, Op, MAX_QUEUED_LOG_FRAMES } from '../src/pipe-server.js';
 import { PROTOCOL_VERSION, MAX_FRAME_BYTES, DEFAULT_CONFIG_VIEW } from '../src/protocol.js';
 import pkg from '../package.json' with { type: 'json' };
 import { FakeSocket } from './helpers/fake-socket.js';
@@ -93,6 +93,37 @@ test('frame parser: two concatenated frames in one chunk dispatch in order', asy
     assert.equal(frames[0]!['reqId'], 1);
     assert.equal(frames[1]!['op'], Op.Result);
     assert.equal(frames[1]!['reqId'], 2);
+});
+
+test('frame parser: length prefix split across chunks reassembles', async () => {
+    const { sock } = makeHarness();
+    const buf = encodeFrame({ op: Op.Hello, reqId: 21, protocolVersion: PROTOCOL_VERSION });
+    // First two bytes of the 4-byte length prefix, then the rest.
+    sock.emit('data', buf.subarray(0, 2));
+    await tick(2);
+    assert.equal(sock.writes.length, 0, 'no response before the full prefix + body arrives');
+    sock.emit('data', buf.subarray(2));
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['reqId'], 21);
+});
+
+test('frame parser: large binary frame fed in many small chunks dispatches once, byte-equal', async () => {
+    const { sock, host } = makeHarness();
+    host.nextSpeakPcm({ ok: true, error: '' });
+    // ~1 MB of PCM delivered in 64-byte chunks: exercises the linear-reassembly
+    // path (a single growing Buffer.concat per chunk would be quadratic here).
+    const pcm = Buffer.alloc(1_000_000);
+    for (let i = 0; i < pcm.length; i++) pcm[i] = i & 0xff;
+    const wire = encodeBinarySpeakPcmFrame(222, pcm);
+    for (let off = 0; off < wire.length; off += 64) {
+        sock.emit('data', wire.subarray(off, Math.min(off + 64, wire.length)));
+    }
+    const [frame] = await waitForFrames(sock, 1);
+    assert.equal(frame!['op'], Op.Result);
+    assert.equal(frame!['reqId'], 222);
+    const calls = host.calls.filter((c) => c.method === 'speakPcm');
+    assert.equal(calls.length, 1, 'exactly one speakPcm dispatch');
+    assert.ok(Buffer.compare(calls[0]!.args[0] as Buffer, pcm) === 0, 'PCM bytes preserved');
 });
 
 test('frame parser: length=0 destroys the socket', async () => {
@@ -589,6 +620,39 @@ test('Notifier: a token-shaped Log message is redacted on the wire', async () =>
     assert.equal(frame!['op'], Op.Log);
     assert.ok(!String(frame!['message']).includes(tokenShaped), `token leaked on the wire: ${String(frame!['message'])}`);
     assert.match(String(frame!['message']), /login failed: \*\*\*/);
+});
+
+test('backpressure: saturated write queue drops Logs but never BotReady; summary on drain', async () => {
+    const { sock, host } = makeHarness();
+    sock.stall(); // peer stops draining the pipe
+
+    const extra = 50;
+    const total = MAX_QUEUED_LOG_FRAMES + extra;
+    for (let i = 0; i < total; i++) {
+        host.fireNotification({ op: Op.Log, level: 'Info', message: `log ${i}` });
+    }
+    // A non-Log notification fired while saturated must still be queued, never dropped.
+    host.fireNotification({ op: Op.BotReady });
+
+    await tick(4); // let the first (stalled) write reach the socket
+    sock.drain(); // peer catches up; queued writes flush
+
+    // Poll until the drained-summary Log lands (cascade of ~MAX writes via setImmediate).
+    const deadline = Date.now() + 5000;
+    for (;;) {
+        const f = decodeFrames(sock.drainedWrites()).frames;
+        if (f.some((x) => String(x['message']).includes('dropped under backpressure'))) break;
+        if (Date.now() > deadline) throw new Error('drained-summary Log never arrived');
+        await new Promise<void>((r) => setImmediate(r));
+    }
+    const frames = decodeFrames(sock.drainedWrites()).frames;
+
+    const keptLogs = frames.filter((f) => /^log \d+$/.test(String(f['message'])));
+    assert.equal(keptLogs.length, MAX_QUEUED_LOG_FRAMES, 'kept Logs capped at the queue limit');
+    assert.ok(frames.some((f) => f['op'] === Op.BotReady), 'BotReady was never dropped');
+    const summaries = frames.filter((f) => String(f['message']).includes('dropped under backpressure'));
+    assert.equal(summaries.length, 1, 'exactly one drop summary');
+    assert.match(String(summaries[0]!['message']), new RegExp(`^${extra} log line\\(s\\) dropped`));
 });
 
 // ----------------------------------------------------------------------------
