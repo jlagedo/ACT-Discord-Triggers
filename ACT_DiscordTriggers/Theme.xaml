@@ -17,6 +17,8 @@
     <SolidColorBrush x:Key="Surface" Color="#EFF4FA" />
     <SolidColorBrush x:Key="Rail" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Card" Color="#FFFFFF" />
+    <!--  Settings rows tint a touch cooler than white on hover, the Win11 Settings card behaviour.  -->
+    <SolidColorBrush x:Key="CardHover" Color="#F4F8FC" />
     <SolidColorBrush x:Key="CardBorder" Color="#DEE7F2" />
     <SolidColorBrush x:Key="Divider" Color="#E7EDF5" />
 
@@ -200,6 +202,14 @@
                         <Trigger Property="Tag" Value="{x:Null}">
                             <Setter TargetName="icon" Property="Visibility" Value="Hidden" />
                         </Trigger>
+                        <!--  Cool hover tint on enabled rows (Win11 Settings card feedback).  -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsEnabled" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="card" Property="Background" Value="{StaticResource CardHover}" />
+                        </MultiTrigger>
                         <!--  Disabled (e.g. a sub-row gated on its parent toggle): dim the whole card so the locked state reads clearly, since the flat slider/field templates show no disabled colour of their own.  -->
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="card" Property="Opacity" Value="0.45" />
