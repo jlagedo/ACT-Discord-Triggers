@@ -974,6 +974,7 @@
                             Height="104"
                             Margin="0,8,0,10"
                             HorizontalAlignment="Center"
+                            RenderOptions.BitmapScalingMode="HighQuality"
                             Source="pack://application:,,,/ACT_DiscordTriggers;component/logo.png" />
                         <TextBlock
                             HorizontalAlignment="Center"

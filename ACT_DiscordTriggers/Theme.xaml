@@ -972,10 +972,11 @@
                                         DockPanel.Dock="Top"
                                         Orientation="Horizontal">
                                         <Image
-                                            Width="34"
-                                            Height="34"
+                                            Width="36"
+                                            Height="36"
                                             VerticalAlignment="Center"
-                                            Source="pack://application:,,,/ACT_DiscordTriggers;component/logo.png" />
+                                            RenderOptions.BitmapScalingMode="HighQuality"
+                                            Source="pack://application:,,,/ACT_DiscordTriggers;component/logo-small.png" />
                                         <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                                             <TextBlock
                                                 FontSize="14"
@@ -986,7 +987,7 @@
                                                 FontFamily="Segoe UI Variable Small, Segoe UI"
                                                 FontSize="12"
                                                 Foreground="{StaticResource TextMuted}"
-                                                Text="Voice bridge for ACT" />
+                                                Text="Voice bridge" />
                                         </StackPanel>
                                     </StackPanel>
                                     <Border

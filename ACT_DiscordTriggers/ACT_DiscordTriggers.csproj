@@ -53,5 +53,10 @@
     <Resource Include="..\docs\logo.png">
       <Link>logo.png</Link>
     </Resource>
+    <!-- Pre-scaled 128px mascot for the nav-rail masthead, where the full-res logo
+         downscaled to ~36px softens badly. Same pack URI scheme (logo-small.png). -->
+    <Resource Include="..\docs\logo-small.png">
+      <Link>logo-small.png</Link>
+    </Resource>
   </ItemGroup>
 </Project>
