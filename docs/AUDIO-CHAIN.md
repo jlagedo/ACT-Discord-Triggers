@@ -15,6 +15,8 @@ processes architecture see [`CLAUDE.md`](../CLAUDE.md).
 > DSP chain (FX → loudness → declick), get summed in **float64** by a pull-based
 > mixer, ride a **look-ahead brickwall limiter**, and are quantized to s16le
 > **exactly once** before the Opus encoder. int16 exists only at the two edges.
+> Untrusted **sound files** are additionally **conditioned** once at ingest
+> (sanitize → DC-block → silence-trim → edge-fade) before any of that.
 
 ---
 
@@ -107,7 +109,7 @@ flowchart TD
     end
 
     A -->|int16ToFloat32| ENQ
-    B -->|"decode (audio-decode)<br/>→ planar→interleaved<br/>→ resampleStereoF32 (r8brain)<br/>→ WavCache"| ENQ
+    B -->|"decode (audio-decode)<br/>→ planar→interleaved<br/>→ resampleStereoF32 (r8brain)<br/>→ conditionSource (§4.1)<br/>→ WavCache"| ENQ
 
     C --> Q{normalize on<br/>AND voice baked?}
     Q -->|"no — buffered"| BUF["OnnxTts.synth (full)<br/>→ resampleMono<br/>→ mono→stereo"]
@@ -126,10 +128,11 @@ flowchart TD
   widens it to float once at the ingest edge.
 - **`SpeakFile`** — the plugin sends only a path. The bridge reads + decodes
   (`audio-decode` handles wav/mp3/ogg/flac → planar float), interleaves to
-  stereo, and band-limit resamples to 48 k via **r8brain** (`resampleStereoF32`).
-  Decoded PCM is memoized in `WavCache` keyed by path+mtime, so a repeated
-  trigger skips decode entirely. Input is bounded at 64 MiB (decode expands
-  ~10× into float).
+  stereo, band-limit resamples to 48 k via **r8brain** (`resampleStereoF32`),
+  and finally **conditions** the buffer (`conditionSource`, §4.1) because a
+  user-supplied file is untrusted. The conditioned PCM is memoized in `WavCache`
+  keyed by path+mtime, so a repeated trigger skips decode *and* conditioning
+  entirely. Input is bounded at 64 MiB (decode expands ~10× into float).
 - **`SpeakText`** — neural TTS is synthesized *in the bridge* (sherpa-onnx). It
   splits into a **streaming** path (audio starts before synthesis finishes) and a
   **buffered** fallback; the choice hinges on whether leveling needs a
@@ -152,6 +155,51 @@ band-limited and image-free rather than muffled-and-grainy.
 
 The WASM module is instantiated **once at startup** (before `BRIDGE_READY`) and
 JIT-warmed, so the first real callout pays no cold-start cost.
+
+### 4.1 Source conditioning (file path only)
+
+A user-supplied sound file is **untrusted input**: it can carry a DC offset,
+subsonic rumble, leading/trailing silence, or — seen in the wild — a corrupt
+full-scale junk burst in its final samples. `conditionSource`
+(`source-conditioning.ts`) treats it like any untrusted signal and cleans it up
+**at ingest, before any creative effect**:
+
+```mermaid
+flowchart LR
+    IN(["decoded + resampled<br/>48k/stereo/float32"]) --> S
+    S["1 · Sanitize<br/>(NaN/Inf → 0)"] --> DCB
+    DCB["2 · DC-block<br/>(1-pole HPF, per channel)"] --> TR
+    TR["3 · Trim silence<br/>(leading/trailing)"] --> EF
+    EF["4 · Edge-fade<br/>(reuses declick)"] --> CACHE["WavCache → _enqueue (§5)"]
+
+    classDef stage fill:#e9f1fd,stroke:#2f6fe0;
+    class S,DCB,TR,EF stage;
+```
+
+Why it exists, and why **here**: the per-clip declick in §5 runs *last*, after any
+random effect, and only fades the *assembled* buffer's edges. A length-extending
+effect (echo / reverb / down-pitch) appends a tail that **relocates a hot source
+edge into the buffer interior**, where the output declick no longer reaches it —
+and it plays back as an isolated "gunshot" pop. Conditioning the source up front
+guarantees both source edges are already zero *whatever* an effect later does to
+the length, so the hot-edge-mid-buffer case can't arise.
+
+- **One per-channel pass** does sanitize + DC-block + silence-bounds detection
+  together: `y[n] = x[n] − x[n−1] + R·y[n−1]` (independent L/R state, non-finite
+  inputs zeroed before they can poison the filter state), tracking the
+  non-silence span on the filtered signal as it's written.
+- **DC-block pole** `R = 0.9975` ≈ a **19 Hz** corner at 48 k — below the audible
+  band, so it only strips DC / subsonic rumble.
+- **Silence threshold** `0.001` ≈ **−60 dBFS**, conservative so real low-level
+  content is never trimmed. A wholly-silent clip is handed back unchanged (decode
+  already rejects truly empty input upstream).
+- **Pure** — returns a new buffer, never mutates the input (callers share
+  `WavCache` buffers, same discipline as `declick.ts`).
+
+It runs **only on the file path** (`SpeakFile`); the `SpeakPcm`/TTS paths are
+controlled producers and skip it. Because the result is `WavCache`d, it is paid
+**once per file**, not per fire. The per-clip declick in §5 still runs as the
+final *output* edge on every fire.
 
 ---
 
@@ -394,6 +442,8 @@ Every constant that shapes the sound, in one place.
 | File transition band | 2.0% | `resample.ts` | tight, cached path |
 | Stream transition band | 6.0% | `resample.ts` | ~18 ms first-output latency |
 | Max decode input | 64 MiB | `discord-host.ts` | pre-decode guard |
+| DC-block pole | 0.9975 (≈19 Hz @ 48k) | `source-conditioning.ts` | ingest DC/subsonic high-pass (file path) |
+| Silence trim threshold | 0.001 (≈ −60 dBFS) | `source-conditioning.ts` | leading/trailing silence gate (file path) |
 | Max voices / queue | 64 / 64 MiB | `pcm-mixer.ts` | FIFO evict (open pinned) |
 
 ### Latency contributors (realtime path)
@@ -419,6 +469,7 @@ and the fixed 20 ms Opus framing.
 | `src/discord-host.ts` | orchestration: ingest, `_enqueue` chain, streaming TTS, voice/encoder/limiter config |
 | `src/audio-format.ts` | the two int16↔float edges (single quantization point) |
 | `src/resample.ts` | r8brain SRC (stereo / mono / streaming) |
+| `src/source-conditioning.ts` | file-ingest guard: sanitize → DC-block → trim silence → edge-fade (untrusted source) |
 | `src/effects.ts` | random FX catalog |
 | `src/normalize.ts` | LUFS auto-level (`measureLevel` / `computeGain` / `normalize`) |
 | `src/k-weighting.ts` | ITU-R BS.1770 K-weighting cascade |

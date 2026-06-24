@@ -45,19 +45,23 @@ the limiter's backstop). Don't reintroduce per-stage int16 round-trips.
 ## Current signal chain
 
 ```
-ingest                          per-clip (_enqueue)           mix bus                    encode
-──────────────────────────      ─────────────────────────     ──────────────────────     ──────
-SpeakPcm  s16→f32 ───────┐
-SpeakFile decode→resample├──▶ FX → normalize → declick ──▶  PcmMixer sum → limiter  ──▶ Opus
-SpeakText ONNX→resample──┘             (LUFS)    (lin fade)   (float64) → s16            (bitrate)
+ingest                                    per-clip (_enqueue)           mix bus                    encode
+────────────────────────────────────      ─────────────────────────     ──────────────────────     ──────
+SpeakPcm  s16→f32 ─────────────────┐
+SpeakFile decode→resample→condition├──▶ FX → normalize → declick ──▶  PcmMixer sum → limiter  ──▶ Opus
+SpeakText ONNX→resample────────────┘             (LUFS)    (lin fade)   (float64) → s16            (bitrate)
+                          ▲
+                   file path only (untrusted source)
 ```
 
 **Ingest → 48k float stereo**
 - `SpeakPcm`: `int16ToFloat32` at the wire edge (`discord-host.ts` `speakPcm`).
 - `SpeakFile`: `audio-decode` (WASM, auto-detects wav/mp3/ogg/flac/opus/m4a/…) →
   `planarFloatToInterleavedStereoF32` downmix → `resampleStereoF32` (r8brain, true
-  stereo) to 48k. Decoded+resampled buffers are cached by path+mtime (`WavCache`),
-  so resample is paid once per file on first fire.
+  stereo) to 48k → **`conditionSource`** (`source-conditioning.ts`: sanitize →
+  DC-block → trim silence → edge-fade — **file path only**, since user files are
+  untrusted). The conditioned buffer is cached by path+mtime (`WavCache`), so
+  decode + resample + condition are paid once per file on first fire.
 - `SpeakText` (ONNX/sherpa): mono float → resampled to 48k → `monoFloat32ToStereoF32`.
   Streams chunk-by-chunk through `MonoStreamResampler` (r8brain, cross-chunk
   continuous) so audio starts before synthesis finishes; baked per-voice loudness
@@ -100,6 +104,10 @@ SpeakText ONNX→resample──┘             (LUFS)    (lin fade)   (float64) 
 - **Cross-chunk-continuous streaming resampler.** Concatenated streamed output is
   sample-identical to resampling the whole utterance at once — no per-chunk seam click.
 - **Declick edges.** No onset/tail clicks from stepping against digital silence.
+- **Source conditioning on file ingest.** Untrusted user files are sanitized
+  (NaN/Inf→0), DC-blocked (~19 Hz HPF), silence-trimmed and edge-faded once at
+  ingest, so a length-extending FX tail can't relocate a hot/junk source edge into
+  the buffer interior and fire as a "gunshot" pop (`source-conditioning.ts`).
 - **Pull-based mixer that degrades to silence.** A mix error or underrun emits a
   silent frame instead of tearing down the resource.
 - **Master look-ahead limiter on the bus.** Overlapping voices that sum past full
@@ -253,8 +261,11 @@ lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
 - **6. Equal-power declick fade** 🔵 — Effort: S. A linear ramp has a slope
   discontinuity at the ramp ends that can still tick faintly. A raised-cosine /
   half-Hann ramp is smoother for the same 2/5 ms — a one-line gain-formula change.
-- **7. DC-blocking high-pass on ingest** 🔵 — Effort: S. A 1-pole HPF at ~20 Hz is
-  standard hygiene — removes DC bias that wastes headroom and clicks on edges.
+- **7. DC-blocking high-pass on ingest** 🟢 — done (`source-conditioning.ts`). A
+  1-pole HPF (`R=0.9975`, ~19 Hz) runs as part of file-ingest source conditioning —
+  removes DC bias / subsonic rumble that waste headroom and click on edges. Bundled
+  with sanitize + silence-trim + edge-fade; the `SpeakPcm`/TTS paths (controlled
+  producers) skip it.
 - **8. Proper >2-channel fold-down** ⚪ — Effort: S. `planarFloatToInterleavedStereoF32`
   keeps the first two channels, so a 5.1 source loses its center (dialogue). A
   Lo/Ro matrix (`L + 0.707·C + 0.707·Ls`…) is correct; rare for ACT sounds.
@@ -285,7 +296,8 @@ lo-fi by accident. `pitch` can route through the P1.1 sinc resampler instead.
    default ceiling.
 3. **K-weighted loudness** (P2.3) 🟢 — done in `k-weighting.ts` + `normalize.ts`;
    target relabeled LUFS, voice catalog re-baked via `tts:rms -- --bake`.
-4. **Cosine declick + DC-block** (P3.6/7) — cheap polish, bundle together; next up.
+4. **DC-block** (P3.7) 🟢 — done as part of file-ingest source conditioning
+   (`source-conditioning.ts`). **Cosine declick** (P3.6) — still open; cheap polish.
 5. **FX anti-aliasing / Opus CTLs** (P2.5 / P3.9) as time allows.
 
 P1.1 + P1.2 + P2.3 together moved the realtime path from clean-amateur to pro-grade.
