@@ -27,6 +27,7 @@ import { applyRandomEffect } from './effects.js';
 import { normalize, computeGain, dbToLinear, type KnownLevel } from './normalize.js';
 import { declick, declickIn, declickOut } from './declick.js';
 import { MonoStreamResampler, resampleMono, resampleStereoF32 } from './resample.js';
+import { conditionSource } from './source-conditioning.js';
 import { DEFAULT_AUDIO_BITRATE, clampBitrate } from './audio-quality.js';
 import { PcmMixer, type VoiceHandle } from './pcm-mixer.js';
 import { LocalOutput, type LocalSink } from './local-output.js';
@@ -668,8 +669,14 @@ export class DiscordHost implements Host {
             return { ok: false, error: log.errMsg(e) };
         }
 
-        this.wavCache.set(path, mtimeMs, finalPcm);
-        return this._enqueue('SpeakFile', finalPcm, meta);
+        // Ingest conditioning, file path only (the SpeakPcm/TTS path is controlled
+        // and skips it): sanitize → DC-block → trim silence → edge-fade, so a
+        // length-extending random effect can't relocate a hot/junk source edge into
+        // the buffer interior and play it as a "gunshot" pop. Cached, so it runs
+        // once per file; the per-clip declick in _enqueue stays as the output edge.
+        const conditioned = conditionSource(finalPcm);
+        this.wavCache.set(path, mtimeMs, conditioned);
+        return this._enqueue('SpeakFile', conditioned, meta);
     }
 
     // ONNX TTS: synthesize the text with the voice learned from SetConfig and play
