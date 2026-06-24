@@ -262,3 +262,9 @@ ModelManifest.xml
 
 # Limiter E2E harness output (generated WAVs)
 DiscordBridge-node/.e2e-out/
+
+# Sample render output (generated WAVs)
+DiscordBridge-node/.samples-out/
+
+# macOS Finder metadata
+.DS_Store
