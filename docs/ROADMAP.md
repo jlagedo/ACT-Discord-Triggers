@@ -215,7 +215,8 @@ removes a constant low-grade annoyance. Applies regardless of TTS provider.
   currently at **protocol v6**. Any new op updates both; bump `PROTOCOL_VERSION` on
   incompatible shape changes and extend both `ProtocolTests.cs` and
   `tests/protocol.test.ts`.
-- Keep managed deps mergeable via Costura.Fody (single-file plugin DLL).
+- Keep managed deps byte-loadable from `libs/` (land them in Main's copy-local
+  output so `build.ps1` stages them; the bootstrap's `AssemblyResolver` loads them).
 - Don't reintroduce a launcher process — the single-`node.exe` lifecycle is
   intentional (see CLAUDE.md).
 

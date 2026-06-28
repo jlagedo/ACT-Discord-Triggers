@@ -976,7 +976,7 @@
                                             Height="36"
                                             VerticalAlignment="Center"
                                             RenderOptions.BitmapScalingMode="HighQuality"
-                                            Source="pack://application:,,,/ACT_DiscordTriggers;component/logo-small.png" />
+                                            Source="pack://application:,,,/ACT_DiscordTriggers.Main;component/logo-small.png" />
                                         <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                                             <TextBlock
                                                 FontSize="14"

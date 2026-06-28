@@ -148,9 +148,10 @@ pwsh ./build.ps1
 ```
 
 `build.ps1` builds the plugin (`dotnet build` — net48 reference assemblies
-auto-restore via NuGet, Costura.Fody merges into a single DLL), type-checks and
-bundles the bridge, copies `node.exe`, stages the external `node_modules/`, runs
-a spawn self-test (asserts `BRIDGE_READY`), and assembles `release/`.
+auto-restore via NuGet; the thin bootstrap DLL plus the byte-loaded `libs/`
+closure), type-checks and bundles the bridge, copies `node.exe`, stages the
+external `node_modules/`, runs a spawn self-test (asserts `BRIDGE_READY`), and
+assembles `release/`.
 
 For bridge-only iteration, use the npm scripts in `DiscordBridge-node/`:
 `npm run typecheck`, `npm run bundle`, `npm test`.

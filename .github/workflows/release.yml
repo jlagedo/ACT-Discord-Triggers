@@ -63,7 +63,7 @@ jobs:
             3. Extract it into your ACT plugins folder:
                `%AppData%\Advanced Combat Tracker\Plugins`
                You should end up with a `Plugins\ACT_DiscordTriggers\` folder containing
-               `ACT_DiscordTriggers.dll`, `node.exe`, `bundle.js`, and `node_modules\`.
+               `ACT_DiscordTriggers.dll`, `libs\`, `node.exe`, `bundle.js`, and `node_modules\`.
                **Keep all of these files together in that folder.**
             4. In ACT: **Plugins** tab → **Browse…** → select
                `ACT_DiscordTriggers.dll` inside that folder → **Add/Enable Plugin**.

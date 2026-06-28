@@ -4,10 +4,10 @@
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <DebugType>portable</DebugType>
-    <!-- WPF view hosted inside ACT's WinForms TabPage via ElementHost; both toggles pull
-         in the corresponding desktop framework assemblies (WindowsFormsIntegration is added
-         explicitly below for ElementHost). -->
-    <UseWPF>true</UseWPF>
+    <!-- The thin bootstrap ACT loads. WinForms only (TabPage/Label/ElementHost host
+         lives in Main); deliberately NO WPF, NO Costura, NO merged deps, so ACT's
+         GetTypes() scan sees only a clean IActPluginV1. The real closure ships as
+         byte-loaded DLLs under libs/ and is resolved by AssemblyResolver. -->
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyTitle>ACT_DiscordTriggers</AssemblyTitle>
     <AssemblyVersion>2.1.2.0</AssemblyVersion>
@@ -17,46 +17,11 @@
     <Description>An ACT plugin for routing audio to discord (via out-of-process bridge for DAVE E2EE support).</Description>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Costura.Fody" Version="6.2.0" PrivateAssets="all" />
-    <PackageReference Include="Fody" Version="6.9.3" PrivateAssets="all" />
-    <!-- Drives the Information-tab links from XAML via Interaction.Triggers + the built-in
-         LaunchUriOrFileAction (opens a URL in the default browser, no code-behind/command).
-         Costura merges it into the single plugin DLL. Used XAML-only: no entry-assembly
-         type derives from a Behaviors base, preserving the GetTypes() load invariant. -->
-    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.142" />
-  </ItemGroup>
-  <ItemGroup>
-    <!-- UI-agnostic code (Protocol/Settings/Ipc/ViewModels). Costura merges Core.dll and
-         its transitive deps (CommunityToolkit.Mvvm, System.Text.Json closure) into the
-         single plugin DLL, so no type that derives from a merged dependency is defined in
-         the assembly ACT reflection-scans. -->
-    <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
-  </ItemGroup>
-  <ItemGroup>
     <Reference Include="Advanced Combat Tracker">
       <HintPath Condition="Exists('..\packages\Advanced Combat Tracker.exe')">..\packages\Advanced Combat Tracker.exe</HintPath>
       <HintPath Condition="Exists('C:\Program Files (x86)\Advanced Combat Tracker\')">C:\Program Files (x86)\Advanced Combat Tracker\Advanced Combat Tracker.exe</HintPath>
       <Private>False</Private>
     </Reference>
-    <!-- System.Windows.Forms / WindowsBase come from UseWindowsForms / UseWPF. -->
-    <Reference Include="System.ComponentModel.Composition" />
-    <Reference Include="System.Management" />
-    <Reference Include="System.Speech" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <!-- ElementHost (hosts the WPF view inside ACT's WinForms TabPage). -->
-    <Reference Include="WindowsFormsIntegration" />
-  </ItemGroup>
-  <ItemGroup>
-    <!-- Mascot shown on the Information tab, embedded as a WPF resource and referenced
-         from XAML via pack URI (pack://application:,,,/ACT_DiscordTriggers;component/logo.png). -->
-    <Resource Include="..\docs\logo.png">
-      <Link>logo.png</Link>
-    </Resource>
-    <!-- Pre-scaled 128px mascot for the nav-rail masthead, where the full-res logo
-         downscaled to ~36px softens badly. Same pack URI scheme (logo-small.png). -->
-    <Resource Include="..\docs\logo-small.png">
-      <Link>logo-small.png</Link>
-    </Resource>
+    <!-- System.Windows.Forms comes from UseWindowsForms. -->
   </ItemGroup>
 </Project>

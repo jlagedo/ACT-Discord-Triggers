@@ -16,7 +16,7 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/ACT_DiscordTriggers;component/Theme.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/ACT_DiscordTriggers.Main;component/Theme.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
@@ -975,7 +975,7 @@
                             Margin="0,8,0,10"
                             HorizontalAlignment="Center"
                             RenderOptions.BitmapScalingMode="HighQuality"
-                            Source="pack://application:,,,/ACT_DiscordTriggers;component/logo.png" />
+                            Source="pack://application:,,,/ACT_DiscordTriggers.Main;component/logo.png" />
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontFamily="Segoe UI Variable Display, Segoe UI"
@@ -988,7 +988,7 @@
                             Margin="0,2,0,10"
                             HorizontalAlignment="Center"
                             Foreground="{StaticResource TextMuted}"
-                            Text="{x:Static local:DiscordTriggersPlugin.VersionDisplay}" />
+                            Text="{x:Static local:AppInfo.VersionDisplay}" />
                         <TextBlock
                             Margin="0,0,0,4"
                             Foreground="{StaticResource TextSecondary}"

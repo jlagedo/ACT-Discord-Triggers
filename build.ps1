@@ -26,13 +26,17 @@ Set-Location $PSScriptRoot
 $PluginName = 'ACT_DiscordTriggers'
 
 # --- 1. Plugin (net48 via dotnet build) ---
-# net48 reference assemblies are auto-restored as a transitive dep of the SDK's
-# net48 targeting; Costura.Fody weaves under the SDK's MSBuild correctly,
-# producing a single merged DLL. So `dotnet build` is enough — no Visual
-# Studio install required.
-Write-Host "==> Building plugin (net48)"
+# Two assemblies: the thin bootstrap ACT loads (ACT_DiscordTriggers.dll) and the
+# byte-loaded Main (ACT_DiscordTriggers.Main.dll) plus its managed closure, which
+# ship under libs/ and are resolved by the bootstrap's AssemblyResolver. net48
+# reference assemblies are auto-restored by the SDK's net48 targeting, so
+# `dotnet build` is enough — no Visual Studio install required.
+Write-Host "==> Building Main + closure (net48)"
+dotnet build ACT_DiscordTriggers.Main\ACT_DiscordTriggers.Main.csproj -c Release -nologo -v:quiet
+if ($LASTEXITCODE -ne 0) { Write-Error "Main build failed"; exit 1 }
+Write-Host "==> Building bootstrap (net48)"
 dotnet build ACT_DiscordTriggers\ACT_DiscordTriggers.csproj -c Release -nologo -v:quiet
-if ($LASTEXITCODE -ne 0) { Write-Error "Plugin build failed"; exit 1 }
+if ($LASTEXITCODE -ne 0) { Write-Error "Bootstrap build failed"; exit 1 }
 
 # --- 2. Bridge: type-check, bundle, stage externals, self-test ---
 Push-Location DiscordBridge-node
@@ -143,6 +147,15 @@ if (Test-Path release) { Remove-Item -Recurse -Force release }
 $stage = "release\$PluginName"
 New-Item -ItemType Directory $stage | Out-Null
 Copy-Item ACT_DiscordTriggers\bin\Release\net48\ACT_DiscordTriggers.dll $stage\
+# Main + its managed closure (Core, CommunityToolkit, System.Text.Json closure,
+# Microsoft.Xaml.Behaviors) ship under libs/, byte-loaded by the bootstrap. Copy
+# every DLL from Main's build output except the ACT reference (Private=False, so
+# it is not emitted here anyway) — these are the files the updater overwrites in place.
+$libs = "$stage\libs"
+New-Item -ItemType Directory $libs | Out-Null
+Get-ChildItem ACT_DiscordTriggers.Main\bin\Release\net48\*.dll |
+    Where-Object { $_.Name -ne 'Advanced Combat Tracker.dll' } |
+    Copy-Item -Destination $libs\
 Copy-Item DiscordBridge-node\dist\node.exe $stage\
 Copy-Item DiscordBridge-node\dist\bundle.js $stage\
 Copy-Item -Recurse DiscordBridge-node\dist\node_modules $stage\node_modules

@@ -10,10 +10,9 @@ using ACT_DiscordTriggers.Core.Settings;
 using ACT_DiscordTriggers.Core.ViewModels;
 
 namespace ACT_DiscordTriggers {
-  // WPF view hosted inside ACT's WinForms TabPage via ElementHost (see DiscordTriggersPlugin).
-  // Derives from the GAC WPF UserControl, so it's load-invariant-safe — it never derives from
-  // a Costura-merged type and only references the Core ViewModel through DataContext. All
-  // state/commands live in DiscordTriggersViewModel; the code-behind is lifecycle/ACT glue only.
+  // WPF view hosted inside ACT's WinForms TabPage via ElementHost (see PluginImpl). The
+  // DataContext is the Core ViewModel; all state/commands live in DiscordTriggersViewModel,
+  // and the code-behind is lifecycle/ACT glue + view-only concerns only.
   public partial class DiscordTriggersView : UserControl {
     private FormActMain.PlayTtsDelegate oldTTS;
     private FormActMain.PlaySoundDelegate oldSound;

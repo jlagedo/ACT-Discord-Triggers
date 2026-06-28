@@ -5,12 +5,9 @@ using System.Windows.Input;
 using ACT_DiscordTriggers.Core.ViewModels;
 
 namespace ACT_DiscordTriggers {
-  // View-layer attached helpers. Deliberately STATIC classes (base type System.Object):
-  // ACT loads the plugin via Assembly.LoadFrom + GetTypes(), which resolves every defined
-  // type's base/interfaces before our Costura resolver attaches. A type deriving from a
-  // Costura-merged base (e.g. Microsoft.Xaml.Behaviors' Behavior<T>) would throw there.
-  // Static helpers sidestep that — they only touch merged/WPF types inside method bodies,
-  // which GetTypes() never resolves.
+  // View-layer attached helpers, written as static attached-property classes (used
+  // XAML-only) rather than Microsoft.Xaml.Behaviors' Behavior<T> — keeps them object-based
+  // and dependency-light, matching the convention of not subclassing Behaviors anywhere.
 
   // Bridges PasswordBox.Password (not a DependencyProperty, so not directly bindable) to a
   // bindable attached string. Lets the XAML keep the token masked while two-way binding it

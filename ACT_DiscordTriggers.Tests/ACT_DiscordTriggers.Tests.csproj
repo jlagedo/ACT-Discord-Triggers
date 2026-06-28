@@ -27,11 +27,11 @@
          Core's InternalsVisibleTo grants access to the internal members the tests use
          (DiagnosticsLog.MergeInterleave, the internal PipeClient/BridgeProcess types). -->
     <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
-    <!-- The view-layer WPF helpers live in the entry assembly (Costura/Fody + ACT
-         reference), which is heavy to reference from tests. Compile the source in
-         directly so PasswordBoxBinding can be unit-tested against a real PasswordBox
-         without dragging in Costura or the ACT dependency. -->
-    <Compile Include="..\ACT_DiscordTriggers\ViewBehaviors.cs">
+    <!-- The view-layer WPF helpers live in the Main assembly (WPF + ACT reference),
+         which is heavy to reference from tests. Compile the source in directly so
+         PasswordBoxBinding can be unit-tested against a real PasswordBox without
+         dragging in the ACT dependency. -->
+    <Compile Include="..\ACT_DiscordTriggers.Main\ViewBehaviors.cs">
       <Link>View\ViewBehaviors.cs</Link>
     </Compile>
   </ItemGroup>

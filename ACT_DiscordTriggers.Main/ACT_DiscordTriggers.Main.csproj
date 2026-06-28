@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <DebugType>portable</DebugType>
+    <!-- WPF view + WinForms ElementHost host, same as the old entry assembly. This
+         assembly is byte-loaded from libs/ by the thin bootstrap, so ACT never
+         GetTypes()-scans it: it may freely derive from merged deps (CommunityToolkit). -->
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- AssemblyName differs from the default so the shipped file is
+         libs\ACT_DiscordTriggers.Main.dll; RootNamespace stays ACT_DiscordTriggers
+         so XAML x:Class / pack URIs and the moved view code keep their namespace. -->
+    <AssemblyName>ACT_DiscordTriggers.Main</AssemblyName>
+    <RootNamespace>ACT_DiscordTriggers</RootNamespace>
+    <AssemblyTitle>ACT_DiscordTriggers.Main</AssemblyTitle>
+    <AssemblyVersion>2.1.2.0</AssemblyVersion>
+    <FileVersion>2.1.2.0</FileVersion>
+    <Version>2.1.2</Version>
+    <Authors>jlagedo</Authors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- UI-agnostic core (Protocol/Settings/Ipc/ViewModels). Its transitive deps
+         (CommunityToolkit.Mvvm, System.Text.Json closure) flow in copy-local and
+         are staged into libs/ by build.ps1. -->
+    <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
+    <!-- Drives the Information-tab links from XAML (Interaction.Triggers +
+         LaunchUriOrFileAction). Used XAML-only; never subclassed here. Ships as a
+         byte-loaded libs/ DLL. -->
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.142" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Advanced Combat Tracker">
+      <HintPath Condition="Exists('..\packages\Advanced Combat Tracker.exe')">..\packages\Advanced Combat Tracker.exe</HintPath>
+      <HintPath Condition="Exists('C:\Program Files (x86)\Advanced Combat Tracker\')">C:\Program Files (x86)\Advanced Combat Tracker\Advanced Combat Tracker.exe</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- System.Windows.Forms / WindowsBase come from UseWindowsForms / UseWPF. -->
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Management" />
+    <Reference Include="System.Speech" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <!-- ElementHost (hosts the WPF view inside ACT's WinForms TabPage). -->
+    <Reference Include="WindowsFormsIntegration" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Mascot shown on the Information tab, embedded as a WPF resource and referenced
+         from XAML via pack URI (pack://application:,,,/ACT_DiscordTriggers.Main;component/logo.png). -->
+    <Resource Include="..\docs\logo.png">
+      <Link>logo.png</Link>
+    </Resource>
+    <!-- Pre-scaled 128px mascot for the nav-rail masthead. -->
+    <Resource Include="..\docs\logo-small.png">
+      <Link>logo-small.png</Link>
+    </Resource>
+  </ItemGroup>
+</Project>

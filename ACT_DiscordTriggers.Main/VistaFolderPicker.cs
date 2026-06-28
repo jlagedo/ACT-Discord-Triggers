@@ -9,8 +9,7 @@ namespace ACT_DiscordTriggers {
   /// (Win11 look on Windows 11). net48's <see cref="System.Windows.Forms.FolderBrowserDialog"/>
   /// only renders the legacy tree, so this is a dependency-free COM-interop wrapper.
   ///
-  /// Pure interop (system types only), so it's load-invariant-safe: nothing here
-  /// derives from a Costura-merged dependency.
+  /// Pure interop (system types only) — no external dependency.
   /// </summary>
   internal static class VistaFolderPicker {
     /// <summary>
