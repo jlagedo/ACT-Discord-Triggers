@@ -40,6 +40,9 @@
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Management" />
     <Reference Include="System.Speech" />
+    <!-- ActUpdateService references GithubReleaseClient, whose ctor signature mentions
+         HttpMessageHandler (GAC System.Net.Http facade on net48, not referenced by default). -->
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <!-- ElementHost (hosts the WPF view inside ACT's WinForms TabPage). -->

@@ -28,7 +28,7 @@ namespace ACT_DiscordTriggers {
     // log. View-level init only: ACT delegates, settings, bot wiring. Constructing the VM
     // here (on the UI thread, after ElementHost has installed the WPF dispatcher) lets it
     // capture the DispatcherSynchronizationContext used to marshal background callbacks.
-    public void OnPluginInit(string configName) {
+    public void OnPluginInit(string configName, string pluginDir) {
       // ACT delegates (restored on leave / deinit); save before any hook swap.
       oldTTS = ActGlobals.oFormActMain.PlayTtsMethod;
       oldSound = ActGlobals.oFormActMain.PlaySoundMethod;
@@ -36,7 +36,13 @@ namespace ACT_DiscordTriggers {
       discordService = new DiscordClientService();
       string configDir = Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Config");
       var store = new SettingsStore(configDir, $"{configName}.config.xml", (msg, level) => vm?.Log(msg, level));
-      vm = new DiscordTriggersViewModel(discordService, store);
+      // Auto-updater: overwrites libs/ + node files in pluginDir, stopping the bridge first
+      // (DeinitAsync) before the swap. Diagnostics go to the unified log.
+      var updateService = new ActUpdateService(
+        pluginDir,
+        () => discordService.DeinitAsync(),
+        (msg, level) => DiagnosticsLog.Append(msg, level));
+      vm = new DiscordTriggersViewModel(discordService, store, updateService);
       DataContext = vm;
 
       // The VM stays ACT-free: it raises these so the view swaps ACT's TTS/sound

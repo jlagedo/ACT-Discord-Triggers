@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using ACT_DiscordTriggers.Core.Ipc;
 using ACT_DiscordTriggers.Core.Settings;
 using ACT_DiscordTriggers.Core.Tts;
+using ACT_DiscordTriggers.Core.Update;
 
 namespace ACT_DiscordTriggers.Core.ViewModels {
   // UI-agnostic ViewModel: no WinForms, no ACT. Holds the settings-backed state,
@@ -22,6 +23,13 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     private readonly IDiscordService discord;
     private readonly SettingsStore store;
     private readonly SynchronizationContext sync;
+    // Auto-updater (null in tests / when the host doesn't supply one — the update UI then
+    // stays inert). The VM owns the once-a-day throttle + LastUpdateCheck persistence;
+    // the service does the network check + apply.
+    private readonly IUpdateService updates;
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromDays(1);
+    private UpdateInfo latestUpdate;
+    private DateTime lastUpdateCheck = DateTime.MinValue;
 
     // Bot status rides in the config object and the textbox fires per keystroke,
     // hence a long debounce; fx/normalize/quality coalesce a slider-drag burst.
@@ -46,9 +54,10 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     public event Action OutputActivated;
     public event Action OutputDeactivated;
 
-    public DiscordTriggersViewModel(IDiscordService discord, SettingsStore store) {
+    public DiscordTriggersViewModel(IDiscordService discord, SettingsStore store, IUpdateService updates = null) {
       this.discord = discord;
       this.store = store;
+      this.updates = updates;
       this.sync = SynchronizationContext.Current;
       this.discord.BotReady += OnBotReady;
       this.discord.Log += OnLog;
@@ -632,9 +641,89 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       // bot mode honours AutoConnect.
       if (IsLocalMode) _ = StartLocalOutputAsync();
       else if (AutoConnect) _ = ConnectAsync();
+
+      // Background, throttled update check (no-op when disabled / recently checked / no service).
+      _ = AutoCheckForUpdatesAsync();
     }
 
     public void Save() => store.Save(ToSettings());
+
+    // --- Auto-update ------------------------------------------------------------
+    // Surfaced on the Information tab. UpdateBusy guards both commands (one update op at a
+    // time); UpdateAvailable gates the install button. The service (Main) does the network
+    // check + apply; the VM owns the throttle + LastUpdateCheck persistence and the UI state.
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CheckForUpdatesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(InstallUpdateCommand))]
+    private bool updateBusy;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallUpdateCommand))]
+    private bool updateAvailable;
+
+    [ObservableProperty] private string updateStatus = "";
+    [ObservableProperty] private string latestVersionText = "";
+
+    // Settings-backed "check on launch" toggle; persisted when changed.
+    [ObservableProperty] private bool updateCheckEnabled = true;
+    partial void OnUpdateCheckEnabledChanged(bool value) { if (!suppressPush) Save(); }
+
+    private bool CanCheckForUpdates() => updates != null && !UpdateBusy;
+    private bool CanInstallUpdate() => updates != null && UpdateAvailable && !UpdateBusy && latestUpdate != null;
+
+    [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
+    private Task CheckForUpdates() => DoCheckAsync(manual: true);
+
+    [RelayCommand(CanExecute = nameof(CanInstallUpdate))]
+    private async Task InstallUpdate() {
+      if (updates == null || latestUpdate == null) return;
+      UpdateBusy = true;
+      try {
+        var progress = new Progress<string>(s => UpdateStatus = s);
+        // On a real apply ACT restarts and control never returns here; on dry-run / decline /
+        // failure ApplyAsync returns and we just clear busy below.
+        await updates.ApplyAsync(latestUpdate, progress);
+      } catch (Exception ex) {
+        UpdateStatus = "Update failed.";
+        Log("Update apply failed: " + ex.Message, LogLevel.Warn);
+      } finally {
+        UpdateBusy = false;
+      }
+    }
+
+    // Throttled launch check — no-op when disabled or checked within the interval.
+    private Task AutoCheckForUpdatesAsync() {
+      if (updates == null || !UpdateCheckEnabled) return Task.CompletedTask;
+      if (DateTime.UtcNow - lastUpdateCheck < UpdateCheckInterval) return Task.CompletedTask;
+      return DoCheckAsync(manual: false);
+    }
+
+    private async Task DoCheckAsync(bool manual) {
+      if (updates == null) return;
+      UpdateBusy = true;
+      if (manual) UpdateStatus = "Checking for updates…";
+      try {
+        var info = await updates.CheckAsync();
+        lastUpdateCheck = DateTime.UtcNow;
+        try { Save(); } catch { }   // persist LastUpdateCheck; never fail the check over a save
+        if (info != null && info.IsNewer) {
+          latestUpdate = info;
+          UpdateAvailable = true;
+          LatestVersionText = info.TagName;
+          UpdateStatus = "Version " + info.TagName + " is available.";
+          Log("Update available: " + info.TagName, LogLevel.Info);
+        } else {
+          latestUpdate = null;
+          UpdateAvailable = false;
+          if (manual) UpdateStatus = "You're on the latest version.";
+        }
+      } catch (Exception ex) {
+        if (manual) UpdateStatus = "Update check failed.";
+        Log("Update check failed: " + ex.Message, LogLevel.Warn);
+      } finally {
+        UpdateBusy = false;
+      }
+    }
 
     public async Task ShutdownAsync() {
       discord.BotReady -= OnBotReady;
@@ -744,6 +833,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
         AudioQualityIndex = s.AudioQualityIndex;
         LimiterEnabled = s.LimiterEnabled;
         LimiterCeilingIndex = s.LimiterCeilingIndex;
+        UpdateCheckEnabled = s.UpdateCheckEnabled;
+        lastUpdateCheck = s.LastUpdateCheck;
       } finally {
         suppressPush = false;
       }
@@ -770,6 +861,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       AudioQualityIndex = AudioQualityIndex,
       LimiterEnabled = LimiterEnabled,
       LimiterCeilingIndex = LimiterCeilingIndex,
+      UpdateCheckEnabled = UpdateCheckEnabled,
+      LastUpdateCheck = lastUpdateCheck,
     };
 
     // --- Debounced config pushes ------------------------------------------------

@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using System.Windows.Forms.Integration;
 using Advanced_Combat_Tracker;
 using ACT_DiscordTriggers.Core.Ipc;
+using ACT_DiscordTriggers.Core.Update;
 
 namespace ACT_DiscordTriggers {
   // The real plugin implementation, byte-loaded from libs/ by the thin bootstrap
@@ -21,6 +22,14 @@ namespace ACT_DiscordTriggers {
 
     public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText, string pluginDir, string configName) {
       lblStatus = pluginStatusText;
+
+      // Sweep any *.old backups a prior auto-update moved aside (e.g. the bootstrap DLL,
+      // only deletable now that the old process's handle is gone). Top-level + libs/ only,
+      // so we never walk node_modules.
+      try {
+        UpdatePackageInstaller.SweepOldBackups(pluginDir, recursive: false);
+        UpdatePackageInstaller.SweepOldBackups(Path.Combine(pluginDir, "libs"), recursive: false);
+      } catch { }
 
       // Locate the out-of-process Discord bridge so DiscordClient knows where to spawn it.
       string bridgeDir = FindBridgeDir(pluginDir);
@@ -42,7 +51,7 @@ namespace ACT_DiscordTriggers {
         Dock = DockStyle.Fill,
       });
 
-      view.OnPluginInit(configName);
+      view.OnPluginInit(configName, pluginDir);
 
       lblStatus.Text = "Plugin Started";
     }

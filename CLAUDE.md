@@ -132,3 +132,39 @@ Packaging:
 Releases:
 - Push a `v*` tag → `release.yml` runs the full build + `build.ps1 -Zip` and publishes a GitHub Release. Tags containing `-` → pre-release.
 - To cut one: bump `AssemblyVersion`/`FileVersion`/`Version` in **both** `ACT_DiscordTriggers.csproj` (bootstrap) and `ACT_DiscordTriggers.Main/ACT_DiscordTriggers.Main.csproj` (Main — `AppInfo.PluginVersion` reads its assembly version), then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+## Auto-update
+
+The plugin checks GitHub Releases on launch (throttled to once/day) and via a manual
+**Check for updates** button on the Information tab; when a newer release exists it offers a
+one-click in-place update that swaps every file and restarts ACT. The byte-loaded-`libs/`
+architecture is what makes this safe — see "Architecture: two processes".
+
+Flow: check → confirm dialog (plain-text notes) → download the release zip → **stop the bridge**
+(`DeinitAsync`, unlocking `node.exe` + `node_modules/*.node`) → swap files → `RestartACT`. Each
+file is replaced by **moving the old one aside** (`*.old`) then writing the new one — the uniform
+primitive that works for unlocked `libs/`, for the ACT-loaded bootstrap DLL (renamable
+share-delete while loaded), and for the freed node files. On a failed apply it rolls back. The
+moved-aside bootstrap `*.old` (still mapped by the dying process) is swept on the next launch by
+`PluginImpl` (`UpdatePackageInstaller.SweepOldBackups`, top-level + `libs/` only).
+
+Pieces:
+- **Core/Update/** (pure, unit-tested, no ACT): `GithubReleaseClient` (API check + download;
+  injectable `HttpMessageHandler`, overridable feed URL), `UpdatePackageInstaller` (extract +
+  move-aside swap + rollback + `SweepOldBackups`), `UpdateInfo`, `IUpdateService`.
+- **Main/Update/**: `ActUpdateService : IUpdateService` (dev `.git` guard, confirm dialog,
+  download, bridge stop, install, `RestartACT` by reflection), `UpdatePromptForm`.
+- **VM**: `CheckForUpdatesCommand` / `InstallUpdateCommand`, `UpdateStatus`/`UpdateAvailable`/
+  `UpdateBusy`/`UpdateCheckEnabled`, the once/day throttle + `LastUpdateCheck` persistence.
+- **Settings**: `UpdateCheckEnabled` + `LastUpdateCheck` are `[JsonIgnore]` (plugin-local, never
+  sent to the bridge) and additive XML — no schema bump.
+- The `/releases/latest` endpoint excludes prereleases, so the updater only offers stable releases.
+
+Local testing (no real release / no GitHub):
+- `node tools/fake-release-server.js --zip ACT_DiscordTriggers.zip --tag v2.2.0 [--port 8099]`
+  serves a `releases/latest` JSON + the local zip (build one with `build.ps1 -Zip`).
+- Env seams: `ACT_DT_UPDATE_FEED` (point the client at the local server — read by
+  `GithubReleaseClient`), `ACT_DT_UPDATE_FAKE_CURRENT` (pretend an older running version, to
+  trigger an update without re-tagging), `ACT_DT_UPDATE_DRYRUN=1` (plan + log the swap but write
+  nothing and don't restart). Unit tests cover the parse/compare/download/extract/swap/rollback
+  with a fake transport + temp dirs (`*Tests` under `ACT_DiscordTriggers.Tests/Update/`).

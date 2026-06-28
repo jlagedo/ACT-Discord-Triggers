@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
@@ -81,5 +82,17 @@ namespace ACT_DiscordTriggers.Core.Settings {
     // bridge's dBTP table; index 1 == -1 dBTP.
     [JsonPropertyName("limiterEnabled")] public bool LimiterEnabled { get; set; } = true;
     [JsonPropertyName("limiterCeilingIndex")] public int LimiterCeilingIndex { get; set; } = 1; // 0..3, default -1 dBTP
+
+    // --- Auto-update (plugin-local; [JsonIgnore] so it never rides in SetConfig to the
+    // bridge — these are additive XML-only fields, no schema bump). ---
+    [XmlAttribute]
+    [JsonIgnore]
+    public bool UpdateCheckEnabled { get; set; } = true;
+
+    // Last time an update check ran (UTC). DateTime.MinValue (the default for older saved
+    // files that lack the attribute) reads as "never", so the first launch checks.
+    [XmlAttribute]
+    [JsonIgnore]
+    public DateTime LastUpdateCheck { get; set; } = DateTime.MinValue;
   }
 }

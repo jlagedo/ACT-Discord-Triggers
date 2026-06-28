@@ -26,6 +26,10 @@
     <!-- OnnxDownloader fetches voice packs over HTTPS; HttpClient lives in the GAC
          System.Net.Http facade on net48 (not referenced by default). -->
     <Reference Include="System.Net.Http" />
+    <!-- UpdatePackageInstaller extracts the release zip; ZipFile/ZipArchive live in the
+         GAC System.IO.Compression(.FileSystem) facades on net48 (not referenced by default). -->
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
   </ItemGroup>
   <ItemGroup>
     <!-- The test project exercises internal members (DiagnosticsLog.MergeInterleave,

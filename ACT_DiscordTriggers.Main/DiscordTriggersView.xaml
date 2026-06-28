@@ -1002,6 +1002,49 @@
                             Margin="0,16"
                             Background="{StaticResource Divider}" />
 
+                        <!--  Auto-update: status line (hidden when blank), check / install buttons, and the on-launch toggle.  -->
+                        <StackPanel Margin="0,0,0,4" HorizontalAlignment="Center">
+                            <TextBlock
+                                Margin="0,0,0,8"
+                                HorizontalAlignment="Center"
+                                Foreground="{StaticResource TextSecondary}"
+                                Text="{Binding UpdateStatus}"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UpdateStatus}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                                <Button
+                                    Margin="0,0,8,0"
+                                    Command="{Binding CheckForUpdatesCommand}"
+                                    Content="Check for updates" />
+                                <Button
+                                    Command="{Binding InstallUpdateCommand}"
+                                    Content="{Binding LatestVersionText, StringFormat='Update to {0}'}"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                            <CheckBox
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Center"
+                                Content="Check for updates on launch"
+                                Foreground="{StaticResource TextSecondary}"
+                                IsChecked="{Binding UpdateCheckEnabled}" />
+                        </StackPanel>
+
+                        <Border
+                            Height="1"
+                            Margin="0,16"
+                            Background="{StaticResource Divider}" />
+
                         <StackPanel Margin="0,0,0,4" HorizontalAlignment="Center">
                             <StackPanel Margin="0,3" Orientation="Horizontal">
                                 <TextBlock

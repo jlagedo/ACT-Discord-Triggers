@@ -21,6 +21,11 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <!-- UpdatePackageInstaller tests build/inspect zips directly. -->
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- The production code under test (Protocol/Settings/Ipc/ViewModels) lives in Core,
          which flows its System.Text.Json + CommunityToolkit.Mvvm deps through transitively.
