@@ -78,6 +78,23 @@ namespace ACT_DiscordTriggers.Tests.Update {
     }
 
     [Theory]
+    [InlineData("nightly")]
+    [InlineData("v2.2.0-beta")]
+    public void Parse_NonNumericTag_IsNotNewer_DoesNotThrow(string tag) {
+      // A non-version tag must not abort the whole check — it's simply not an applicable
+      // update (no version to compare), so IsNewer is false and the tag is still surfaced.
+      var info = GithubReleaseClient.Parse(ReleaseJson(tag), new Version(2, 1, 2));
+      Assert.Null(info.Version);
+      Assert.False(info.IsNewer);
+      Assert.Equal(tag, info.TagName);
+    }
+
+    [Fact]
+    public void ParseTag_NonNumeric_ReturnsNull() {
+      Assert.Null(GithubReleaseClient.ParseTag("nightly"));
+    }
+
+    [Theory]
     [InlineData("v2.2.0", "2.2.0")]
     [InlineData("V2.2.0", "2.2.0")]
     [InlineData("2.2.0", "2.2.0")]

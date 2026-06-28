@@ -9,10 +9,10 @@ using ACT_DiscordTriggers.Core.Update;
 
 namespace ACT_DiscordTriggers {
   // The real plugin implementation, byte-loaded from libs/ by the thin bootstrap
-  // (DiscordTriggersPlugin). It owns everything the entry assembly used to: bridge
-  // discovery, diagnostics, and hosting the WPF view inside ACT's WinForms TabPage via
-  // an ElementHost. It is NOT an IActPluginV1 and is never reflection-scanned by ACT,
-  // so it may freely reference WPF + the third-party deps shipped under libs/.
+  // (DiscordTriggersPlugin). It owns bridge discovery, diagnostics, and hosting the WPF
+  // view inside ACT's WinForms TabPage via an ElementHost. It is NOT an IActPluginV1 and
+  // is never reflection-scanned by ACT, so it may freely reference WPF + the third-party
+  // deps shipped under libs/.
   //
   // The bootstrap forwards lifecycle calls here by reflection (InitPlugin /
   // DeInitPluginAsync), passing the plugin directory + config name it resolves from ACT.
@@ -23,13 +23,11 @@ namespace ACT_DiscordTriggers {
     public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText, string pluginDir, string configName) {
       lblStatus = pluginStatusText;
 
-      // Sweep any *.old backups a prior auto-update moved aside (e.g. the bootstrap DLL,
-      // only deletable now that the old process's handle is gone). Top-level + libs/ only,
-      // so we never walk node_modules.
-      try {
-        UpdatePackageInstaller.SweepOldBackups(pluginDir, recursive: false);
-        UpdatePackageInstaller.SweepOldBackups(Path.Combine(pluginDir, "libs"), recursive: false);
-      } catch { }
+      // Sweep any .old backups a prior auto-update moved aside (e.g. the bootstrap DLL, or
+      // node_modules/*.node freed by an interrupted apply), now deletable once the old
+      // process's handles are gone. Recursive so it reaches every dir the installer writes
+      // backups into, including node_modules/.
+      try { UpdatePackageInstaller.SweepOldBackups(pluginDir, recursive: true); } catch { }
 
       // Locate the out-of-process Discord bridge so DiscordClient knows where to spawn it.
       string bridgeDir = FindBridgeDir(pluginDir);

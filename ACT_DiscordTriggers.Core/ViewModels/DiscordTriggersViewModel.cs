@@ -702,26 +702,35 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
       if (updates == null) return;
       UpdateBusy = true;
       if (manual) UpdateStatus = "Checking for updates…";
+      // Advance the throttle for this attempt up front, regardless of outcome: a failing
+      // check (offline, rate-limited) must still back off for the interval instead of
+      // re-firing on every launch.
+      lastUpdateCheck = DateTime.UtcNow;
+      try { Save(); } catch { }   // persist LastUpdateCheck; never fail the check over a save
       try {
+        // CheckAsync resumes off the UI thread (ConfigureAwait(false) down the stack), so
+        // every observable/command-bound mutation below must hop back via OnUi — touching
+        // UpdateBusy/UpdateAvailable (and the CanExecuteChanged they raise) off-thread
+        // throws a cross-thread WPF exception.
         var info = await updates.CheckAsync();
-        lastUpdateCheck = DateTime.UtcNow;
-        try { Save(); } catch { }   // persist LastUpdateCheck; never fail the check over a save
-        if (info != null && info.IsNewer) {
-          latestUpdate = info;
-          UpdateAvailable = true;
-          LatestVersionText = info.TagName;
-          UpdateStatus = "Version " + info.TagName + " is available.";
-          Log("Update available: " + info.TagName, LogLevel.Info);
-        } else {
-          latestUpdate = null;
-          UpdateAvailable = false;
-          if (manual) UpdateStatus = "You're on the latest version.";
-        }
+        OnUi(() => {
+          if (info != null && info.IsNewer) {
+            latestUpdate = info;
+            UpdateAvailable = true;
+            LatestVersionText = info.TagName;
+            UpdateStatus = "Version " + info.TagName + " is available.";
+            Log("Update available: " + info.TagName, LogLevel.Info);
+          } else {
+            latestUpdate = null;
+            UpdateAvailable = false;
+            if (manual) UpdateStatus = "You're on the latest version.";
+          }
+        });
       } catch (Exception ex) {
-        if (manual) UpdateStatus = "Update check failed.";
+        OnUi(() => { if (manual) UpdateStatus = "Update check failed."; });
         Log("Update check failed: " + ex.Message, LogLevel.Warn);
       } finally {
-        UpdateBusy = false;
+        OnUi(() => UpdateBusy = false);
       }
     }
 

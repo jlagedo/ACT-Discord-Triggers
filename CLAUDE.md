@@ -141,17 +141,22 @@ one-click in-place update that swaps every file and restarts ACT. The byte-loade
 architecture is what makes this safe — see "Architecture: two processes".
 
 Flow: check → confirm dialog (plain-text notes) → download the release zip → **stop the bridge**
-(`DeinitAsync`, unlocking `node.exe` + `node_modules/*.node`) → swap files → `RestartACT`. Each
-file is replaced by **moving the old one aside** (`*.old`) then writing the new one — the uniform
-primitive that works for unlocked `libs/`, for the ACT-loaded bootstrap DLL (renamable
-share-delete while loaded), and for the freed node files. On a failed apply it rolls back. The
-moved-aside bootstrap `*.old` (still mapped by the dying process) is swept on the next launch by
-`PluginImpl` (`UpdatePackageInstaller.SweepOldBackups`, top-level + `libs/` only).
+(`DeinitAsync`, unlocking `node.exe` + `node_modules/*.node`) → swap files → `RestartACT`. The
+whole `libs/` folder is swapped **wholesale** — the old one moved aside (`libs.old`) and the
+release's extracted fresh — so an assembly removed/renamed in the new release can't linger and be
+byte-loaded by simple name; its DLLs are byte-loaded (never file-locked) so the folder is freely
+movable. Every other file (the ACT-loaded bootstrap DLL — renamable share-delete while loaded —
+and the freed node files) is replaced by **moving the old one aside** (`*.old`) then writing the
+new one. On a failed apply it rolls back both the moved files and the moved folder. Leftover
+`.old` backups (the bootstrap DLL still mapped by the dying process, the moved-aside `libs.old`,
+node files freed late) are swept — file or folder — on the next launch by `PluginImpl`
+(`UpdatePackageInstaller.SweepOldBackups`, recursive over the plugin dir).
 
 Pieces:
 - **Core/Update/** (pure, unit-tested, no ACT): `GithubReleaseClient` (API check + download;
   injectable `HttpMessageHandler`, overridable feed URL), `UpdatePackageInstaller` (extract +
-  move-aside swap + rollback + `SweepOldBackups`), `UpdateInfo`, `IUpdateService`.
+  wholesale `libs/` swap + move-aside file swap + rollback + `SweepOldBackups`), `UpdateInfo`,
+  `IUpdateService`.
 - **Main/Update/**: `ActUpdateService : IUpdateService` (dev `.git` guard, confirm dialog,
   download, bridge stop, install, `RestartACT` by reflection), `UpdatePromptForm`.
 - **VM**: `CheckForUpdatesCommand` / `InstallUpdateCommand`, `UpdateStatus`/`UpdateAvailable`/

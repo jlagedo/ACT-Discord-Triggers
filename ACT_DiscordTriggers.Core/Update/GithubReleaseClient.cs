@@ -82,17 +82,23 @@ namespace ACT_DiscordTriggers.Core.Update {
           Notes = (GetString(root, "body") ?? string.Empty).Replace("\r\n", "\n").Trim(),
           HtmlUrl = GetString(root, "html_url"),
           DownloadUrl = PickAssetUrl(root),
-          IsNewer = Normalize(version) > Normalize(current),
+          // A non-numeric tag (e.g. "nightly") yields no version, so it isn't an applicable
+          // update — never newer — rather than a hard failure that dead-ends the check.
+          IsNewer = version != null && Normalize(version) > Normalize(current),
         };
         return info;
       }
     }
 
-    /// <summary>Strip a leading "v"/"V" and parse the rest as a <see cref="Version"/>.</summary>
+    /// <summary>
+    /// Strip a leading "v"/"V" and parse the rest as a <see cref="Version"/>; returns null
+    /// for a tag that isn't a numeric version (the caller treats that as "not an update"
+    /// instead of throwing).
+    /// </summary>
     public static Version ParseTag(string tag) {
-      string s = tag.Trim();
+      string s = (tag ?? string.Empty).Trim();
       if (s.StartsWith("v", StringComparison.OrdinalIgnoreCase)) s = s.Substring(1);
-      return Version.Parse(s);
+      return Version.TryParse(s, out var v) ? v : null;
     }
 
     /// <summary>

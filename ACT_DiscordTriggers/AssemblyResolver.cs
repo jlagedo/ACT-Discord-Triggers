@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using Advanced_Combat_Tracker;
 
 namespace ACT_DiscordTriggers {
   // Resolves the plugin's managed closure from the libs/ folder next to the bootstrap
@@ -64,10 +65,17 @@ namespace ACT_DiscordTriggers {
           string path;
           try { path = Path.Combine(dir, name + ".dll"); } catch { continue; }
           if (!File.Exists(path)) continue;
-          // Load from bytes: no file handle is retained, so the DLL stays overwritable.
-          var asm = Assembly.Load(File.ReadAllBytes(path));
-          cache[name] = asm;
-          return asm;
+          try {
+            // Load from bytes: no file handle is retained, so the DLL stays overwritable.
+            var asm = Assembly.Load(File.ReadAllBytes(path));
+            cache[name] = asm;
+            return asm;
+          } catch (Exception ex) {
+            // A corrupt/half-written libs/ DLL (e.g. an interrupted auto-update) must not
+            // throw out of AssemblyResolve — log a breadcrumb and fall through to the next
+            // probe dir, else return null so the CLR reports the load failure normally.
+            try { ActGlobals.oFormActMain?.WriteExceptionLog(ex, $"ACT_DiscordTriggers: failed to byte-load {name} from {path}."); } catch { }
+          }
         }
       }
       return null;

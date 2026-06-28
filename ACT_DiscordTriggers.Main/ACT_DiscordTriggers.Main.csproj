@@ -4,9 +4,9 @@
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <DebugType>portable</DebugType>
-    <!-- WPF view + WinForms ElementHost host, same as the old entry assembly. This
-         assembly is byte-loaded from libs/ by the thin bootstrap, so ACT never
-         GetTypes()-scans it: it may freely derive from merged deps (CommunityToolkit). -->
+    <!-- WPF view + WinForms ElementHost host. This assembly is byte-loaded from libs/ by
+         the thin bootstrap, so ACT never GetTypes()-scans it: it may freely derive from
+         merged deps (CommunityToolkit). -->
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- AssemblyName differs from the default so the shipped file is

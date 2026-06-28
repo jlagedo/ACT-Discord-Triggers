@@ -82,7 +82,7 @@ namespace ACT_DiscordTriggers {
       return Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "Plugins\\Discord");
     }
 
-    // The plugin file's base name, used to name the config file (matches the prior behaviour).
+    // The plugin file's base name, used to name the config file.
     private string ResolveConfigName() {
       try {
         string pluginName = ActGlobals.oFormActMain.PluginGetSelfData(this).pluginFile.FullName;

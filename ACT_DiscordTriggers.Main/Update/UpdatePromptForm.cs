@@ -8,7 +8,7 @@ namespace ACT_DiscordTriggers {
   // no dependency) showing the release title + plain-text notes with Update / Skip. Returns
   // true when the user chooses to update.
   internal static class UpdatePromptForm {
-    public static bool Ask(UpdateInfo info) {
+    public static bool Ask(UpdateInfo info, Version current) {
       using (var form = new Form()) {
         form.Text = "ACT Discord Triggers — Update available";
         form.StartPosition = FormStartPosition.CenterScreen;
@@ -24,7 +24,7 @@ namespace ACT_DiscordTriggers {
           Dock = DockStyle.Top,
           Height = 52,
           Padding = new Padding(14, 12, 14, 6),
-          Text = $"Version {info.TagName} is available.\nYou are running v{typeof(AppInfo).Assembly.GetName().Version}.",
+          Text = $"Version {info.TagName} is available.\nYou are running v{current}.",
           Font = new Font("Segoe UI", 10f, FontStyle.Bold),
         };
 

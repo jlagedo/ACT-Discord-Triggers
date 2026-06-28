@@ -66,6 +66,53 @@ namespace ACT_DiscordTriggers.Tests.Update {
     }
 
     [Fact]
+    public void Install_ReplacesLibsWholesale_DropsRemovedAssemblies() {
+      string zip = MakeReleaseZip();
+      string target = Sub("target");
+      Write(Path.Combine(target, "libs", "ACT_DiscordTriggers.Core.dll"), "OLD-CORE");
+      // A libs/ assembly the new release no longer ships — the wholesale folder swap must
+      // drop it so the simple-name resolver can't byte-load the stale copy.
+      Write(Path.Combine(target, "libs", "Renamed.Old.dll"), "STALE");
+
+      var inst = new UpdatePackageInstaller();
+      bool ok = inst.Install(zip, target, new UpdatePackageInstaller.Options { StripDirs = 1 });
+
+      Assert.True(ok);
+      Assert.Equal("NEW-CORE", File.ReadAllText(Path.Combine(target, "libs", "ACT_DiscordTriggers.Core.dll")));
+      Assert.False(File.Exists(Path.Combine(target, "libs", "Renamed.Old.dll")));
+      // The moved-aside libs.old backup is dropped on success — no .old file or folder left.
+      Assert.Empty(Directory.EnumerateFiles(target, "*.old*", SearchOption.AllDirectories));
+      Assert.Empty(Directory.EnumerateDirectories(target, "*.old*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void SweepOldBackups_RemovesBackupFolders() {
+      string dir = Sub("sweep-dirs");
+      Write(Path.Combine(dir, "libs.old", "Core.dll"), "x"); // a swapped-aside libs folder
+      Write(Path.Combine(dir, "libs", "Core.dll"), "live");
+
+      int removed = UpdatePackageInstaller.SweepOldBackups(dir);
+
+      Assert.Equal(1, removed);
+      Assert.False(Directory.Exists(Path.Combine(dir, "libs.old")));
+      Assert.True(File.Exists(Path.Combine(dir, "libs", "Core.dll")));
+    }
+
+    [Fact]
+    public void SweepOldBackups_LeavesNonBackupFilesEndingInOld() {
+      string dir = Sub("sweep-narrow");
+      Write(Path.Combine(dir, "ACT_DiscordTriggers.dll.old"), "x"); // real backup
+      Write(Path.Combine(dir, "config.old.txt"), "user");           // not a backup suffix
+      Write(Path.Combine(dir, "data.oldbackup"), "user");           // not a backup suffix
+
+      int removed = UpdatePackageInstaller.SweepOldBackups(dir);
+
+      Assert.Equal(1, removed);
+      Assert.True(File.Exists(Path.Combine(dir, "config.old.txt")));
+      Assert.True(File.Exists(Path.Combine(dir, "data.oldbackup")));
+    }
+
+    [Fact]
     public void Install_DryRun_WritesNothing() {
       string zip = MakeReleaseZip();
       string target = Sub("target");

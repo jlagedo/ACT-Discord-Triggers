@@ -69,16 +69,25 @@ namespace ACT_DiscordTriggers {
           await client.DownloadAsync(info.DownloadUrl, zip, progress, ct).ConfigureAwait(false);
         }
 
-        Report(status, "Stopping the bridge…", LogLevel.Info);
-        try { if (stopBridgeAsync != null) await stopBridgeAsync().ConfigureAwait(false); }
-        catch (Exception ex) { log("Bridge stop before update failed (continuing): " + ex.Message, LogLevel.Warn); }
+        // Only stop the bridge for a real apply — it unlocks node.exe + node_modules/*.node
+        // for the swap. A dry run writes nothing, so killing the bridge would just leave
+        // audio output dead for a "nothing changed" preview.
+        if (!dryRun) {
+          Report(status, "Stopping the bridge…", LogLevel.Info);
+          try { if (stopBridgeAsync != null) await stopBridgeAsync().ConfigureAwait(false); }
+          catch (Exception ex) { log("Bridge stop before update failed (continuing): " + ex.Message, LogLevel.Warn); }
+        }
 
         Report(status, dryRun ? "Applying update (DRY RUN)…" : "Applying update…", LogLevel.Info);
         var installer = new UpdatePackageInstaller(m => log(m, LogLevel.Info));
         bool ok = installer.Install(zip, pluginDir, new UpdatePackageInstaller.Options { StripDirs = 1, DryRun = dryRun }, ct: ct);
         if (!ok) {
           Report(status, "Update failed; your installation is unchanged.", LogLevel.Error);
-          ShowInfo("The update could not be applied. Your current version is unchanged. See the diagnostics log for details.");
+          // On a real apply we already stopped the bridge, so audio stays down until ACT
+          // restarts even though the files rolled back; ask the user to restart.
+          ShowInfo(dryRun
+            ? "The update could not be applied (dry run). See the diagnostics log for details."
+            : "The update could not be applied. Your current version is unchanged. Please restart ACT to restore audio output. See the diagnostics log for details.");
           return false;
         }
 
@@ -137,8 +146,9 @@ namespace ACT_DiscordTriggers {
     // --- ACT/WinForms interop ------------------------------------------------------------
 
     private bool Confirm(UpdateInfo info) {
+      var current = ResolveCurrentVersion();
       bool result = false;
-      OnUi(() => result = UpdatePromptForm.Ask(info));
+      OnUi(() => result = UpdatePromptForm.Ask(info, current));
       return result;
     }
 
