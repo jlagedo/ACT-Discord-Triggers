@@ -1,0 +1,232 @@
+# Migrating ACT‑Discord‑Triggers to a native net10 plugin
+
+**Goal.** Port this plugin off the net48 ACT‑drop‑in model onto the **FFXIV Combat Tracker** host's
+modern plugin contract (`Fct.Abstractions`) as a **native `IPlugin`** — no `.NET Framework 4.x`, no ACT
+reference, no compat shim. The config UI is rewritten in **Avalonia**. The out‑of‑process node bridge,
+the wire protocol, and the UI‑agnostic `Core` logic carry across essentially unchanged.
+
+This is the **native path**, not the host's recompile‑shim path. Rationale: the UI is WPF and must be
+rewritten for the Avalonia shell regardless (there is no WPF‑in‑Avalonia host), and the audio seam
+collapses to a single `IAudioSink`. The shim's only value — "minimal code change" — is nullified by the
+mandatory UI rewrite, so we target the modern contract directly.
+
+Host references (in the `ffxiv-combat-tracker` repo, `E:\dev\ffxiv-combat-tracker`):
+- `docs/PLUGIN-API.md` — the modern plugin contract (`IPlugin`, `IPluginHost`, `IAudioOutput`,
+  `IUiContributor`).
+- `docs/ACT-INTERFACE-MAP.md` §6/§16 — the legacy ACT audio seam this replaces.
+
+## Source layout (what we are porting)
+
+| Project | TFM | Role | Disposition |
+|---|---|---|---|
+| `ACT_DiscordTriggers` | net48 (WPF+WinForms) | entry assembly ACT loads; `IActPluginV1`, WPF view, Costura merge | **Replaced** by a new native plugin project in the host repo |
+| `ACT_DiscordTriggers.Core` | net48 | UI‑agnostic: `Ipc/`, `Protocol/`, `Settings/`, `ViewModels/`, `Tts/` | **Retargeted** to net10‑windows, carried over |
+| `DiscordBridge-node` | Node | out‑of‑process Discord/ONNX bridge | **Unchanged** (spawned as before) |
+| `ACT_DiscordTriggers.Tests` | net48 | protocol/IPC/lifecycle tests | Retargeted with `Core` |
+
+The new native plugin project (`Fct.Plugins.DiscordTriggers`, `IPlugin` + Avalonia UI) lives in the
+**host** repo alongside the other Fct projects; `Core` + the node bridge remain the deliverables this
+repo owns.
+
+## The entire ACT surface it touches (and the modern replacement)
+
+Discord‑Triggers **consumes no combat data** — no `OnLogLineRead`, no encounter, no `AddCombatAction`
+(verified: grep for LogLineRead/Encounter/CombatAction = 0). Its whole ACT contact surface lives in
+`ACT_DiscordTriggers/DiscordTriggersPlugin.cs` + `DiscordTriggersView.xaml.cs`:
+
+| Legacy ACT member | Used for | Modern replacement |
+|---|---|---|
+| `IActPluginV1.InitPlugin(TabPage,Label)` / `DeInitPlugin` | lifecycle | `IPlugin.InitializeAsync` / `DisposeAsync` |
+| `ActGlobals.oFormActMain` | host hub | `IPluginHost` (injected) |
+| `PluginGetSelfData(this).pluginFile.DirectoryName` | locate the node bridge; config name; assembly‑resolve fallback | plugin's own load location; ALC removes the resolve hack |
+| `AppDataFolder.FullName` | diagnostics‑log dir, config dir, bridge fallback dir | `IPluginHost.Storage` (or a resolved AppData path) |
+| `WriteExceptionLog(ex,msg)` | error sink | `IPluginHost.Logger` (MEL `ILogger`) |
+| `PlayTtsMethod` / `PlaySoundMethod` (get‑to‑save, set‑to‑hijack) | route audio to Discord, suppress ACT's built‑in speakers | `IAudioOutput.RegisterSink(sink, terminal:true)` + `Dispose()` |
+| `FormActMain.PlayTtsDelegate` / `PlaySoundDelegate` | field types for the saved delegates | **deleted** (no save/restore, see Audio below) |
+| `Handle` (HWND) | parent for the folder‑picker dialogs | Avalonia `IStorageProvider.OpenFolderPickerAsync` |
+| WPF view in the `TabPage` via `ElementHost` | the config UI | `IUiContributor` → Avalonia `UiSurface` |
+
+## What is deleted outright
+
+The single‑mutable‑slot workaround and the net48 packaging scaffolding all disappear:
+
+- The delegate **save/swap/restore** (`oldTTS`/`oldSound`, `OnOutputActivated`/`OnOutputDeactivated`
+  bodies). Suppression is now "register a terminal sink"; un‑suppression is "dispose it".
+- **Costura.Fody + Fody**, `CosturaUtility.Initialize()`, the `GetTypes()` load‑invariant gymnastics,
+  the `[MethodImpl(NoInlining)]` markers, and the `AppDomain.CurrentDomain.AssemblyResolve` fallback —
+  the host's ALC + `.deps.json` handle assembly isolation.
+- `ElementHost` / `WindowsFormsIntegration`, `VistaFolderPicker`, `FolderBrowserDialog`, and the
+  `ActGlobals.oFormActMain.Handle` plumbing.
+
+## Audio — the whole legacy dance collapses to one sink
+
+Legacy (single mutable slot, so it must save/overwrite/restore):
+
+```csharp
+oldTTS = ActGlobals.oFormActMain.PlayTtsMethod;          // save
+ActGlobals.oFormActMain.PlayTtsMethod = vm.SpeakText;    // hijack (suppress ACT speakers)
+...
+ActGlobals.oFormActMain.PlayTtsMethod = oldTTS;          // restore
+```
+
+Native (additive multi‑sink; a **terminal** sink stops the chain so the host's built‑in speaker sink
+never fires — that *is* the suppression):
+
+```csharp
+// on vm.OutputActivated:
+_sinkHandle = host.Audio.RegisterSink(new DiscordAudioSink(vm), priority: 10, terminal: true);
+// on vm.OutputDeactivated:
+_sinkHandle?.Dispose();   // chain falls back through to the built-in sink
+```
+
+```csharp
+sealed class DiscordAudioSink(DiscordTriggersViewModel vm) : IAudioSink
+{
+    // options (Voice/Rate/Volume) intentionally ignored — Discord-Triggers routes through
+    // its OWN configured engine/voice, not per-request host options. See note below.
+    public ValueTask SpeakAsync(string text, AudioOptions o, CancellationToken ct)
+        => new(vm.SpeakTextCoreAsync(text));           // Task -> ValueTask wrap
+    public ValueTask PlayAsync(string file, int volume, CancellationToken ct)
+        => new(vm.SpeakFileCoreAsync(file));           // volume dropped (see note)
+}
+```
+
+Small `Core` change — smaller than it first looks:
+- `SpeakTextCoreAsync` **already exists** (returns `Task`; the Test command already awaits it). It is
+  `private` today; promote it to `internal`.
+- `SpeakSoundFile` is a one‑liner wrapping `discord.SpeakFileAsync(path)`. Add an `internal
+  SpeakFileCoreAsync(string path)` that returns that `Task` directly — there is little to "factor out".
+- Grant the new plugin assembly access via `[InternalsVisibleTo]` (keep the two cores `internal`, not
+  `public`, so the exposed surface stays minimal).
+- The `async void SpeakText`/`SpeakSoundFile` ACT‑delegate targets are no longer needed (nothing calls
+  a `void` delegate now) and can be deleted.
+
+Two behaviours to preserve deliberately (state them so a reviewer doesn't "fix" them):
+- **`AudioOptions.Voice`/`Rate` on `SpeakAsync` are ignored by design** — the plugin uses its own
+  configured engine/voice, not the host's per‑request options.
+- **`PlayAsync`'s `volume` is dropped**, matching today's behaviour (`SpeakSoundFile`'s `volume` param
+  is already ignored). Honouring it would need a per‑play gain across the wire protocol; leave it as a
+  logged TODO rather than a protocol bump in this port.
+
+## Migration steps (ordered, checkable)
+
+### Phase 0 — branch & doc
+- [x] `git checkout -b feature/net10-native-migration`
+- [x] This migration document.
+
+### Phase 1a — de‑risk `System.Speech` on net10 first (spike)
+The in‑process SAPI synth path is the single highest‑risk unknown, so validate it before any real
+retarget work.
+- [x] Throwaway `net10.0-windows` console referencing the **`System.Speech` NuGet package**;
+      synthesize one clip to WAV and confirm it plays. If it regresses, the ONNX (bridge‑side) path is
+      unaffected — but you want to know now, not in Phase 3.
+      **Result: passes.** `System.Speech` 10.0.0 restores/builds clean on `net10.0-windows`, enumerates
+      the installed SAPI voices, synthesizes, and plays back. The WAV header decodes to exactly the
+      pinned format (PCM, 48000 Hz, stereo, 16‑bit), so the in‑process synth path needs no conversion.
+      One incidental find: `System.Media.SoundPlayer` moved to `System.Windows.Extensions` on net10 —
+      not used anywhere in this codebase, so no impact.
+
+### Phase 1b — carry `Core` to net10 (clean cut)
+- [x] Retarget `ACT_DiscordTriggers.Core` to **`net10.0-windows`** — a clean cut, **not** a
+      `net48;net10.0-windows` multi‑target. `master` retains the net48 ACT build for servicing; this
+      branch avoids the ongoing `#if`/dual‑TFM tax for the duration of the port.
+- [x] Replace the GAC `System.Speech` `<Reference>` with the **`System.Speech` NuGet package**
+      (`10.0.0`, the version validated in Phase 1a); drop the `System.Net.Http` `<Reference>` (in‑box on
+      net10). Also dropped the now‑obsolete net48 `ServicePointManager.SecurityProtocol` TLS‑1.2 nudge in
+      `OnnxDownloader.cs` (net10 defaults to TLS 1.2+ and it no longer affects `HttpClient`).
+- [x] Keep `CommunityToolkit.Mvvm`, `System.Text.Json`, the embedded `onnx-voices.json`. (`System.Text.Json`
+      draws a benign `NU1510` — it's in‑box on net10 — but is kept per plan; the pinned `10.0.9` matches.)
+- [x] Confirm the VM's `SynchronizationContext`‑based `OnUi` marshaling is intact — Avalonia installs
+      a sync context on the UI thread, so `sync = SynchronizationContext.Current` in the ctor works the
+      same way it did under the WPF dispatcher. Verified **no** WPF/`Dispatcher` types leak into `Core`.
+- [x] Promote `SpeakTextCoreAsync` to `internal`; add `internal SpeakFileCoreAsync(string path)`
+      returning `discord.SpeakFileAsync(path)`; add `[InternalsVisibleTo]` for the new plugin assembly
+      (`Fct.Plugins.DiscordTriggers`).
+- [x] Build `Core` standalone on net10; run its unit tests (protocol/settings/tts parser). **139 passed,
+      5 skipped** (network‑gated + unmeasured‑voice); bridge‑spawning suites (`BridgeIntegrationTests`,
+      `OnnxBridgeE2ETests`) still need a prior `build.ps1` and were filtered for this phase.
+- [x] Side effects of the clean cut: the net48 entry assembly `ACT_DiscordTriggers` (which can't reference
+      a net10 `Core`) is **unhooked from `ACT_DiscordTriggers.sln`** on this branch — its source stays on
+      disk for the Phase 3 Avalonia port; `master` keeps building it. `ACT_DiscordTriggers.Tests` retargeted
+      to `net10.0-windows` alongside `Core` (keeps `UseWPF` + the linked `ViewBehaviors.cs`). `build.ps1`/
+      `check.ps1` still assume the net48 entry assembly + Costura packaging and are deferred to Phase 4.
+
+### Phase 2 — native plugin project (headless first)
+- [ ] New `Fct.Plugins.DiscordTriggers` (`net10.0-windows`, `EnableDynamicLoading=true`) in the host
+      repo, referencing `Fct.Abstractions`, `Fct.Abstractions.UI`, and this repo's `ACT_DiscordTriggers.Core`.
+- [ ] `plugin.json`: `id`, `version`, `contract`, `entry` = the `IPlugin` type,
+      `capabilities: ["ui","audio"]`.
+- [ ] `DiscordTriggersPlugin : IPlugin` —
+  - `InitializeAsync`: resolve the bridge dir from the plugin's own location; init `DiagnosticsLog`
+    against a host‑provided path; build `DiscordClientService` + `SettingsStore` + the VM; subscribe
+    `vm.OutputActivated`/`OutputDeactivated` to register/dispose the terminal `IAudioSink`; call
+    `vm.Initialize()`.
+  - `DisposeAsync`: dispose the sink handle, `await vm.ShutdownAsync()`, dispose the discord service.
+  - Route all logging to `host.Logger`.
+- [ ] `DiscordAudioSink : IAudioSink` (as above).
+- [ ] Stage the node bridge (`node.exe` + `bundle.js` + `node_modules/`) next to the plugin output;
+      keep `FindBridgeDir()`'s "next to the DLL, else AppData\Plugins\Discord" logic.
+- [ ] Load end‑to‑end in the host with a **placeholder** settings page; verify: plugin discovered,
+      init runs, bridge spawns, a Test speak routes to the sink, deinit tears the bridge down.
+
+### Phase 3 — port the UI to Avalonia
+- [ ] `DiscordTriggersView` → Avalonia `UserControl` (`.axaml` + code‑behind); `DataContext` = the same
+      `DiscordTriggersViewModel` (unchanged bindings where possible).
+- [ ] Implement `IUiContributor.RegisterUi` → `AddSettingsPage(new UiSurface(... CreateView ...))`
+      (and/or `AddNavPage`); lazy `Func<Control>`.
+- [ ] Port the sub‑pieces that used WPF/Win32 specifics:
+  - ONNX voice‑picker flyout: Avalonia `Flyout`/`Popup` + a filtered `CollectionView`/`DataGrid` list
+    (replaces the WPF `CollectionViewSource` + `FilterEventArgs`).
+  - Masked token box + Ctrl+C log copy (`ViewBehaviors.cs`) → Avalonia behaviors/attached properties.
+  - Info‑tab hyperlinks (`Microsoft.Xaml.Behaviors` `LaunchUriOrFileAction`) → Avalonia `HyperlinkButton`
+    or a click handler using the launcher.
+  - Folder picker → `TopLevel.GetTopLevel(this).StorageProvider.OpenFolderPickerAsync(...)`
+    (delete `VistaFolderPicker`, `PickFolderClassic`, the `Handle` usage).
+  - Logo/mascot resources → Avalonia `avares://` assets (replace the `pack://` URIs).
+  - `Theme.xaml` → an Avalonia `ResourceDictionary`/`Styles`, scoped to the plugin's subtree.
+- [ ] Background‑thread view updates go through `IUiHost.Dispatcher` (or the VM's existing sync‑context
+      `OnUi`, which now targets Avalonia's UI thread).
+
+### Phase 4 — packaging & tests
+- [ ] Host staging: copy the plugin + `plugin.json` + the node bridge into the host's plugins dir.
+- [ ] Port/retarget `ACT_DiscordTriggers.Tests` to net10 (protocol/IPC/lifecycle keep working;
+      `BridgeIntegrationTests` still spawns the real bridge).
+- [ ] New test: `OutputActivated` registers a terminal sink; a producer `Speak` reaches
+      `DiscordAudioSink` and **not** the built‑in sink; `OutputDeactivated`/dispose restores fall‑through.
+- [ ] Manual e2e: run the host, connect the bot / local output, fire a Test speak, confirm audio and
+      clean teardown.
+
+## What does NOT change
+
+- The **node bridge**, the **wire protocol** (`Protocol.cs`/`protocol.ts`), the audio DSP pipeline, and
+  the two output modes (bot / local).
+- The `Core` **VM logic, IPC, settings migrations, ONNX catalog** — only its TFM and the two exposed
+  audio cores change.
+
+## Risks / open items
+
+- **System.Speech on net10**: the in‑process SAPI synth path (non‑ONNX voices) depends on the modern
+  `System.Speech` package behaving like the net48 GAC assembly. **Phase 1a** de‑risks this with a
+  one‑clip spike before any retarget work. If it regresses, the ONNX path (bridge‑side synth) is
+  unaffected.
+- **Host contract verified**: the `Fct.Abstractions` audio/UI members this port targets already exist
+  and match the signatures used above (`IAudioSink.SpeakAsync(text, AudioOptions, ct)` /
+  `PlayAsync(file, volume, ct)` → `ValueTask`; `IAudioOutput.RegisterSink(sink, priority, terminal)` →
+  `IDisposable`; `AudioOptions(Volume, Voice, Rate)`; `IUiHost.AddSettingsPage`/`Dispatcher`). The
+  sink shim compiles against the real contract, not an assumed one.
+- **UI port scope**: the Avalonia rewrite is ~75% of total effort. The XAML is large (voice picker,
+  output‑mode folding, info tab). Ship Phase 2's placeholder page first, then iterate the real UI so
+  audio/lifecycle land independently of UI completeness.
+- **`IUiHost` maturity**: this is the host's first real UI‑contributing plugin, so it exercises
+  `Fct.Abstractions.UI` for real — confirm the shell renders an `AddSettingsPage` surface end‑to‑end.
+- **Diagnostics log location**: today it's `AppDataFolder\...`; decide whether it moves under the host's
+  per‑plugin storage or stays a user‑emailable file next to the bridge.
+
+## Note for the host's compat shim (out of scope for this port)
+
+`FormActMain.PlayTtsMethod`/`PlaySoundMethod` in the host's `Fct.Compat.Shim.ActFacade` are **set‑only**.
+A literal recompile‑shim port of *any* audio‑hijack plugin (Discord‑Triggers, TTSYukkuri) would fail to
+compile on the `get`‑to‑save line, and assigning the saved delegate back would register a second sink
+rather than unregister. This port avoids the issue by going native, but the shim gap is real and should
+be tracked in the host repo if the recompile path is meant to serve those plugins.
+</content>

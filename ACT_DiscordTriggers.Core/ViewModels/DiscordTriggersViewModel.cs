@@ -583,8 +583,8 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // Awaitable synth/send for the configured engine, shared by the async-void ACT
-    // delegate target above and the (awaited) Test command.
-    private Task SpeakTextCoreAsync(string text) {
+    // delegate target above, the (awaited) Test command, and the native IAudioSink.
+    internal Task SpeakTextCoreAsync(string text) {
       Log("Playing TTS for text: " + text);
       // ONNX: the bridge synthesizes with the voice it learned from SetConfig; only
       // the text crosses the wire. If no installed ONNX voice is configured the bridge
@@ -597,12 +597,19 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     // ACT's PlaySoundMethod delegate (also void): async void for the same reason —
     // fire the playback without blocking ACT's callout thread, log any failure.
     public async void SpeakSoundFile(string path, int volume) {
-      Log("Playing Audio file: " + path);
       try {
-        await discord.SpeakFileAsync(path).ConfigureAwait(false);
+        await SpeakFileCoreAsync(path).ConfigureAwait(false);
       } catch (Exception ex) {
         Log("Sound playback error", ex);
       }
+    }
+
+    // Awaitable file playback, shared by the async-void delegate target above and the
+    // native IAudioSink. TODO: per-play volume is dropped (matches today's behaviour);
+    // honouring it would need a per-play gain across the wire protocol.
+    internal Task SpeakFileCoreAsync(string path) {
+      Log("Playing Audio file: " + path);
+      return discord.SpeakFileAsync(path);
     }
 
     // --- Lifecycle --------------------------------------------------------------
