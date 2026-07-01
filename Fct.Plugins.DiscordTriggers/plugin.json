@@ -1,0 +1,8 @@
+{
+  "id": "com.discordtriggers",
+  "version": "2.1.2",
+  "contract": "1.0",
+  "assembly": "Fct.Plugins.DiscordTriggers.dll",
+  "entry": "Fct.Plugins.DiscordTriggers.DiscordTriggersPlugin",
+  "capabilities": [ "audio", "ui" ]
+}

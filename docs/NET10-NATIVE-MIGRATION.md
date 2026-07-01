@@ -19,14 +19,17 @@ Host references (in the `ffxiv-combat-tracker` repo, `E:\dev\ffxiv-combat-tracke
 
 | Project | TFM | Role | Disposition |
 |---|---|---|---|
-| `ACT_DiscordTriggers` | net48 (WPF+WinForms) | entry assembly ACT loads; `IActPluginV1`, WPF view, Costura merge | **Replaced** by a new native plugin project in the host repo |
+| `ACT_DiscordTriggers` | net48 (WPF+WinForms) | entry assembly ACT loads; `IActPluginV1`, WPF view, Costura merge | **Replaced** by the native `Fct.Plugins.DiscordTriggers` project in **this** repo |
 | `ACT_DiscordTriggers.Core` | net48 | UI‑agnostic: `Ipc/`, `Protocol/`, `Settings/`, `ViewModels/`, `Tts/` | **Retargeted** to net10‑windows, carried over |
 | `DiscordBridge-node` | Node | out‑of‑process Discord/ONNX bridge | **Unchanged** (spawned as before) |
 | `ACT_DiscordTriggers.Tests` | net48 | protocol/IPC/lifecycle tests | Retargeted with `Core` |
 
-The new native plugin project (`Fct.Plugins.DiscordTriggers`, `IPlugin` + Avalonia UI) lives in the
-**host** repo alongside the other Fct projects; `Core` + the node bridge remain the deliverables this
-repo owns.
+The new native plugin project (`Fct.Plugins.DiscordTriggers`, `IPlugin` + Avalonia UI) lives in
+**this** repo alongside `Core` and the node bridge, so the whole Discord‑Triggers deliverable stays in
+one place. It references `Core` by in‑repo `ProjectReference` and the host contracts
+(`Fct.Abstractions`, `Fct.Abstractions.UI`) as **vendored DLLs** under `libs/fct/` (`Private=false` —
+the host loader shares those into the default `AssemblyLoadContext`, so they must not ship as private
+plugin deps; the host publishes no NuGet feed). See `libs/fct/README.md` for the refresh step.
 
 ## The entire ACT surface it touches (and the modern replacement)
 
@@ -152,22 +155,33 @@ retarget work.
       `check.ps1` still assume the net48 entry assembly + Costura packaging and are deferred to Phase 4.
 
 ### Phase 2 — native plugin project (headless first)
-- [ ] New `Fct.Plugins.DiscordTriggers` (`net10.0-windows`, `EnableDynamicLoading=true`) in the host
-      repo, referencing `Fct.Abstractions`, `Fct.Abstractions.UI`, and this repo's `ACT_DiscordTriggers.Core`.
-- [ ] `plugin.json`: `id`, `version`, `contract`, `entry` = the `IPlugin` type,
-      `capabilities: ["ui","audio"]`.
-- [ ] `DiscordTriggersPlugin : IPlugin` —
-  - `InitializeAsync`: resolve the bridge dir from the plugin's own location; init `DiagnosticsLog`
-    against a host‑provided path; build `DiscordClientService` + `SettingsStore` + the VM; subscribe
-    `vm.OutputActivated`/`OutputDeactivated` to register/dispose the terminal `IAudioSink`; call
-    `vm.Initialize()`.
-  - `DisposeAsync`: dispose the sink handle, `await vm.ShutdownAsync()`, dispose the discord service.
-  - Route all logging to `host.Logger`.
-- [ ] `DiscordAudioSink : IAudioSink` (as above).
-- [ ] Stage the node bridge (`node.exe` + `bundle.js` + `node_modules/`) next to the plugin output;
-      keep `FindBridgeDir()`'s "next to the DLL, else AppData\Plugins\Discord" logic.
-- [ ] Load end‑to‑end in the host with a **placeholder** settings page; verify: plugin discovered,
-      init runs, bridge spawns, a Test speak routes to the sink, deinit tears the bridge down.
+- [x] New `Fct.Plugins.DiscordTriggers` (`net10.0-windows`, `EnableDynamicLoading=true`) in **this**
+      repo, `ProjectReference`ing `ACT_DiscordTriggers.Core` and referencing the vendored host contract
+      DLLs (`Fct.Abstractions`, `Fct.Abstractions.UI`) with `Private=false`. Avalonia 12.0.5 +
+      `Microsoft.Extensions.Logging.Abstractions` 10.0.9 are compile‑time‑only (`ExcludeAssets=runtime`
+      — host‑provided, shared‑to‑default‑ALC). Added to `ACT_DiscordTriggers.sln`.
+- [x] `plugin.json`: `id` `com.discordtriggers`, `version`, `contract` `1.0`, `assembly`,
+      `entry` = the `IPlugin` type, `capabilities: ["audio","ui"]`.
+- [x] `DiscordTriggersPlugin : IPlugin, IUiContributor` —
+  - `InitializeAsync`: `FindBridgeDir` from the plugin's own location (`Assembly.Location`, fallback
+    `host.Storage.DataDirectory`) → `DiscordClient.SetBridgePath` → `DiagnosticsLog.Init(host.Storage.
+    DataDirectory, …)` → `DiscordClientService` + `SettingsStore(host.Storage.DataDirectory,
+    "DiscordTriggers.config.xml", …)` + the VM; subscribe `vm.OutputActivated`/`OutputDeactivated` to
+    register/dispose the terminal `IAudioSink`; `vm.Initialize()`.
+  - `DisposeAsync`: dispose the sink, dispose the discord service, unsubscribe, `vm.Save()`,
+    `await vm.ShutdownAsync()`, flush/shutdown `DiagnosticsLog` — each step guarded.
+  - `RegisterUi`: `AddSettingsPage` with a **placeholder** Avalonia view (real UI is Phase 3).
+  - Logging forwarded to `host.Logger` (plus the user‑emailable unified diagnostics file via the VM).
+- [x] `DiscordAudioSink : IAudioSink` — `SpeakAsync`→`SpeakTextCoreAsync`, `PlayAsync`→`SpeakFileCoreAsync`
+      (Voice/Rate/volume dropped by design); registered `priority: 10, terminal: true`.
+- [x] Stage the node bridge (`node.exe` + `bundle.js` + `node_modules/`) next to the plugin output via
+      a post‑build MSBuild target (gated on the bridge `dist/` existing); `FindBridgeDir` keeps the
+      "next to the DLL, else fallback dir" logic. Full release packaging into the host `plugins/` dir
+      is Phase 4.
+- [ ] Load end‑to‑end in the host with the placeholder settings page; verify: plugin discovered, init
+      runs, bridge spawns, a Test speak routes to the sink, deinit tears the bridge down. *(Pending —
+      manual step: build the bridge, stage the plugin output into the host's `plugins/` dir, run the
+      host. Plugin + solution build clean and the output dep layout is verified.)*
 
 ### Phase 3 — port the UI to Avalonia
 - [ ] `DiscordTriggersView` → Avalonia `UserControl` (`.axaml` + code‑behind); `DataContext` = the same
@@ -219,8 +233,11 @@ retarget work.
   audio/lifecycle land independently of UI completeness.
 - **`IUiHost` maturity**: this is the host's first real UI‑contributing plugin, so it exercises
   `Fct.Abstractions.UI` for real — confirm the shell renders an `AddSettingsPage` surface end‑to‑end.
-- **Diagnostics log location**: today it's `AppDataFolder\...`; decide whether it moves under the host's
-  per‑plugin storage or stays a user‑emailable file next to the bridge.
+- **Diagnostics log + settings location** (decided in Phase 2): both live under the host's per‑plugin
+  storage (`IPluginHost.Storage.DataDirectory`). `Core`'s XML `SettingsStore` is kept (preserving the
+  v2→v3 migration framework) but pointed at that dir, and `DiagnosticsLog.Init` writes the unified log
+  there too. Switching the log back to a file next to the bridge is a one‑argument change if a more
+  discoverable user‑emailable path is wanted later.
 
 ## Note for the host's compat shim (out of scope for this port)
 

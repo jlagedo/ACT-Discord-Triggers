@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Native FFXIV Combat Tracker plugin: wires ACT_DiscordTriggers.Core into the host's IPlugin
+    contract and routes audio through a terminal IAudioSink. Loaded by the host into its own
+    collectible AssemblyLoadContext.
+
+    net10.0-windows (not plain net10) because it ProjectReferences the net10-windows Core, whose
+    System.Speech synth path is Windows-only. The assembly name MUST stay Fct.Plugins.DiscordTriggers:
+    Core's [InternalsVisibleTo("Fct.Plugins.DiscordTriggers")] is what lets DiscordAudioSink reach
+    the internal SpeakTextCoreAsync/SpeakFileCoreAsync cores.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Emits the .deps.json the host's per-plugin AssemblyDependencyResolver needs. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyVersion>2.1.2.0</AssemblyVersion>
+    <FileVersion>2.1.2.0</FileVersion>
+    <Version>2.1.2</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Host plugin contract, vendored (the host publishes no NuGet feed). Private=false: the host
+       loader shares these into the default ALC for single type identity across shell + plugin, so
+       the plugin must NOT ship its own private copy. See libs/fct/README.md. -->
+  <ItemGroup>
+    <Reference Include="Fct.Abstractions">
+      <HintPath>..\libs\fct\Fct.Abstractions.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Fct.Abstractions.UI">
+      <HintPath>..\libs\fct\Fct.Abstractions.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Compile-time only. The contract surface leaks Avalonia types (UiSurface.CreateView returns a
+       Control) and MEL types (IPluginHost.Logger is an ILogger), so the compiler needs their
+       metadata; both are host-provided and shared-to-default-ALC, so ExcludeAssets=runtime keeps
+       them out of the plugin output. Versions pinned to the host (Directory.Packages.props). -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Stage the node bridge (node.exe + bundle.js + node_modules/) next to the plugin DLL so
+       FindBridgeDir resolves "next to the DLL" in dev. Gated on the bridge dist existing — build it
+       first (build.ps1 or `npm run bundle` in DiscordBridge-node). Runtime logs are excluded. Full
+       release packaging into the host's plugins/ dir is a later phase. -->
+  <Target Name="StageDiscordBridge" AfterTargets="Build"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\DiscordBridge-node\dist\bundle.js')">
+    <ItemGroup>
+      <BridgeFiles Include="$(MSBuildProjectDirectory)\..\DiscordBridge-node\dist\**\*"
+                   Exclude="$(MSBuildProjectDirectory)\..\DiscordBridge-node\dist\DiscordBridge.log;$(MSBuildProjectDirectory)\..\DiscordBridge-node\dist\selftest.stdout" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BridgeFiles)"
+          DestinationFiles="@(BridgeFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Staged Discord bridge into $(OutDir)" />
+  </Target>
+
+</Project>
