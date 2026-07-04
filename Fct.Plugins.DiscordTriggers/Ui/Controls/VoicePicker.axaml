@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ACT_DiscordTriggers.Core.ViewModels"
+             xmlns:local="using:Fct.Plugins.DiscordTriggers.Ui.Controls"
+             x:Class="Fct.Plugins.DiscordTriggers.Ui.Controls.VoicePicker"
+             x:DataType="vm:DiscordTriggersViewModel">
+  <!-- Closed state: a ToggleButton showing the selected voice; open state: a light-dismiss Popup
+       with a search box + locale-grouped list. Filtering/grouping is a view concern (code-behind),
+       exactly as the WPF CollectionViewSource path was; selection is pushed to the VM on click. -->
+  <Grid>
+    <ToggleButton Name="Toggle" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                   Text="{Binding SelectedOnnxVoice.Label, FallbackValue='Select a voice', TargetNullValue='Select a voice'}" />
+        <TextBlock Grid.Column="1" Classes="icon" Text="&#xE70D;" FontSize="12" Margin="8,0,0,0" />
+      </Grid>
+    </ToggleButton>
+
+    <Popup PlacementTarget="{Binding #Toggle}" Placement="BottomEdgeAlignedLeft"
+           IsLightDismissEnabled="True" Opened="OnOpened"
+           IsOpen="{Binding #Toggle.IsChecked, Mode=TwoWay}">
+      <Border Width="300" Background="{DynamicResource FctSurface}"
+              BorderBrush="{DynamicResource FctHairline}" BorderThickness="1"
+              CornerRadius="10" Padding="8" Margin="0,4,0,0">
+        <DockPanel>
+          <TextBox Name="Search" DockPanel.Dock="Top" PlaceholderText="Search voices…"
+                   TextChanged="OnSearchChanged" Margin="0,0,0,8" />
+          <ScrollViewer MaxHeight="340">
+            <ItemsControl Name="GroupList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="local:VoiceGroup">
+                  <StackPanel Margin="0,0,0,6">
+                    <TextBlock Text="{Binding Name}" Classes="section" Margin="4,4,0,2" />
+                    <ItemsControl ItemsSource="{Binding Items}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:OnnxVoiceItem">
+                          <Button Classes="link" HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  Padding="6,5" Click="OnVoiceClick">
+                            <Grid ColumnDefinitions="16,*,Auto">
+                              <TextBlock Grid.Column="0" Text="★" FontSize="12"
+                                         Foreground="{DynamicResource FctEmphasis}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding Recommended}" />
+                              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding Name}"
+                                           Foreground="{DynamicResource FctText}" />
+                                <TextBlock Text="{Binding TierLabel}"
+                                           Foreground="{DynamicResource FctTextDim}" />
+                              </StackPanel>
+                              <TextBlock Grid.Column="2" Text="✓"
+                                         Foreground="{DynamicResource FctAccent}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding Installed}" />
+                              <TextBlock Grid.Column="2" Text="{Binding SizeText}"
+                                         Foreground="{DynamicResource FctTextDim}"
+                                         VerticalAlignment="Center"
+                                         IsVisible="{Binding !Installed}" />
+                            </Grid>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Popup>
+  </Grid>
+</UserControl>

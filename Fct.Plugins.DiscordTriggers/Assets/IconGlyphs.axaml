@@ -1,0 +1,34 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Segoe Fluent Icons (the Windows 11 symbol font) glyph code points, rendered as text.
+       These are not theme tokens (they never restyle), so consumers reference them with
+       {StaticResource}. FontFamily is IconFont. -->
+  <FontFamily x:Key="IconFont">Segoe Fluent Icons</FontFamily>
+
+  <x:String x:Key="Icon.Home">&#xE80F;</x:String>
+  <x:String x:Key="Icon.Sound">&#xE767;</x:String>
+  <x:String x:Key="Icon.Info">&#xE946;</x:String>
+  <x:String x:Key="Icon.Key">&#xE980;</x:String>
+  <x:String x:Key="Icon.PlugConnected">&#xE703;</x:String>
+  <x:String x:Key="Icon.Chat">&#xE8BD;</x:String>
+  <x:String x:Key="Icon.AutoConnect">&#xE895;</x:String>
+  <x:String x:Key="Icon.Server">&#xEC05;</x:String>
+  <x:String x:Key="Icon.Channel">&#xE7F6;</x:String>
+  <x:String x:Key="Icon.Voice">&#xE720;</x:String>
+  <x:String x:Key="Icon.Speed">&#xEC49;</x:String>
+  <x:String x:Key="Icon.Wand">&#xE794;</x:String>
+  <x:String x:Key="Icon.Level">&#xE9E9;</x:String>
+  <x:String x:Key="Icon.Quality">&#xE93E;</x:String>
+  <x:String x:Key="Icon.Folder">&#xE8B7;</x:String>
+  <x:String x:Key="Icon.Bug">&#xEBE8;</x:String>
+  <x:String x:Key="Icon.Guide">&#xE8F1;</x:String>
+  <x:String x:Key="Icon.Open">&#xE8A7;</x:String>
+  <x:String x:Key="Icon.Sparkle">&#xEB78;</x:String>
+  <x:String x:Key="Icon.Desktop">&#xE7F4;</x:String>
+  <x:String x:Key="Icon.TopSpeed">&#xEC4A;</x:String>
+  <x:String x:Key="Icon.Download">&#xE896;</x:String>
+  <x:String x:Key="Icon.CheckCircle">&#xEC61;</x:String>
+  <x:String x:Key="Icon.PlayCircle">&#xE768;</x:String>
+  <x:String x:Key="Icon.Help">&#xE897;</x:String>
+  <x:String x:Key="Icon.Star">&#xE735;</x:String>
+</ResourceDictionary>

@@ -14,14 +14,17 @@ using ACT_DiscordTriggers.Core.Settings;
 using ACT_DiscordTriggers.Core.Tts;
 
 namespace ACT_DiscordTriggers.Core.ViewModels {
-  // UI-agnostic ViewModel: no WinForms, no ACT. Holds the settings-backed state,
-  // commands, and Discord wiring the WinForms view used to own; the eventual WPF
-  // view binds to the same instance. Constructed on the UI thread so it can capture
-  // the SynchronizationContext used to marshal background callbacks.
+  // UI-agnostic ViewModel: no WinForms, no ACT, no Avalonia. Holds the settings-backed state,
+  // commands, and Discord wiring; the view binds to the same instance. Background callbacks are
+  // marshaled through a SynchronizationContext captured in the ctor and rebindable via
+  // UseSynchronizationContext (the host sets the real UI-thread context once it exists).
   public partial class DiscordTriggersViewModel : ObservableObject {
     private readonly IDiscordService discord;
     private readonly SettingsStore store;
-    private readonly SynchronizationContext sync;
+    // The context background callbacks marshal through. Captured in the ctor, but the ctor may not
+    // run on the UI thread (the native host constructs the VM before its Avalonia UI thread exists),
+    // so UseSynchronizationContext lets the host rebind it once the real UI thread is known.
+    private SynchronizationContext sync;
 
     // Bot status rides in the config object and the textbox fires per keystroke,
     // hence a long debounce; fx/normalize/quality coalesce a slider-drag burst.
@@ -831,6 +834,13 @@ namespace ACT_DiscordTriggers.Core.ViewModels {
     }
 
     // --- Helpers ----------------------------------------------------------------
+    // Rebind the marshaling context to the real UI thread. The native plugin calls this from
+    // RegisterUi (on the Avalonia UI thread), which runs after construction but before the view is
+    // ever built, so every bound-collection update is marshaled correctly with no gap.
+    public void UseSynchronizationContext(SynchronizationContext ctx) {
+      if (ctx != null) sync = ctx;
+    }
+
     private void OnUi(Action action) {
       if (sync != null) sync.Post(_ => action(), null);
       else action();

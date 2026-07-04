@@ -1,0 +1,162 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Bespoke styles for the few pieces the host's fct-* classes + FluentTheme don't cover.
+       Every colour is a host token bound with {DynamicResource} so the page tracks a shell restyle.
+       Everything else (ToggleSwitch, Slider, ComboBox, TextBox, ProgressBar, TabControl) uses the
+       FluentTheme natives the host already provides. -->
+
+  <!-- ── Section header (small caps eyebrow over a group of cards) ─────────────────────────── -->
+  <Style Selector="TextBlock.section">
+    <Setter Property="FontFamily" Value="{DynamicResource FctFontMono}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{DynamicResource FctTextDim}" />
+    <Setter Property="Margin" Value="2,10,0,2" />
+  </Style>
+
+  <!-- ── Inline icon glyph (Segoe Fluent Icons) ───────────────────────────────────────────── -->
+  <Style Selector="TextBlock.icon">
+    <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="Foreground" Value="{DynamicResource FctTextDim}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- ── Choice card: a RadioButton rendered as a selectable bordered card (engine / mode) ─── -->
+  <Style Selector="RadioButton.choice-card">
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="root"
+                Background="{DynamicResource FctSurfaceAlt}"
+                BorderBrush="{DynamicResource FctHairline}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="14">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.choice-card:pointerover /template/ Border#root">
+    <Setter Property="BorderBrush" Value="{DynamicResource FctAccentDim}" />
+  </Style>
+  <Style Selector="RadioButton.choice-card:checked /template/ Border#root">
+    <Setter Property="BorderBrush" Value="{DynamicResource FctAccent}" />
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceHi}" />
+  </Style>
+
+  <!-- ── Segmented control: joined RadioButtons in a Border.segmented pill (quality / CPU) ─── -->
+  <Style Selector="Border.segmented">
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource FctHairline}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="RadioButton.segment">
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Foreground" Value="{DynamicResource FctTextDim}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="root" Background="Transparent" Padding="14,7">
+          <ContentPresenter HorizontalAlignment="Center"
+                            Content="{TemplateBinding Content}"
+                            Foreground="{TemplateBinding Foreground}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.segment:pointerover /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceHi}" />
+  </Style>
+  <Style Selector="RadioButton.segment:checked /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource FctAccent}" />
+  </Style>
+  <Style Selector="RadioButton.segment:checked">
+    <Setter Property="Foreground" Value="{DynamicResource FctBackground}" />
+  </Style>
+
+  <!-- ── Status dot (Discord connection) ──────────────────────────────────────────────────── -->
+  <Style Selector="Border.status-dot">
+    <Setter Property="Width" Value="9" />
+    <Setter Property="Height" Value="9" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource FctTextDim}" />
+  </Style>
+  <Style Selector="Border.status-dot.online">
+    <Setter Property="Background" Value="{DynamicResource FctAccent}" />
+  </Style>
+
+  <!-- ── Help "?" button (opens a Flyout) ─────────────────────────────────────────────────── -->
+  <Style Selector="Button.help">
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Foreground" Value="{DynamicResource FctTextDim}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="root"
+                Width="20" Height="20" CornerRadius="10"
+                Background="{DynamicResource FctSurfaceHi}">
+          <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE897;" FontSize="12"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Foreground="{TemplateBinding Foreground}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="Button.help:pointerover">
+    <Setter Property="Foreground" Value="{DynamicResource FctAccent}" />
+  </Style>
+
+  <!-- ── Info callout band (notices, warnings) ────────────────────────────────────────────── -->
+  <Style Selector="Border.callout">
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource FctAccentDim}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="12" />
+  </Style>
+  <Style Selector="Border.callout.warn">
+    <Setter Property="BorderBrush" Value="{DynamicResource FctEmphasis}" />
+  </Style>
+
+  <!-- ── Text link (Information tab) ──────────────────────────────────────────────────────── -->
+  <Style Selector="Button.link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Foreground" Value="{DynamicResource FctAccent}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+
+  <!-- ── Left tab rail: token-tint the FluentTheme TabItem ────────────────────────────────── -->
+  <Style Selector="TabControl.rail > TabItem">
+    <Setter Property="Foreground" Value="{DynamicResource FctTextDim}" />
+    <Setter Property="FontFamily" Value="{DynamicResource FctFontDisplay}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+  <Style Selector="TabControl.rail > TabItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource FctText}" />
+  </Style>
+  <Style Selector="TabControl.rail > TabItem:pointerover">
+    <Setter Property="Foreground" Value="{DynamicResource FctText}" />
+  </Style>
+
+  <!-- ── Diagnostics log rows (colour by level) ───────────────────────────────────────────── -->
+  <Style Selector="TextBlock.logmsg">
+    <Setter Property="Foreground" Value="{DynamicResource FctText}" />
+  </Style>
+  <Style Selector="TextBlock.logmsg.warn">
+    <Setter Property="Foreground" Value="{DynamicResource FctEmphasis}" />
+  </Style>
+  <Style Selector="TextBlock.logmsg.error">
+    <Setter Property="Foreground" Value="{DynamicResource FctDanger}" />
+  </Style>
+</Styles>

@@ -29,6 +29,14 @@ namespace Fct.Plugins.DiscordTriggers {
     // Host constructs the entry type via Activator.CreateInstance — needs a public parameterless ctor.
     public DiscordTriggersPlugin() { }
 
+    // Bound by the Information tab (x:Static). Reads the assembly version stamped in the csproj.
+    public static string VersionDisplay {
+      get {
+        var v = typeof(DiscordTriggersPlugin).Assembly.GetName().Version;
+        return v == null ? "" : "v" + v.Major + "." + v.Minor + "." + v.Build;
+      }
+    }
+
     public Task InitializeAsync(IPluginHost host, CancellationToken ct) {
       this.host = host;
       try {
@@ -83,11 +91,28 @@ namespace Fct.Plugins.DiscordTriggers {
       try { DiagnosticsLog.Flush(); DiagnosticsLog.Shutdown(); } catch { /* best-effort */ }
     }
 
-    // Called once on the UI thread after InitializeAsync. Phase 2 ships a placeholder; the real
-    // Avalonia view is Phase 3.
+    // Called once on the Avalonia UI thread, after InitializeAsync and before any CreateView. This is
+    // where the VM finally learns the real UI-thread SynchronizationContext: it was constructed in
+    // InitializeAsync (before Avalonia's UI thread existed), so its ctor-captured context can't marshal
+    // background bot/download callbacks onto the thread the bound collections live on. Rebinding here —
+    // ahead of the view's first construction — closes that gap.
     public void RegisterUi(IUiHost ui) {
+      vm?.UseSynchronizationContext(SynchronizationContext.Current);
       ui.AddSettingsPage(new UiSurface(
-        "discordtriggers.settings", "Discord Triggers", CreatePlaceholderView));
+        "discordtriggers.settings", "Discord Triggers", CreateView));
+    }
+
+    private Control CreateView() {
+      // The VM should exist (InitializeAsync ran first); guard so a failed init still yields a surface
+      // instead of a dead page.
+      if (vm == null) {
+        return new TextBlock {
+          Margin = new Thickness(16),
+          TextWrapping = TextWrapping.Wrap,
+          Text = "Discord Triggers failed to initialize — see the diagnostics log.",
+        };
+      }
+      return new Ui.DiscordTriggersView { DataContext = vm };
     }
 
     private void OnOutputActivated() {
@@ -116,20 +141,6 @@ namespace Fct.Plugins.DiscordTriggers {
         }
       } catch { /* fall through */ }
       return fallbackDir;
-    }
-
-    private static Control CreatePlaceholderView() {
-      return new StackPanel {
-        Margin = new Thickness(16),
-        Spacing = 8,
-        Children = {
-          new TextBlock { Text = "Discord Triggers", FontSize = 20, FontWeight = FontWeight.SemiBold },
-          new TextBlock {
-            Text = "Audio and lifecycle are active. The full settings UI arrives in a later migration phase.",
-            TextWrapping = TextWrapping.Wrap,
-          },
-        },
-      };
     }
 
     // Settings-store + lifecycle messages: keep the user-emailable unified diagnostics file (via the

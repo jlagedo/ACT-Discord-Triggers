@@ -27,9 +27,11 @@ Host references (in the `ffxiv-combat-tracker` repo, `E:\dev\ffxiv-combat-tracke
 The new native plugin project (`Fct.Plugins.DiscordTriggers`, `IPlugin` + Avalonia UI) lives in
 **this** repo alongside `Core` and the node bridge, so the whole Discord‑Triggers deliverable stays in
 one place. It references `Core` by in‑repo `ProjectReference` and the host contracts
-(`Fct.Abstractions`, `Fct.Abstractions.UI`) as **vendored DLLs** under `libs/fct/` (`Private=false` —
-the host loader shares those into the default `AssemblyLoadContext`, so they must not ship as private
-plugin deps; the host publishes no NuGet feed). See `libs/fct/README.md` for the refresh step.
+(`Fct.Abstractions`, `Fct.Abstractions.UI`) as **NuGet packages** from the host's local `.nupkg` feed
+(`nuget.config` → `fct-local` → `../ffxiv-combat-tracker/dist/debug/packages`), pinned with
+`ExcludeAssets="runtime"` (the `Private=false` equivalent — the host loader shares those into the
+default `AssemblyLoadContext`, so they must not ship as private plugin deps; the host publishes no
+public NuGet feed). See `libs/fct/README.md` for the refresh step.
 
 ## The entire ACT surface it touches (and the modern replacement)
 
@@ -156,10 +158,12 @@ retarget work.
 
 ### Phase 2 — native plugin project (headless first)
 - [x] New `Fct.Plugins.DiscordTriggers` (`net10.0-windows`, `EnableDynamicLoading=true`) in **this**
-      repo, `ProjectReference`ing `ACT_DiscordTriggers.Core` and referencing the vendored host contract
-      DLLs (`Fct.Abstractions`, `Fct.Abstractions.UI`) with `Private=false`. Avalonia 12.0.5 +
-      `Microsoft.Extensions.Logging.Abstractions` 10.0.9 are compile‑time‑only (`ExcludeAssets=runtime`
-      — host‑provided, shared‑to‑default‑ALC). Added to `ACT_DiscordTriggers.sln`.
+      repo, `ProjectReference`ing `ACT_DiscordTriggers.Core` and `PackageReference`ing the host contract
+      packages (`Fct.Abstractions`, `Fct.Abstractions.UI`) from the `fct-local` feed with
+      `ExcludeAssets=runtime`. Avalonia 12.0.5 + `Microsoft.Extensions.Logging.Abstractions` 10.0.9
+      (pulled transitively by those packages) are declared explicitly, also `ExcludeAssets=runtime`, so
+      the direct reference overrides the transitive runtime flow (host‑provided, shared‑to‑default‑ALC).
+      Added to `ACT_DiscordTriggers.sln`.
 - [x] `plugin.json`: `id` `com.discordtriggers`, `version`, `contract` `1.0`, `assembly`,
       `entry` = the `IPlugin` type, `capabilities: ["audio","ui"]`.
 - [x] `DiscordTriggersPlugin : IPlugin, IUiContributor` —

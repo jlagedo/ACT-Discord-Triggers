@@ -18,6 +18,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <!-- Emits the .deps.json the host's per-plugin AssemblyDependencyResolver needs. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- The config UI is .axaml with x:DataType compiled bindings, matching the host's own views. -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyVersion>2.1.2.0</AssemblyVersion>
     <FileVersion>2.1.2.0</FileVersion>
     <Version>2.1.2</Version>
@@ -27,31 +29,32 @@
     <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
   </ItemGroup>
 
-  <!-- Host plugin contract, vendored (the host publishes no NuGet feed). Private=false: the host
-       loader shares these into the default ALC for single type identity across shell + plugin, so
-       the plugin must NOT ship its own private copy. See libs/fct/README.md. -->
-  <ItemGroup>
-    <Reference Include="Fct.Abstractions">
-      <HintPath>..\libs\fct\Fct.Abstractions.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Fct.Abstractions.UI">
-      <HintPath>..\libs\fct\Fct.Abstractions.UI.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
+  <!-- Host plugin contract, from the host's local nupkg feed (nuget.config -> fct-local; the host
+       publishes no public NuGet feed). ExcludeAssets=runtime is the Private=false equivalent: the
+       host loader shares these into the default ALC for single type identity across shell + plugin,
+       so the plugin must NOT ship its own private copy. See libs/fct/README.md.
 
-  <!-- Compile-time only. The contract surface leaks Avalonia types (UiSurface.CreateView returns a
-       Control) and MEL types (IPluginHost.Logger is an ILogger), so the compiler needs their
-       metadata; both are host-provided and shared-to-default-ALC, so ExcludeAssets=runtime keeps
-       them out of the plugin output. Versions pinned to the host (Directory.Packages.props). -->
+       The contract surface also leaks Avalonia types (UiSurface.CreateView returns a Control) and
+       MEL types (IPluginHost.Logger is an ILogger) — pulled in transitively by these packages. They
+       are declared explicitly with ExcludeAssets=runtime so the direct reference overrides the
+       transitive runtime flow and keeps those host-provided assemblies out of the plugin output. -->
   <ItemGroup>
+    <PackageReference Include="Fct.Abstractions" Version="1.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Fct.Abstractions.UI" Version="1.0.0" ExcludeAssets="runtime" />
     <PackageReference Include="Avalonia" Version="12.0.5" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Avalonia assets (embedded as avares:// resources): the mascot logo, linked from docs/ so the
+       1.3 MB PNG isn't duplicated in the repo. The avares path follows the Link, i.e.
+       avares://Fct.Plugins.DiscordTriggers/Assets/logo.png. .axaml files are auto-globbed as
+       AvaloniaXaml by the Avalonia build targets. -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\docs\logo.png" Link="Assets\logo.png" />
   </ItemGroup>
 
   <!-- Stage the node bridge (node.exe + bundle.js + node_modules/) next to the plugin DLL so
