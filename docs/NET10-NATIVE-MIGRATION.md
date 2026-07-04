@@ -188,22 +188,32 @@ retarget work.
       host. Plugin + solution build clean and the output dep layout is verified.)*
 
 ### Phase 3 — port the UI to Avalonia
-- [ ] `DiscordTriggersView` → Avalonia `UserControl` (`.axaml` + code‑behind); `DataContext` = the same
-      `DiscordTriggersViewModel` (unchanged bindings where possible).
-- [ ] Implement `IUiContributor.RegisterUi` → `AddSettingsPage(new UiSurface(... CreateView ...))`
-      (and/or `AddNavPage`); lazy `Func<Control>`.
-- [ ] Port the sub‑pieces that used WPF/Win32 specifics:
-  - ONNX voice‑picker flyout: Avalonia `Flyout`/`Popup` + a filtered `CollectionView`/`DataGrid` list
-    (replaces the WPF `CollectionViewSource` + `FilterEventArgs`).
-  - Masked token box + Ctrl+C log copy (`ViewBehaviors.cs`) → Avalonia behaviors/attached properties.
-  - Info‑tab hyperlinks (`Microsoft.Xaml.Behaviors` `LaunchUriOrFileAction`) → Avalonia `HyperlinkButton`
-    or a click handler using the launcher.
+- [x] `DiscordTriggersView` → Avalonia `UserControl` (`Ui/DiscordTriggersView.axaml` + code‑behind);
+      `DataContext` = the same `DiscordTriggersViewModel`, `x:DataType` compiled bindings. The four tabs
+      (Output · Text‑to‑Speech · Sound · Information) carry over, with the bot/local and SAPI/ONNX folds
+      bound to the VM's `IsBotMode`/`IsLocalMode`/`IsSapi`/`IsOnnx` flags.
+- [x] `IUiContributor.RegisterUi` → `ui.AddSettingsPage(new UiSurface(id, title, CreateView))` with a
+      lazy `Func<Control>`; `CreateView` returns the real view (falling back to an error `TextBlock` if
+      the VM failed to init). `RegisterUi` also rebinds the VM's `SynchronizationContext` to Avalonia's
+      UI thread before the first `CreateView`.
+- [x] Ported the sub‑pieces that used WPF/Win32 specifics:
+  - ONNX voice‑picker flyout: `Ui/Controls/VoicePicker` — a searchable, locale‑grouped flyout over the
+    VM's `OnnxVoices` (tokenized substring filter + `GroupBy(LocaleName)` in code‑behind), replacing the
+    WPF `CollectionViewSource` + `FilterEventArgs`.
+  - Masked token box → `TextBox PasswordChar="•"`; Ctrl+C log copy → `KeyDown` handler + `TopLevel`
+    `Clipboard` in the view code‑behind (replaces the `ViewBehaviors.cs` attached properties).
+  - Info‑tab links → click handlers using `TopLevel.GetTopLevel(this).Launcher.LaunchUriAsync(...)`.
   - Folder picker → `TopLevel.GetTopLevel(this).StorageProvider.OpenFolderPickerAsync(...)`
-    (delete `VistaFolderPicker`, `PickFolderClassic`, the `Handle` usage).
-  - Logo/mascot resources → Avalonia `avares://` assets (replace the `pack://` URIs).
-  - `Theme.xaml` → an Avalonia `ResourceDictionary`/`Styles`, scoped to the plugin's subtree.
-- [ ] Background‑thread view updates go through `IUiHost.Dispatcher` (or the VM's existing sync‑context
-      `OnUi`, which now targets Avalonia's UI thread).
+    (`VistaFolderPicker`/`PickFolderClassic`/`Handle` deleted).
+  - Logo/mascot → `avares://` asset (`AvaloniaResource` linked from `docs/logo.png`); glyphs in
+    `Assets/IconGlyphs.axaml`, replacing the `pack://` URIs.
+  - Theme → `Ui/Styles/PluginStyles.axaml` over the host's semantic token contract (`FctSurface`/
+    `FctAccent`/… + `fct-*` style classes), scoped to the plugin's subtree.
+- [x] Background‑thread view updates go through the VM's existing sync‑context `OnUi` (rebound in
+      `RegisterUi` to Avalonia's UI thread); the log tail‑follow marshals via `Dispatcher.UIThread.Post`.
+
+*(Plugin builds clean against the real host contract; a live in‑host render is folded into Phase 4's
+manual e2e.)*
 
 ### Phase 4 — packaging & tests
 - [ ] Host staging: copy the plugin + `plugin.json` + the node bridge into the host's plugins dir.
