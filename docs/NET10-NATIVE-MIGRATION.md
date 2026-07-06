@@ -216,13 +216,21 @@ retarget work.
 manual e2e.)*
 
 ### Phase 4 — packaging & tests
-- [ ] Host staging: copy the plugin + `plugin.json` + the node bridge into the host's plugins dir.
-- [ ] Port/retarget `ACT_DiscordTriggers.Tests` to net10 (protocol/IPC/lifecycle keep working;
-      `BridgeIntegrationTests` still spawns the real bridge).
-- [ ] New test: `OutputActivated` registers a terminal sink; a producer `Speak` reaches
-      `DiscordAudioSink` and **not** the built‑in sink; `OutputDeactivated`/dispose restores fall‑through.
+- [x] Host staging: `build_modern.ps1` assembles `release-modern/Fct.Plugins.DiscordTriggers/` (entry
+      DLL + `plugin.json` + `.deps.json` + Core/CommunityToolkit/System.Speech + `runtimes/` + the node
+      bridge) — the host's install layout, pointed at via the in-app "Add plugin" catalog.
+- [x] Port/retarget `ACT_DiscordTriggers.Tests` to net10 (protocol/IPC/lifecycle keep working;
+      `BridgeIntegrationTests` still spawns the real bridge). Retargeted alongside `Core` in Phase 1b;
+      the dead WPF `PasswordBoxBindingTests` + the `ViewBehaviors.cs` compile-link + `UseWPF` were
+      dropped (the Avalonia port replaced that seam). **140 passed, 5 skipped** (non-bridge suites).
+- [x] New test (`DiscordAudioSinkTests`): the terminal-sink seam — `DiscordAudioSink.SpeakAsync` routes
+      through the VM's SAPI/ONNX synth branch (ignoring per-request `AudioOptions` by design) and
+      `PlayAsync` routes to the file core (dropping per-file volume), via a fake `IDiscordService`. The
+      *fan-out suppression* half ("a terminal sink stops the chain so the built‑in speaker never fires")
+      is the host `AudioService`'s job (G3) and is covered in the host repo — not reproducible here
+      without the host runtime.
 - [ ] Manual e2e: run the host, connect the bot / local output, fire a Test speak, confirm audio and
-      clean teardown.
+      clean teardown. *(Still the one unverified path — the plugin has never run inside `Fct.App`.)*
 
 ## What does NOT change
 

@@ -194,11 +194,11 @@ Write-Host "==> Install into the host (id: $PluginId):"
 Write-Host "    Plugins -> Add plugin -> point at:"
 Write-Host ("    {0}" -f (Resolve-Path $stage).Path)
 
-# --- 4. Optional: distributable zip at repo root ---
+# --- 4. Optional: distributable zip alongside the staged folder ---
 # Compress the wrapper folder (not its contents) so the archive's top-level entry is
 # the plugin folder — extractable straight into an install source.
 if ($Zip) {
-    $zipPath = "$PSScriptRoot\$PluginName.zip"
+    $zipPath = "$PSScriptRoot\release-modern\$PluginName.zip"
     Write-Host ""
     Write-Host "==> Packaging $PluginName.zip"
     if (Test-Path $zipPath) { Remove-Item -Force $zipPath }

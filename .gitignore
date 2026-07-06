@@ -202,7 +202,6 @@ DiscordBridge-node/dist/
 /ACT_DiscordTriggers*.zip
 # Modern native-plugin staging + zip assembled by ./build_modern.ps1
 /release-modern/
-/Fct.Plugins.DiscordTriggers.zip
 # tsc --noEmit is the default; this catches accidental emit if anyone flips it on
 DiscordBridge-node/dist-types/
 # Stale stdout/stderr captures from local bridge runs (the build self-test

@@ -29,6 +29,11 @@
     <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
   </ItemGroup>
 
+  <!-- The test project exercises the internal DiscordAudioSink directly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="ACT_DiscordTriggers.Tests" />
+  </ItemGroup>
+
   <!-- Host plugin contract, from the host's local nupkg feed (nuget.config -> fct-local; the host
        publishes no public NuGet feed). ExcludeAssets=runtime is the Private=false equivalent: the
        host loader shares these into the default ALC for single type identity across shell + plugin,
