@@ -7,7 +7,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -25,17 +24,12 @@ namespace Fct.Plugins.DiscordTriggers.Ui {
     private const string IssuesUrl = "https://github.com/jlagedo/ACT-Discord-Triggers/issues/new";
     private const string GuideUrl = "https://github.com/jlagedo/ACT-Discord-Triggers/wiki/First-Time-Setup-Guide";
 
-    private ListBox? logList;
     private ScrollViewer? logScroll;
     private DiscordTriggersViewModel? boundVm;
 
     public DiscordTriggersView() {
+      // InitializeComponent (and the strongly-typed x:Name fields, e.g. LogList) are generated.
       InitializeComponent();
-      logList = this.FindControl<ListBox>("LogList");
-    }
-
-    private void InitializeComponent() {
-      AvaloniaXamlLoader.Load(this);
     }
 
     protected override void OnDataContextChanged(EventArgs e) {
@@ -65,7 +59,7 @@ namespace Fct.Plugins.DiscordTriggers.Ui {
 
     private ScrollViewer? ResolveLogScroll() {
       if (logScroll != null) return logScroll;
-      logScroll = logList?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+      logScroll = LogList.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
       return logScroll;
     }
 
@@ -81,8 +75,8 @@ namespace Fct.Plugins.DiscordTriggers.Ui {
     // Copy the selected log lines (or all, if none are selected) to the clipboard.
     private void CopyLog() {
       if (boundVm == null) return;
-      var items = (logList?.SelectedItems?.Count ?? 0) > 0
-        ? logList!.SelectedItems!.Cast<LogEntry>()
+      var items = (LogList.SelectedItems?.Count ?? 0) > 0
+        ? LogList.SelectedItems!.Cast<LogEntry>()
         : boundVm.LogEntries;
       var sb = new StringBuilder();
       foreach (var le in items) sb.AppendLine(le.Message);

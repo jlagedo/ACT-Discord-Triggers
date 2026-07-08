@@ -47,6 +47,14 @@
     <Setter Property="BorderBrush" Value="{DynamicResource FctAccent}" />
     <Setter Property="Background" Value="{DynamicResource FctSurfaceHi}" />
   </Style>
+  <!-- Keyboard focus ring: the custom template drops the default adorner, so light it back up. -->
+  <Style Selector="RadioButton.choice-card:focus-visible /template/ Border#root">
+    <Setter Property="BorderBrush" Value="{DynamicResource FctAccent}" />
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceHi}" />
+  </Style>
+  <Style Selector="RadioButton.choice-card:disabled /template/ Border#root">
+    <Setter Property="Opacity" Value="0.5" />
+  </Style>
 
   <!-- ── Segmented control: joined RadioButtons in a Border.segmented pill (quality / CPU) ─── -->
   <Style Selector="Border.segmented">
@@ -78,6 +86,12 @@
   </Style>
   <Style Selector="RadioButton.segment:checked">
     <Setter Property="Foreground" Value="{DynamicResource FctBackground}" />
+  </Style>
+  <Style Selector="RadioButton.segment:focus-visible /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource FctSurfaceHi}" />
+  </Style>
+  <Style Selector="RadioButton.segment:disabled">
+    <Setter Property="Opacity" Value="0.5" />
   </Style>
 
   <!-- ── Status dot (Discord connection) ──────────────────────────────────────────────────── -->
@@ -111,6 +125,9 @@
   </Style>
   <Style Selector="Button.help:pointerover">
     <Setter Property="Foreground" Value="{DynamicResource FctAccent}" />
+  </Style>
+  <Style Selector="Button.help:focus-visible /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource FctAccentDim}" />
   </Style>
 
   <!-- ── Info callout band (notices, warnings) ────────────────────────────────────────────── -->

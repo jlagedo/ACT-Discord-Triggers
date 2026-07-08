@@ -29,7 +29,7 @@
           <Button Grid.Column="1" Classes="link" Content="Copy" Click="OnCopyLog" />
         </Grid>
         <Border Background="{DynamicResource FctBackground}" CornerRadius="8" Padding="4">
-          <ListBox Name="LogList" ItemsSource="{Binding LogEntries}" SelectionMode="Multiple"
+          <ListBox x:Name="LogList" ItemsSource="{Binding LogEntries}" SelectionMode="Multiple"
                    Background="Transparent" KeyDown="OnLogKeyDown">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:LogEntry">
@@ -171,7 +171,9 @@
                       <TextBlock Classes="fct-body" Text="Audio quality" />
                       <TextBlock Classes="fct-meta" Text="Higher tiers use more bandwidth." />
                     </StackPanel>
-                    <Button Grid.Column="2" Classes="help">
+                    <Button Grid.Column="2" Classes="help"
+                            AutomationProperties.Name="Audio quality help"
+                            ToolTip.Tip="High may exceed an unboosted server's per-channel bitrate cap and be clamped.">
                       <Button.Flyout>
                         <Flyout>
                           <TextBlock Classes="fct-body" MaxWidth="260"
@@ -355,7 +357,7 @@
                            Text="Plays a sample on this PC." />
                 <Button Classes="fct-ghost" HorizontalAlignment="Left" Command="{Binding TestCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
-                    <TextBlock FontFamily="Segoe Fluent Icons" Text="{StaticResource Icon.PlayCircle}" />
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.PlayCircle}" />
                     <TextBlock Text="Test" />
                   </StackPanel>
                 </Button>
@@ -465,19 +467,19 @@
 
             <Button Classes="link" HorizontalAlignment="Center" Click="OnOpenProject">
               <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="{StaticResource Icon.Open}" />
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Open}" />
                 <TextBlock Text="Project on GitHub" />
               </StackPanel>
             </Button>
             <Button Classes="link" HorizontalAlignment="Center" Click="OnReportProblem">
               <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="{StaticResource Icon.Bug}" />
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Bug}" />
                 <TextBlock Text="Report a problem" />
               </StackPanel>
             </Button>
             <Button Classes="link" HorizontalAlignment="Center" Click="OnSetupGuide">
               <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="{StaticResource Icon.Guide}" />
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Guide}" />
                 <TextBlock Text="First-time setup guide" />
               </StackPanel>
             </Button>
@@ -486,7 +488,7 @@
 
             <Button Classes="fct-ghost" HorizontalAlignment="Center" Command="{Binding OpenLogFolderCommand}">
               <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock FontFamily="Segoe Fluent Icons" Text="{StaticResource Icon.Folder}" />
+                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Folder}" />
                 <TextBlock Text="Open log folder" />
               </StackPanel>
             </Button>

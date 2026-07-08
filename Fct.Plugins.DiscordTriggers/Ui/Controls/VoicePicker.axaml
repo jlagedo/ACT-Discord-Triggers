@@ -8,7 +8,7 @@
        with a search box + locale-grouped list. Filtering/grouping is a view concern (code-behind),
        exactly as the WPF CollectionViewSource path was; selection is pushed to the VM on click. -->
   <Grid>
-    <ToggleButton Name="Toggle" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+    <ToggleButton x:Name="Toggle" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
       <Grid ColumnDefinitions="*,Auto">
         <TextBlock Grid.Column="0" VerticalAlignment="Center"
                    Text="{Binding SelectedOnnxVoice.Label, FallbackValue='Select a voice', TargetNullValue='Select a voice'}" />
@@ -23,10 +23,10 @@
               BorderBrush="{DynamicResource FctHairline}" BorderThickness="1"
               CornerRadius="10" Padding="8" Margin="0,4,0,0">
         <DockPanel>
-          <TextBox Name="Search" DockPanel.Dock="Top" PlaceholderText="Search voices…"
+          <TextBox x:Name="Search" DockPanel.Dock="Top" PlaceholderText="Search voices…"
                    TextChanged="OnSearchChanged" Margin="0,0,0,8" />
           <ScrollViewer MaxHeight="340">
-            <ItemsControl Name="GroupList">
+            <ItemsControl x:Name="GroupList">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="local:VoiceGroup">
                   <StackPanel Margin="0,0,0,6">
@@ -41,6 +41,7 @@
                               <TextBlock Grid.Column="0" Text="★" FontSize="12"
                                          Foreground="{DynamicResource FctEmphasis}"
                                          VerticalAlignment="Center"
+                                         AutomationProperties.Name="Recommended" ToolTip.Tip="Recommended"
                                          IsVisible="{Binding Recommended}" />
                               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="{Binding Name}"
@@ -51,6 +52,7 @@
                               <TextBlock Grid.Column="2" Text="✓"
                                          Foreground="{DynamicResource FctAccent}"
                                          VerticalAlignment="Center"
+                                         AutomationProperties.Name="Installed" ToolTip.Tip="Installed"
                                          IsVisible="{Binding Installed}" />
                               <TextBlock Grid.Column="2" Text="{Binding SizeText}"
                                          Foreground="{DynamicResource FctTextDim}"

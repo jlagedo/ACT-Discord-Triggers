@@ -6,7 +6,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
 using Avalonia.VisualTree;
 using ACT_DiscordTriggers.Core.ViewModels;
 
@@ -31,11 +30,8 @@ namespace Fct.Plugins.DiscordTriggers.Ui.Controls {
     private DiscordTriggersViewModel? boundVm;
 
     public VoicePicker() {
+      // InitializeComponent (and the strongly-typed x:Name fields Toggle/Search/GroupList) are generated.
       InitializeComponent();
-    }
-
-    private void InitializeComponent() {
-      AvaloniaXamlLoader.Load(this);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e) {
@@ -70,11 +66,8 @@ namespace Fct.Plugins.DiscordTriggers.Ui.Controls {
 
     // Opening resets the search to show the full list and focuses the box.
     private void OnOpened(object? sender, EventArgs e) {
-      var search = this.FindControl<TextBox>("Search");
-      if (search != null) {
-        search.Text = "";
-        search.Focus();
-      }
+      Search.Text = "";
+      Search.Focus();
       Rebuild();
     }
 
@@ -82,21 +75,19 @@ namespace Fct.Plugins.DiscordTriggers.Ui.Controls {
       if (sender is Control c && c.DataContext is OnnxVoiceItem item && boundVm != null) {
         boundVm.SelectedOnnxVoice = item;
       }
-      var toggle = this.FindControl<ToggleButton>("Toggle");
-      if (toggle != null) toggle.IsChecked = false;   // close the flyout
+      Toggle.IsChecked = false;   // close the flyout
     }
 
     // Tokenized substring match over locale + name + tier, grouped by friendly locale name,
     // mirroring the old OnnxVoiceFilter.
     private void Rebuild() {
-      var list = this.FindControl<ItemsControl>("GroupList");
-      if (list == null) return;
+      var list = GroupList;
       if (boundVm == null) {
         list.ItemsSource = Array.Empty<VoiceGroup>();
         return;
       }
 
-      var query = this.FindControl<TextBox>("Search")?.Text ?? "";
+      var query = Search.Text ?? "";
       var tokens = query.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
       var groups = boundVm.OnnxVoices
