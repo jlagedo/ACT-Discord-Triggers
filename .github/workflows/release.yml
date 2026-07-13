@@ -60,7 +60,7 @@ jobs:
         shell: pwsh
         run: |
           Rename-Item ACT_DiscordTriggers.zip "ACT_DiscordTriggers-${{ github.ref_name }}.zip"
-          Rename-Item release-modern/Fct.Plugins.DiscordTriggers.zip "release-modern/Fct.Plugins.DiscordTriggers-${{ github.ref_name }}.zip"
+          Rename-Item release-modern/Fct.Plugins.DiscordTriggers.zip "Fct.Plugins.DiscordTriggers-${{ github.ref_name }}.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
