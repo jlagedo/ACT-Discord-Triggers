@@ -29,6 +29,13 @@ jobs:
           Invoke-WebRequest https://github.com/EQAditu/AdvancedCombatTracker/releases/latest/download/ACTv3.zip -OutFile packages/act.zip
           Expand-Archive -Path packages/act.zip -DestinationPath packages
 
+      - name: Create empty fct-local feed dir
+        shell: pwsh
+        # nuget.config lists the sibling host's fct-local source, absent in CI. NuGet treats a
+        # MISSING local source as fatal (NU1301), so create it empty — restore then falls through
+        # to the committed fct-vendored feed (libs/fct/packages).
+        run: New-Item -ItemType Directory -Force ..\ffxiv-combat-tracker\dist\debug\packages | Out-Null
+
       - name: Install bridge npm deps
         working-directory: DiscordBridge-node
         run: npm ci
