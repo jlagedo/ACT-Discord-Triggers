@@ -29,21 +29,30 @@ $PluginProj = 'Fct.Plugins.DiscordTriggers\Fct.Plugins.DiscordTriggers.csproj'
 $PluginName = 'Fct.Plugins.DiscordTriggers'
 $PluginId   = 'com.discordtriggers'
 
-# --- 0. Preflight: the host's local contract-package feed ---
-# The plugin PackageReferences Fct.Abstractions[.UI] from the fct-local feed
-# (nuget.config -> ..\ffxiv-combat-tracker\dist\debug\packages). The host emits those
-# nupkgs only after `dotnet run --project build`, and wipes/recreates dist\ each time.
-# Fail early with the fix rather than letting `dotnet build` emit an opaque NU1101.
+# --- 0. Preflight: the host's contract-package feed ---
+# The plugin PackageReferences Fct.Abstractions[.UI], restored from either the live host feed
+# (nuget.config -> fct-local -> ..\ffxiv-combat-tracker\dist\debug\packages, emitted by the host's
+# `dotnet run --project build`, which wipes/recreates dist\ each time) or the committed vendored
+# copy (fct-vendored -> libs\fct\packages, what CI uses). Accept either. Fail early with the fix
+# rather than letting `dotnet build` emit an opaque NU1101.
 Write-Host "==> Checking host contract feed"
-$feed = Join-Path $PSScriptRoot '..\ffxiv-combat-tracker\dist\debug\packages'
-$haveCore = (Test-Path $feed) -and (Get-ChildItem -Path $feed -Filter 'Fct.Abstractions.*.nupkg' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'Fct.Abstractions.UI.*' })
-$haveUi   = (Test-Path $feed) -and (Get-ChildItem -Path $feed -Filter 'Fct.Abstractions.UI.*.nupkg' -ErrorAction SilentlyContinue)
+$feeds = @(
+    (Join-Path $PSScriptRoot '..\ffxiv-combat-tracker\dist\debug\packages'),  # fct-local
+    (Join-Path $PSScriptRoot 'libs\fct\packages')                             # fct-vendored
+)
+$haveCore = $false; $haveUi = $false
+foreach ($feed in $feeds) {
+    if (-not (Test-Path $feed)) { continue }
+    if (Get-ChildItem -Path $feed -Filter 'Fct.Abstractions.*.nupkg' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'Fct.Abstractions.UI.*' }) { $haveCore = $true }
+    if (Get-ChildItem -Path $feed -Filter 'Fct.Abstractions.UI.*.nupkg' -ErrorAction SilentlyContinue) { $haveUi = $true }
+}
 if (-not $haveCore -or -not $haveUi) {
     Write-Error @"
-Host contract packages not found in:
-    $feed
-Run the host's package build first, then re-run this script:
-    dotnet run --project build     # in E:\dev\ffxiv-combat-tracker
+Host contract packages not found in either feed:
+    $($feeds -join "`n    ")
+Build the host packages first, then re-run this script (and refresh the vendored copy):
+    dotnet run --project build                  # in E:\dev\ffxiv-combat-tracker
+    pwsh ./tools/vendor-fct-packages.ps1        # refresh libs\fct\packages for CI
 "@
     exit 1
 }

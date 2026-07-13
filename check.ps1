@@ -6,11 +6,14 @@
 #             tsc typecheck in place of build.ps1's. The quick inner-loop subset.
 #   -Fix      Auto-fix instead of check (eslint --fix, xstyler write mode), then run the rest.
 #   -Install  Run `npm ci` in DiscordBridge-node first (otherwise assumes deps are present).
+#   -Modern   Also package the modern FCT plugin (build_modern.ps1, reusing build.ps1's bridge).
+#             Requires the FCT contract feed (fct-local or libs/fct/packages). Ignored with -Fast.
 [CmdletBinding()]
 param(
   [switch]$Fast,
   [switch]$Fix,
-  [switch]$Install
+  [switch]$Install,
+  [switch]$Modern
 )
 
 Set-Location $PSScriptRoot
@@ -42,14 +45,20 @@ if ($Fix) {
 if ($Fast) {
   # build.ps1 (and its tsc) is skipped, so typecheck standalone and skip integration tests.
   Add-Gate 'TS typecheck (bridge)' { npm --prefix $bridge run typecheck }
-  Add-Gate 'C# unit tests (net48)' {
+  Add-Gate 'C# unit tests (net48 + net10)' {
     dotnet test $tests -c Release --nologo --filter 'FullyQualifiedName!~BridgeIntegration'
   }
 } else {
   # build.ps1 covers the tsc typecheck + bundles the bridge into dist/ that the C# integration
   # tests spawn, so it must precede them. This branch mirrors CI's gate set exactly.
   Add-Gate 'Build + bundle + self-test' { pwsh -NoProfile -File (Join-Path $PSScriptRoot 'build.ps1') }
-  Add-Gate 'C# tests (net48)' { dotnet test $tests -c Release --nologo }
+  if ($Modern) {
+    # Reuse the bridge dist/ that build.ps1 just produced (-SkipBridge).
+    Add-Gate 'Package modern (FCT net10)' {
+      pwsh -NoProfile -File (Join-Path $PSScriptRoot 'build_modern.ps1') -Configuration Release -SkipBridge
+    }
+  }
+  Add-Gate 'C# tests (net48 + net10)' { dotnet test $tests -c Release --nologo }
 }
 
 Add-Gate 'Node tests (bridge)' { npm --prefix $bridge test }

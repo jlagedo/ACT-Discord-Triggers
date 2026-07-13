@@ -2,6 +2,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+#if NET48
+using System.Net;
+#endif
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +36,10 @@ namespace ACT_DiscordTriggers.Core.Tts {
     private static readonly HttpClient Http = CreateClient();
 
     private static HttpClient CreateClient() {
+#if NET48
+      // net48 negotiates below TLS 1.2 by default; GitHub's release CDN requires >= 1.2.
+      ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+#endif
       // The body is streamed and governed by the CancellationToken, so the request
       // timeout is disabled — a slow 333 MB pack must not trip the default 100 s limit.
       return new HttpClient { Timeout = Timeout.InfiniteTimeSpan };

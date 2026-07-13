@@ -158,6 +158,10 @@ publish/
 **/packages/*
 # except build/, which is used as an MSBuild target.
 !**/packages/build/
+# except the vendored FCT contract packages — committed so CI restores the modern
+# plugin without a sibling ffxiv-combat-tracker checkout (refresh via tools/vendor-fct-packages.ps1).
+!libs/fct/packages/
+!libs/fct/packages/*.nupkg
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/packages/repositories.config
 # NuGet v3's project.json files produces more ignoreable files

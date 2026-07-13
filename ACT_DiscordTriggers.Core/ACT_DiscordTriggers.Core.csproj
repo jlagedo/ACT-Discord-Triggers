@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Multi-target: net48 feeds the ACT drop-in (ACT_DiscordTriggers, Costura-merged),
+         net10.0-windows feeds the FCT native plugin (Fct.Plugins.DiscordTriggers). Each
+         consumer's ProjectReference auto-selects its matching flavor. -->
+    <TargetFrameworks>net48;net10.0-windows</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <DebugType>portable</DebugType>
@@ -9,12 +12,19 @@
     <Version>2.0.3</Version>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Both ship a netstandard2.0 target, so they resolve on net48 and net10 alike. -->
     <PackageReference Include="System.Text.Json" Version="10.0.9" />
     <!-- MVVM base (ObservableObject + source-generated [ObservableProperty]/[RelayCommand])
          for the ViewModel layer. Zero-dep, netstandard2.0 -> net10. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <!-- DiscordClient synthesizes TTS via System.Speech. On modern .NET it ships as a
-         Windows-only NuGet package (the net10.0-windows TFM covers that), not a GAC assembly. -->
+  </ItemGroup>
+  <!-- DiscordClient synthesizes TTS via System.Speech. On net48 it's a GAC framework
+       assembly; on modern .NET it ships as a Windows-only NuGet package. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Speech" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <PackageReference Include="System.Speech" Version="10.0.0" />
   </ItemGroup>
   <ItemGroup>

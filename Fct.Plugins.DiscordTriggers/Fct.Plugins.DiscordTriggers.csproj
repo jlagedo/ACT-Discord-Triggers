@@ -20,9 +20,9 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- The config UI is .axaml with x:DataType compiled bindings, matching the host's own views. -->
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <AssemblyVersion>2.1.2.0</AssemblyVersion>
-    <FileVersion>2.1.2.0</FileVersion>
-    <Version>2.1.2</Version>
+    <AssemblyVersion>2.2.0.0</AssemblyVersion>
+    <FileVersion>2.2.0.0</FileVersion>
+    <Version>2.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,15 +1,24 @@
 # CLAUDE.md
 
+## Two packages (dual build)
+
+The repo builds **two plugin packages for two different hosts** from one checkout:
+- **Legacy** — `ACT_DiscordTriggers/` (net48, WPF, Costura single-DLL), built by `build.ps1` → `release/ACT_DiscordTriggers/`, loaded by **Advanced Combat Tracker (ACT)**.
+- **Modern** — `Fct.Plugins.DiscordTriggers/` (net10.0-windows, Avalonia), built by `build_modern.ps1` → `release-modern/Fct.Plugins.DiscordTriggers/`, loaded by the **FFXIV Combat Tracker (FCT)** host (sibling repo `..\ffxiv-combat-tracker`).
+
+Both share `ACT_DiscordTriggers.Core` and the `DiscordBridge-node` bridge. `Core` and the test project **multi-target `net48;net10.0-windows`** (`<TargetFrameworks>`); each entry project's `ProjectReference` auto-selects the matching flavor. Core's only per-TFM code is a `#if NET48` TLS-1.2 nudge in `OnnxDownloader.cs` and a conditional `System.Speech`/`System.Net.Http` reference (GAC on net48, NuGet package on net10). `build_all.ps1` builds both packages (bridge built once via build.ps1, reused by `build_modern.ps1 -SkipBridge`); `-SkipModern`/`-SkipLegacy` build just one.
+
 ## Build & test
 
-Run every gate at once (fail-fast, mirrors CI): `pwsh ./check.ps1`. Order: ESLint → XAML style → `build.ps1` → C# tests → Node tests. Flags: `-Fast` (skip `build.ps1` + the bridge-spawning C# integration tests; runs a standalone `tsc` typecheck instead), `-Fix` (eslint `--fix` + `xstyler` write mode, then test), `-Install` (`npm ci` first). The no-arg run is the full CI gate set.
+Run every gate at once (fail-fast, mirrors CI): `pwsh ./check.ps1`. Order: ESLint → XAML style → `build.ps1` → C# tests → Node tests. Flags: `-Fast` (skip `build.ps1` + the bridge-spawning C# integration tests; runs a standalone `tsc` typecheck instead), `-Fix` (eslint `--fix` + `xstyler` write mode, then test), `-Install` (`npm ci` first), `-Modern` (also package the modern FCT plugin via `build_modern.ps1 -SkipBridge`). The no-arg run is the full CI gate set.
 
-Release build (produces `release/ACT_DiscordTriggers/`, the folder users drop into ACT's plugins dir):
+Release build — legacy (produces `release/ACT_DiscordTriggers/`, the folder users drop into ACT's plugins dir):
 ```
 cd DiscordBridge-node && npm ci && cd ..
 pwsh ./build.ps1            # add -Zip to also emit ACT_DiscordTriggers.zip at the repo root
+pwsh ./build_all.ps1        # both packages; -Zip emits both zips
 ```
-`build.ps1` does `dotnet build` (net48 — ACT only loads net48) → `tsc --noEmit` → esbuild bundle → stages `node.exe` + externals → spawns the bridge and asserts `BRIDGE_READY` on stdout → assembles the release folder. That self-test catches packaging regressions; **do not skip or weaken it**.
+`build.ps1` does `dotnet build` (net48 — ACT only loads net48) → `tsc --noEmit` → esbuild bundle → stages `node.exe` + externals → spawns the bridge and asserts `BRIDGE_READY` on stdout → assembles the release folder. That self-test catches packaging regressions; **do not skip or weaken it**. `build_modern.ps1` (net10.0-windows; default Debug, `-Configuration Release` for release, `-SkipBridge` to reuse `dist/`) mirrors the same bridge build + self-test, then does `dotnet build` of the FCT plugin and copies its bin tree (already the host install layout) to `release-modern/`; its header comment and `docs/NET10-NATIVE-MIGRATION.md` cover the details. The FCT contract packages (`Fct.Abstractions[.UI]`) resolve from the `fct-local` live feed or the committed `fct-vendored` copy under `libs/fct/packages` (refresh with `tools/vendor-fct-packages.ps1`; see `libs/fct/README.md`).
 
 Bridge-only iteration (in `DiscordBridge-node/`):
 - `npm run typecheck` — `tsc --noEmit`
@@ -18,9 +27,10 @@ Bridge-only iteration (in `DiscordBridge-node/`):
 - `npm test` — JS suite (protocol, framing, op dispatch; plus a Windows-only lifecycle suite that spawns the real bridge). Independent of `dist/`. Lifecycle tests skip on non-Windows (Windows named pipes). The real-ONNX suites (`tts-synth.test.ts` synthesizes through `OnnxTts`; `tts-e2e.test.ts` spawns the bridge with the audio sink and drives `SetConfig`+`SpeakText` to a WAV) auto-skip unless the `sherpa-onnx-node` addon and the voice models are both present — models default to `E:\ai`, override with `ACT_DT_MODELS_DIR`. `tts.test.ts` covers the parser/converter/sink/validation with neither.
 - `npm run tts:probe -- --model <dir> [--family piper|kokoro --sid N --lang <espeak> --speed 0..20 --text "..." --out f.wav]` — synthesize one line through the real bridge synth path to a WAV for manual listening.
 
-C# tests (net48, xUnit v3 — `xunit.v3` builds the test project as an `.exe`, run under VSTest via `Microsoft.NET.Test.Sdk` + `xunit.runner.visualstudio` 3.x):
+C# tests (multi-target `net48;net10.0-windows`, xUnit v3 — `xunit.v3` builds the test project as an `.exe`, run under VSTest via `Microsoft.NET.Test.Sdk` + `xunit.runner.visualstudio` 3.x). A bare `dotnet test` runs **both** TFM passes; the net10-only `DiscordAudioSinkTests` (FCT `DiscordAudioSink` seam) is excluded from the net48 pass, and the plugin `ProjectReference`/`Fct.Abstractions` package are net10-conditioned:
 ```
-dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj
+dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj              # both TFMs
+dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj -f net48     # one TFM
 ```
 - `BridgeIntegrationTests` spawns the real bridge from `dist/` — run `build.ps1` first or it fails with a "build the bridge first" message.
 - Network integration tests (`*_RealNetwork_*` in `OnnxDownloaderTests`/`DiscordTriggersViewModelTests`) download a real ONNX voice pack from the k2-fsa `tts-models` release and drive the VM download command end-to-end. They are opt-in: `Assert.SkipUnless` gates them on the `ACT_DT_NETWORK_TESTS` env var, so they skip by default (CI included) and run with `ACT_DT_NETWORK_TESTS=1 dotnet test ...`.
@@ -57,11 +67,11 @@ DLL --spawns "node.exe bundle.js <pipe>"--> node bridge (discord.js + @snazzah/d
 DLL <--Windows named pipe, length-prefixed JSON--> node bridge
 ```
 
-The production code is two net48 assemblies — the thin assembly ACT scans, and a UI-agnostic core that Costura merges into it:
+The **legacy ACT package** is two net48 assemblies — the thin assembly ACT scans, and a UI-agnostic core that Costura merges into it (the modern FCT package replaces the entry assembly with `Fct.Plugins.DiscordTriggers` and shares the same Core):
 
 - **`ACT_DiscordTriggers/`** (net48, `UseWPF` + `UseWindowsForms`): the entry assembly ACT loads, hosting `Costura.Fody`, the ACT reference, and `Microsoft.Xaml.Behaviors.Wpf` (Costura-merged). It only *defines* GAC-based types — `DiscordTriggersPlugin : IActPluginV1` (lifecycle, bridge discovery, diagnostics, assembly-resolve fallback; hosts the WPF view inside ACT's WinForms `TabPage` via `ElementHost`), `DiscordTriggersView : System.Windows.Controls.UserControl` (WPF XAML view + code-behind; `DataContext` is the Core ViewModel, settings glue, hooks `PlayTtsMethod`/`PlaySoundMethod`; TTS synthesized in-process via `System.Speech` → 48k/16/stereo PCM, sound files sent by path), and the `static` attached-property helpers `PasswordBoxBinding`/`LogListCopy` (bindable masked token + Ctrl+C log copy; `ViewBehaviors.cs`).
   - **Load-time invariant:** no type *defined in this assembly* may derive from / implement a Costura-merged dependency. ACT loads via `Assembly.LoadFrom` + `GetTypes()`, which resolves every defined type's base/interfaces *before* any managed code of ours runs (so before Costura's module-init resolver attaches). A merged-dep base type here = `GetTypes()` throws = "Invalid Plugin". WPF base types (`UserControl`) are GAC, so the view is safe; the MVVM ViewModel lives in Core (not here) because it derives from merged `CommunityToolkit.Mvvm`. `Microsoft.Xaml.Behaviors` is used **XAML-only** (`Interaction.Triggers` with the built-in `LaunchUriOrFileAction` for the Information-tab links) and never subclassed here; view helpers that would otherwise be `Behavior<T>` are written as `static` attached-property classes to stay object-based. `DiscordTriggersPlugin`'s ctor calls `CosturaUtility.Initialize()` and the lifecycle methods carry `[MethodImpl(NoInlining)]` to keep resolver attach deterministic.
-- **`ACT_DiscordTriggers.Core/`** (net48 class lib; no Costura/WinForms/ACT): all UI-agnostic code, referencing `CommunityToolkit.Mvvm` + `System.Text.Json` (PackageReference) and `System.Speech` (GAC). Costura merges Core.dll + those deps into the single plugin DLL (they ride in transitively + copy-local), so the closure stays isolated from other ACT plugins. Organized by folder:
+- **`ACT_DiscordTriggers.Core/`** (multi-target `net48;net10.0-windows` class lib; no Costura/WinForms/ACT): all UI-agnostic code, referencing `CommunityToolkit.Mvvm` + `System.Text.Json` (PackageReference); `System.Speech` is a GAC reference on net48 and a NuGet package on net10. For the legacy package, Costura merges the net48 Core.dll + those deps into the single plugin DLL (they ride in transitively + copy-local), so the closure stays isolated from other ACT plugins; the net10 flavor feeds the FCT plugin. Organized by folder:
   - `Ipc/` (`ACT_DiscordTriggers.Core.Ipc`): `DiscordClient` (static facade), `DiscordClientService` (`IDiscordService` impl), `BridgeProcess.StartAndConnectAsync` (spawns node, scans stdout for `BRIDGE_READY`, connects the pipe), `PipeClient`, `DiagnosticsLog`.
   - `Protocol/` (`ACT_DiscordTriggers.Core.Protocol`): `Protocol.cs` — the C# wire-protocol DTOs + `Op`.
   - `Settings/` (`ACT_DiscordTriggers.Core.Settings`): `PluginSettings` POCO + versioned migration framework.
@@ -123,10 +133,10 @@ Auto-leveling loudness: `normalize.ts` measures per-clip loudness with ITU-R BS.
 ## Packaging & releases
 
 Packaging:
-- Release archive is one top-level `ACT_DiscordTriggers/` folder: DLL + `node.exe` + `bundle.js` + `node_modules/` + `README.md`/`LICENSE`.
+- Legacy archive is one top-level `ACT_DiscordTriggers/` folder: DLL + `node.exe` + `bundle.js` + `node_modules/` + `README.md`/`LICENSE`. Modern archive is one `Fct.Plugins.DiscordTriggers/` folder: entry DLL + `plugin.json` + `.deps.json` + private deps (Core/CommunityToolkit/System.Speech) + `runtimes/` + the node bridge (Avalonia + `Fct.Abstractions[.UI]` are host-provided, `ExcludeAssets=runtime`, so absent).
 - `FindBridgeDir()` resolves the bridge next to the plugin DLL first, then ACT's `AppData\Plugins\Discord\`.
-- Costura.Fody merges net48 managed deps into the DLL — keep new managed deps Costura-merged so the plugin stays single-file.
+- Costura.Fody merges net48 managed deps into the legacy DLL — keep new managed deps Costura-merged so the legacy plugin stays single-file.
 
 Releases:
-- Push a `v*` tag → `release.yml` runs the full build + `build.ps1 -Zip` and publishes a GitHub Release. Tags containing `-` → pre-release.
-- To cut one: bump `AssemblyVersion`/`FileVersion`/`Version` in `ACT_DiscordTriggers.csproj`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- Push a `v*` tag → `release.yml` builds **both** packages (`build.ps1 -Zip` then `build_modern.ps1 -Configuration Release -Zip -SkipBridge`), runs the C# tests on both TFMs, and publishes a GitHub Release with both zips. Tags containing `-` → pre-release. CI restores the FCT contracts from the committed `libs/fct/packages` (fct-vendored).
+- To cut one: bump `AssemblyVersion`/`FileVersion`/`Version` in **both** `ACT_DiscordTriggers/ACT_DiscordTriggers.csproj` and `Fct.Plugins.DiscordTriggers/Fct.Plugins.DiscordTriggers.csproj`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.

@@ -32,13 +32,22 @@ jobs:
     - name: Test bridge (Node)
       working-directory: DiscordBridge-node
       run: npm test
-    - name: Build + package (plugin + bridge + zip)
+    - name: Build + package legacy (ACT net48) + bridge + zip
       shell: pwsh
       run: ./build.ps1 -Zip
-    - name: Run C# tests (net48)
+    - name: Build + package modern (FCT net10) — vendored contract feed
+      shell: pwsh
+      # Reuses the bridge dist/ from build.ps1 (-SkipBridge); contracts come from libs/fct/packages.
+      run: ./build_modern.ps1 -Configuration Release -Zip -SkipBridge
+    - name: Run C# tests (net48 + net10)
       run: dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj -c Release --nologo
-    - name: Upload Artifact
+    - name: Upload legacy artifact (ACT)
       uses: actions/upload-artifact@v7
       with:
         name: ACT_DiscordTriggers-Prerelease
         path: ACT_DiscordTriggers.zip
+    - name: Upload modern artifact (FCT)
+      uses: actions/upload-artifact@v7
+      with:
+        name: Fct.Plugins.DiscordTriggers-Prerelease
+        path: release-modern/Fct.Plugins.DiscordTriggers.zip

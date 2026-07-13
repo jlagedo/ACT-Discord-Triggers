@@ -37,25 +37,39 @@ jobs:
         working-directory: DiscordBridge-node
         run: npm test
 
-      - name: Build + package (plugin + bridge + zip)
+      - name: Build + package legacy (ACT net48) + bridge + zip
         shell: pwsh
         run: ./build.ps1 -Zip
 
-      - name: Run C# tests (net48)
+      - name: Build + package modern (FCT net10) — vendored contract feed
+        shell: pwsh
+        # Reuses the bridge dist/ from build.ps1 (-SkipBridge); contracts come from libs/fct/packages.
+        run: ./build_modern.ps1 -Configuration Release -Zip -SkipBridge
+
+      - name: Run C# tests (net48 + net10)
         run: dotnet test ACT_DiscordTriggers.Tests/ACT_DiscordTriggers.Tests.csproj -c Release --nologo
 
-      - name: Name archive after the tag
+      - name: Name archives after the tag
         shell: pwsh
-        run: Rename-Item ACT_DiscordTriggers.zip "ACT_DiscordTriggers-${{ github.ref_name }}.zip"
+        run: |
+          Rename-Item ACT_DiscordTriggers.zip "ACT_DiscordTriggers-${{ github.ref_name }}.zip"
+          Rename-Item release-modern/Fct.Plugins.DiscordTriggers.zip "release-modern/Fct.Plugins.DiscordTriggers-${{ github.ref_name }}.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: ACT_DiscordTriggers-*.zip
+          files: |
+            ACT_DiscordTriggers-*.zip
+            release-modern/Fct.Plugins.DiscordTriggers-*.zip
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
-            ## Installation
+            This release ships **two packages** — pick the one for your tracker:
+
+            - **`ACT_DiscordTriggers-${{ github.ref_name }}.zip`** — for **Advanced Combat Tracker (ACT)** (net48 drop-in).
+            - **`Fct.Plugins.DiscordTriggers-${{ github.ref_name }}.zip`** — for **FFXIV Combat Tracker (FCT)** (net10 native plugin).
+
+            ## Installation (ACT)
 
             1. Download `ACT_DiscordTriggers-${{ github.ref_name }}.zip` from the **Assets** below.
             2. Right-click the downloaded zip → **Properties** → tick **Unblock** → OK.
@@ -73,5 +87,14 @@ jobs:
             to connect your Discord bot.
 
             > **Updating:** replace the whole `ACT_DiscordTriggers` folder, not just the `.dll`.
+
+            ## Installation (FCT)
+
+            1. Download `Fct.Plugins.DiscordTriggers-${{ github.ref_name }}.zip` from the **Assets** below.
+            2. Right-click the downloaded zip → **Properties** → tick **Unblock** → OK.
+            3. Extract it, then in **FFXIV Combat Tracker**: **Plugins** → **Add plugin** → point at the
+               extracted `Fct.Plugins.DiscordTriggers\` folder.
+
+            > **Updating:** replace the whole `Fct.Plugins.DiscordTriggers` folder, not just the `.dll`.
 
             ---

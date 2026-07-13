@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Both TFMs run under `dotnet test`: net48 covers the shared Core on the legacy
+         ACT path, net10.0-windows adds the FCT plugin's DiscordAudioSink seam. -->
+    <TargetFrameworks>net48;net10.0-windows</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -24,12 +26,17 @@
          Core's InternalsVisibleTo grants access to the internal members the tests use
          (DiagnosticsLog.MergeInterleave, the internal PipeClient/BridgeProcess types). -->
     <ProjectReference Include="..\ACT_DiscordTriggers.Core\ACT_DiscordTriggers.Core.csproj" />
-    <!-- The native plugin, for the DiscordAudioSink terminal-sink seam (internal;
-         reached via the plugin's InternalsVisibleTo). It PackageReferences the host
-         contracts with ExcludeAssets=runtime (host-provided), so the test supplies
-         Fct.Abstractions itself below to get the runtime DLL the sink binds to. The
-         plugin's Avalonia deps stay compile-only and are never JITed by these tests. -->
+  </ItemGroup>
+  <!-- The native plugin (DiscordAudioSink terminal-sink seam) is net10-only: it pulls
+       Avalonia + the FCT host contracts that don't exist on net48. Its DiscordAudioSinkTests
+       is excluded from the net48 pass below. The plugin PackageReferences the contracts with
+       ExcludeAssets=runtime (host-provided), so the test supplies Fct.Abstractions itself to
+       get the runtime DLL the sink binds to. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <ProjectReference Include="..\Fct.Plugins.DiscordTriggers\Fct.Plugins.DiscordTriggers.csproj" />
     <PackageReference Include="Fct.Abstractions" Version="1.0.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Compile Remove="DiscordAudioSinkTests.cs" />
   </ItemGroup>
 </Project>
