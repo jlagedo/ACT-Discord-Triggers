@@ -1,503 +1,740 @@
-<UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:ACT_DiscordTriggers.Core.ViewModels"
-             xmlns:controls="using:Fct.Plugins.DiscordTriggers.Ui.Controls"
-             xmlns:conv="using:Fct.Plugins.DiscordTriggers.Ui"
-             xmlns:plugin="using:Fct.Plugins.DiscordTriggers"
-             x:Class="Fct.Plugins.DiscordTriggers.Ui.DiscordTriggersView"
-             x:DataType="vm:DiscordTriggersViewModel">
-  <UserControl.Resources>
-    <ResourceDictionary>
-      <ResourceDictionary.MergedDictionaries>
-        <ResourceInclude Source="avares://Fct.Plugins.DiscordTriggers/Assets/IconGlyphs.axaml" />
-      </ResourceDictionary.MergedDictionaries>
-    </ResourceDictionary>
-  </UserControl.Resources>
-  <UserControl.Styles>
-    <StyleInclude Source="avares://Fct.Plugins.DiscordTriggers/Ui/Styles/PluginStyles.axaml" />
-  </UserControl.Styles>
+﻿<UserControl
+    x:Class="Fct.Plugins.DiscordTriggers.Ui.DiscordTriggersView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Fct.Plugins.DiscordTriggers.Ui.Controls"
+    xmlns:conv="using:Fct.Plugins.DiscordTriggers.Ui"
+    xmlns:plugin="using:Fct.Plugins.DiscordTriggers"
+    xmlns:vm="using:ACT_DiscordTriggers.Core.ViewModels"
+    x:DataType="vm:DiscordTriggersViewModel">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://Fct.Plugins.DiscordTriggers/Assets/IconGlyphs.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <StyleInclude Source="avares://Fct.Plugins.DiscordTriggers/Ui/Styles/PluginStyles.axaml" />
+    </UserControl.Styles>
 
-  <DockPanel LastChildFill="True">
+    <DockPanel LastChildFill="True">
 
-    <!-- ── Diagnostics log (docked bottom, shared by all tabs) ──────────────────────────────── -->
-    <Border DockPanel.Dock="Bottom" Height="190"
+        <!--  ── Diagnostics log (docked bottom, shared by all tabs) ────────────────────────────────  -->
+        <Border
+            Height="190"
             Background="{DynamicResource FctSurface}"
-            BorderBrush="{DynamicResource FctHairline}" BorderThickness="0,1,0,0">
-      <DockPanel Margin="12,8">
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,6">
-          <TextBlock Grid.Column="0" Classes="section" Margin="0" Text="DIAGNOSTICS" VerticalAlignment="Center" />
-          <Button Grid.Column="1" Classes="link" Content="Copy" Click="OnCopyLog" />
-        </Grid>
-        <Border Background="{DynamicResource FctBackground}" CornerRadius="8" Padding="4">
-          <ListBox x:Name="LogList" ItemsSource="{Binding LogEntries}" SelectionMode="Multiple"
-                   Background="Transparent" KeyDown="OnLogKeyDown">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:LogEntry">
-                <Grid ColumnDefinitions="Auto,*">
-                  <TextBlock Grid.Column="0" Margin="0,0,10,0"
-                             FontFamily="{DynamicResource FctFontMono}" FontSize="11"
-                             Foreground="{DynamicResource FctTextDim}"
-                             Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}" />
-                  <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12" Classes="logmsg"
-                             Classes.warn="{Binding Level, Converter={x:Static conv:LogConverters.IsWarn}}"
-                             Classes.error="{Binding Level, Converter={x:Static conv:LogConverters.IsError}}"
-                             Text="{Binding Message}" />
+            BorderBrush="{DynamicResource FctHairline}"
+            BorderThickness="0,1,0,0"
+            DockPanel.Dock="Bottom">
+            <DockPanel Margin="12,8">
+                <Grid
+                    Margin="0,0,0,6"
+                    ColumnDefinitions="*,Auto"
+                    DockPanel.Dock="Top">
+                    <TextBlock
+                        Grid.Column="0"
+                        Margin="0"
+                        VerticalAlignment="Center"
+                        Classes="section"
+                        Text="DIAGNOSTICS" />
+                    <Button
+                        Grid.Column="1"
+                        Classes="link"
+                        Click="OnCopyLog"
+                        Content="Copy" />
                 </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
+                <Border
+                    Padding="4"
+                    Background="{DynamicResource FctBackground}"
+                    CornerRadius="8">
+                    <ListBox
+                        x:Name="LogList"
+                        Background="Transparent"
+                        ItemsSource="{Binding LogEntries}"
+                        KeyDown="OnLogKeyDown"
+                        SelectionMode="Multiple">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:LogEntry">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Margin="0,0,10,0"
+                                        FontFamily="{DynamicResource FctFontMono}"
+                                        FontSize="11"
+                                        Foreground="{DynamicResource FctTextDim}"
+                                        Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Classes="logmsg"
+                                        Classes.error="{Binding Level, Converter={x:Static conv:LogConverters.IsError}}"
+                                        Classes.warn="{Binding Level, Converter={x:Static conv:LogConverters.IsWarn}}"
+                                        FontSize="12"
+                                        Text="{Binding Message}"
+                                        TextWrapping="Wrap" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </DockPanel>
         </Border>
-      </DockPanel>
-    </Border>
 
-    <!-- ── Left tab rail: Output · Text-to-Speech · Sound · Information ──────────────────────── -->
-    <TabControl Classes="rail" TabStripPlacement="Left" Background="Transparent">
+        <!--  ── Left tab rail: Output · Text-to-Speech · Sound · Information ────────────────────────  -->
+        <TabControl
+            Background="Transparent"
+            Classes="rail"
+            TabStripPlacement="Left">
 
-      <!-- ══ TAB 1 — OUTPUT ══════════════════════════════════════════════════════════════════ -->
-      <TabItem>
-        <TabItem.Header>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Classes="icon" Text="{StaticResource Icon.Home}" />
-            <TextBlock Text="Output" VerticalAlignment="Center" />
-          </StackPanel>
-        </TabItem.Header>
-        <ScrollViewer>
-          <StackPanel HorizontalAlignment="Left" MaxWidth="640" Margin="20,16" Spacing="8">
-
-            <TextBlock Classes="section" Text="OUTPUT MODE" />
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
-              <RadioButton Grid.Column="0" Classes="choice-card" GroupName="outputMode"
-                           IsChecked="{Binding IsBotMode, Mode=TwoWay}">
-                <StackPanel Spacing="6">
-                  <TextBlock Classes="icon" FontSize="20" Text="{StaticResource Icon.PlugConnected}" />
-                  <TextBlock Classes="fct-body" Text="Discord bot" />
-                  <TextBlock Classes="fct-meta" Text="Stream to a voice channel." />
-                </StackPanel>
-              </RadioButton>
-              <RadioButton Grid.Column="1" Classes="choice-card" GroupName="outputMode"
-                           IsChecked="{Binding IsLocalMode, Mode=TwoWay}">
-                <StackPanel Spacing="6">
-                  <TextBlock Classes="icon" FontSize="20" Text="{StaticResource Icon.Desktop}" />
-                  <TextBlock Classes="fct-body" Text="This PC (local)" />
-                  <TextBlock Classes="fct-meta" Text="Play on the default device." />
-                </StackPanel>
-              </RadioButton>
-            </Grid>
-
-            <!-- Bot-mode fold -->
-            <StackPanel Spacing="8" IsVisible="{Binding IsBotMode}">
-              <TextBlock Classes="section" Text="DISCORD CONNECTION" />
-
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <Grid ColumnDefinitions="Auto,*">
-                    <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Key}" />
-                    <StackPanel Grid.Column="1">
-                      <TextBlock Classes="fct-body" Text="Bot token" />
-                      <TextBlock Classes="fct-meta" Text="From the Discord developer portal." />
+            <!--  ══ TAB 1 — OUTPUT ══════════════════════════════════════════════════════════════════  -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="icon" Text="{StaticResource Icon.Home}" />
+                        <TextBlock VerticalAlignment="Center" Text="Output" />
                     </StackPanel>
-                  </Grid>
-                  <TextBox PasswordChar="•" Text="{Binding BotToken}" />
-                </StackPanel>
-              </Border>
+                </TabItem.Header>
+                <ScrollViewer>
+                    <StackPanel
+                        MaxWidth="640"
+                        Margin="20,16"
+                        HorizontalAlignment="Left"
+                        Spacing="8">
 
-              <Border Classes="fct-card">
-                <StackPanel Spacing="10">
-                  <Grid ColumnDefinitions="Auto,Auto,*">
-                    <Border Grid.Column="0" Classes="status-dot" Margin="0,0,8,0"
-                            Classes.online="{Binding IsConnected}" />
-                    <TextBlock Grid.Column="1" Classes="fct-body" Text="Connected" IsVisible="{Binding IsConnected}" />
-                    <TextBlock Grid.Column="1" Classes="fct-body" Text="Disconnected" IsVisible="{Binding !IsConnected}" />
-                  </Grid>
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Classes="fct-ghost" Content="Connect" Command="{Binding ConnectCommand}"
-                            IsVisible="{Binding !IsConnected}" />
-                    <Button Classes="fct-ghost" Content="Disconnect" Command="{Binding DisconnectCommand}"
-                            IsVisible="{Binding IsConnected}" />
-                  </StackPanel>
-                </StackPanel>
-              </Border>
+                        <TextBlock Classes="section" Text="OUTPUT MODE" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <RadioButton
+                                Grid.Column="0"
+                                Classes="choice-card"
+                                GroupName="outputMode"
+                                IsChecked="{Binding IsBotMode, Mode=TwoWay}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                                        Classes="icon"
+                                        FontSize="20"
+                                        Text="{StaticResource Icon.PlugConnected}" />
+                                    <TextBlock Classes="fct-body" Text="Discord bot" />
+                                    <TextBlock Classes="fct-meta" Text="Stream to a voice channel." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton
+                                Grid.Column="1"
+                                Classes="choice-card"
+                                GroupName="outputMode"
+                                IsChecked="{Binding IsLocalMode, Mode=TwoWay}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                                        Classes="icon"
+                                        FontSize="20"
+                                        Text="{StaticResource Icon.Desktop}" />
+                                    <TextBlock Classes="fct-body" Text="This PC (local)" />
+                                    <TextBlock Classes="fct-meta" Text="Play on the default device." />
+                                </StackPanel>
+                            </RadioButton>
+                        </Grid>
 
-              <Border Classes="fct-card">
-                <Grid ColumnDefinitions="Auto,*,Auto">
-                  <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.AutoConnect}" />
-                  <StackPanel Grid.Column="1">
-                    <TextBlock Classes="fct-body" Text="Connect automatically" />
-                    <TextBlock Classes="fct-meta" Text="Log in when the plugin loads." />
-                  </StackPanel>
-                  <ToggleSwitch Grid.Column="2" IsChecked="{Binding AutoConnect}" />
-                </Grid>
-              </Border>
+                        <!--  Bot-mode fold  -->
+                        <StackPanel IsVisible="{Binding IsBotMode}" Spacing="8">
+                            <TextBlock Classes="section" Text="DISCORD CONNECTION" />
 
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <Grid ColumnDefinitions="Auto,*">
-                    <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Chat}" />
-                    <StackPanel Grid.Column="1">
-                      <TextBlock Classes="fct-body" Text="Bot status message" />
-                      <TextBlock Classes="fct-meta" Text="Shown as the bot's activity." />
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            Margin="0,0,10,0"
+                                            Classes="icon"
+                                            Text="{StaticResource Icon.Key}" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Classes="fct-body" Text="Bot token" />
+                                            <TextBlock Classes="fct-meta" Text="From the Discord developer portal." />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBox PasswordChar="•" Text="{Binding BotToken}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="10">
+                                    <Grid ColumnDefinitions="Auto,Auto,*">
+                                        <Border
+                                            Grid.Column="0"
+                                            Margin="0,0,8,0"
+                                            Classes="status-dot"
+                                            Classes.online="{Binding IsConnected}" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Classes="fct-body"
+                                            IsVisible="{Binding IsConnected}"
+                                            Text="Connected" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Classes="fct-body"
+                                            IsVisible="{Binding !IsConnected}"
+                                            Text="Disconnected" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button
+                                            Classes="fct-ghost"
+                                            Command="{Binding ConnectCommand}"
+                                            Content="Connect"
+                                            IsVisible="{Binding !IsConnected}" />
+                                        <Button
+                                            Classes="fct-ghost"
+                                            Command="{Binding DisconnectCommand}"
+                                            Content="Disconnect"
+                                            IsVisible="{Binding IsConnected}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="fct-card">
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Margin="0,0,10,0"
+                                        Classes="icon"
+                                        Text="{StaticResource Icon.AutoConnect}" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Classes="fct-body" Text="Connect automatically" />
+                                        <TextBlock Classes="fct-meta" Text="Log in when the plugin loads." />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="2" IsChecked="{Binding AutoConnect}" />
+                                </Grid>
+                            </Border>
+
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,*">
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            Margin="0,0,10,0"
+                                            Classes="icon"
+                                            Text="{StaticResource Icon.Chat}" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Classes="fct-body" Text="Bot status message" />
+                                            <TextBlock Classes="fct-meta" Text="Shown as the bot's activity." />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBox Text="{Binding BotStatus}" />
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Classes="section" Text="VOICE CHANNEL" />
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="10">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="fct-meta" Text="Server" />
+                                        <ComboBox
+                                            HorizontalAlignment="Stretch"
+                                            ItemsSource="{Binding Servers}"
+                                            SelectedItem="{Binding SelectedServer}" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="fct-meta" Text="Channel" />
+                                        <ComboBox
+                                            HorizontalAlignment="Stretch"
+                                            ItemsSource="{Binding Channels}"
+                                            SelectedItem="{Binding SelectedChannel}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button
+                                            Classes="fct-ghost"
+                                            Command="{Binding JoinCommand}"
+                                            Content="Join channel" />
+                                        <Button
+                                            Classes="fct-ghost"
+                                            Command="{Binding LeaveCommand}"
+                                            Content="Leave" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Classes="section" Text="DISCORD AUDIO QUALITY" />
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,*,Auto">
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            Margin="0,0,10,0"
+                                            Classes="icon"
+                                            Text="{StaticResource Icon.Quality}" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Classes="fct-body" Text="Audio quality" />
+                                            <TextBlock Classes="fct-meta" Text="Higher tiers use more bandwidth." />
+                                        </StackPanel>
+                                        <Button
+                                            Grid.Column="2"
+                                            AutomationProperties.Name="Audio quality help"
+                                            Classes="help"
+                                            ToolTip.Tip="High may exceed an unboosted server's per-channel bitrate cap and be clamped.">
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <TextBlock
+                                                        MaxWidth="260"
+                                                        Classes="fct-body"
+                                                        Text="High may exceed an unboosted server's per-channel bitrate cap and be clamped." />
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
+                                    <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding AudioQualityIndex}">
+                                        <ComboBoxItem>Low — 64 kbps</ComboBoxItem>
+                                        <ComboBoxItem>Medium — 96 kbps</ComboBoxItem>
+                                        <ComboBoxItem>High — 128 kbps</ComboBoxItem>
+                                    </ComboBox>
+                                    <Border Classes="callout warn" IsVisible="{Binding ShowHighQualityWarning}">
+                                        <TextBlock Classes="fct-meta" Text="High quality may be clamped on servers without a boost level." />
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!--  Local-mode fold  -->
+                        <StackPanel IsVisible="{Binding IsLocalMode}" Spacing="8">
+                            <Border Classes="callout">
+                                <TextBlock Classes="fct-meta" Text="Local mode plays on this PC's default output device — no Discord login or channel." />
+                            </Border>
+                            <TextBlock Classes="section" Text="LOCAL PLAYBACK" />
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="{Binding LocalOutputVolumeLabel}" />
+                                    <Slider
+                                        Maximum="100"
+                                        Minimum="0"
+                                        Value="{Binding LocalOutputVolume}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
                     </StackPanel>
-                  </Grid>
-                  <TextBox Text="{Binding BotStatus}" />
-                </StackPanel>
-              </Border>
+                </ScrollViewer>
+            </TabItem>
 
-              <TextBlock Classes="section" Text="VOICE CHANNEL" />
-              <Border Classes="fct-card">
-                <StackPanel Spacing="10">
-                  <StackPanel Spacing="6">
-                    <TextBlock Classes="fct-meta" Text="Server" />
-                    <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Servers}"
-                              SelectedItem="{Binding SelectedServer}" />
-                  </StackPanel>
-                  <StackPanel Spacing="6">
-                    <TextBlock Classes="fct-meta" Text="Channel" />
-                    <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Channels}"
-                              SelectedItem="{Binding SelectedChannel}" />
-                  </StackPanel>
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Classes="fct-ghost" Content="Join channel" Command="{Binding JoinCommand}" />
-                    <Button Classes="fct-ghost" Content="Leave" Command="{Binding LeaveCommand}" />
-                  </StackPanel>
-                </StackPanel>
-              </Border>
-
-              <TextBlock Classes="section" Text="DISCORD AUDIO QUALITY" />
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <Grid ColumnDefinitions="Auto,*,Auto">
-                    <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Quality}" />
-                    <StackPanel Grid.Column="1">
-                      <TextBlock Classes="fct-body" Text="Audio quality" />
-                      <TextBlock Classes="fct-meta" Text="Higher tiers use more bandwidth." />
+            <!--  ══ TAB 2 — TEXT-TO-SPEECH ══════════════════════════════════════════════════════════  -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="icon" Text="{StaticResource Icon.Voice}" />
+                        <TextBlock VerticalAlignment="Center" Text="Text-to-Speech" />
                     </StackPanel>
-                    <Button Grid.Column="2" Classes="help"
-                            AutomationProperties.Name="Audio quality help"
-                            ToolTip.Tip="High may exceed an unboosted server's per-channel bitrate cap and be clamped.">
-                      <Button.Flyout>
-                        <Flyout>
-                          <TextBlock Classes="fct-body" MaxWidth="260"
-                                     Text="High may exceed an unboosted server's per-channel bitrate cap and be clamped." />
-                        </Flyout>
-                      </Button.Flyout>
-                    </Button>
-                  </Grid>
-                  <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding AudioQualityIndex}">
-                    <ComboBoxItem>Low — 64 kbps</ComboBoxItem>
-                    <ComboBoxItem>Medium — 96 kbps</ComboBoxItem>
-                    <ComboBoxItem>High — 128 kbps</ComboBoxItem>
-                  </ComboBox>
-                  <Border Classes="callout warn" IsVisible="{Binding ShowHighQualityWarning}">
-                    <TextBlock Classes="fct-meta"
-                               Text="High quality may be clamped on servers without a boost level." />
-                  </Border>
-                </StackPanel>
-              </Border>
-            </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer>
+                    <StackPanel
+                        MaxWidth="640"
+                        Margin="20,16"
+                        HorizontalAlignment="Left"
+                        Spacing="8">
 
-            <!-- Local-mode fold -->
-            <StackPanel Spacing="8" IsVisible="{Binding IsLocalMode}">
-              <Border Classes="callout">
-                <TextBlock Classes="fct-meta"
-                           Text="Local mode plays on this PC's default output device — no Discord login or channel." />
-              </Border>
-              <TextBlock Classes="section" Text="LOCAL PLAYBACK" />
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="{Binding LocalOutputVolumeLabel}" />
-                  <Slider Minimum="0" Maximum="100" Value="{Binding LocalOutputVolume}" />
-                </StackPanel>
-              </Border>
-            </StackPanel>
+                        <TextBlock Classes="section" Text="ENGINE" />
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <RadioButton
+                                Grid.Column="0"
+                                Classes="choice-card"
+                                GroupName="engine"
+                                IsChecked="{Binding IsSapi, Mode=TwoWay}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                                        Classes="icon"
+                                        FontSize="20"
+                                        Text="{StaticResource Icon.Desktop}" />
+                                    <TextBlock Classes="fct-body" Text="Windows (SAPI)" />
+                                    <TextBlock Classes="fct-meta" Text="Built-in system voices." />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton
+                                Grid.Column="1"
+                                Classes="choice-card"
+                                GroupName="engine"
+                                IsChecked="{Binding IsOnnx, Mode=TwoWay}">
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                                        Classes="icon"
+                                        FontSize="20"
+                                        Text="{StaticResource Icon.Sparkle}" />
+                                    <TextBlock Classes="fct-body" Text="ONNX — neural" />
+                                    <TextBlock Classes="fct-meta" Text="Downloadable neural voices." />
+                                </StackPanel>
+                            </RadioButton>
+                        </Grid>
 
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
+                        <!--  SAPI fold  -->
+                        <StackPanel IsVisible="{Binding IsSapi}" Spacing="8">
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="Voice" />
+                                    <ComboBox
+                                        HorizontalAlignment="Stretch"
+                                        ItemsSource="{Binding Voices}"
+                                        SelectedItem="{Binding TtsVoice}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="{Binding TtsVolume, StringFormat='Volume: {0}'}" />
+                                    <Slider
+                                        Maximum="20"
+                                        Minimum="0"
+                                        Value="{Binding TtsVolume}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="{Binding TtsSpeed, StringFormat='Speed: {0}'}" />
+                                    <Slider
+                                        Maximum="20"
+                                        Minimum="0"
+                                        Value="{Binding TtsSpeed}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
 
-      <!-- ══ TAB 2 — TEXT-TO-SPEECH ══════════════════════════════════════════════════════════ -->
-      <TabItem>
-        <TabItem.Header>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Classes="icon" Text="{StaticResource Icon.Voice}" />
-            <TextBlock Text="Text-to-Speech" VerticalAlignment="Center" />
-          </StackPanel>
-        </TabItem.Header>
-        <ScrollViewer>
-          <StackPanel HorizontalAlignment="Left" MaxWidth="640" Margin="20,16" Spacing="8">
+                        <!--  ONNX fold  -->
+                        <StackPanel IsVisible="{Binding IsOnnx}" Spacing="8">
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="Quality" />
+                                    <TextBlock Classes="fct-meta" Text="{Binding QualityDescription}" />
+                                    <Border Classes="segmented">
+                                        <Grid ColumnDefinitions="*,*">
+                                            <RadioButton
+                                                Grid.Column="0"
+                                                Classes="segment"
+                                                Content="Fast"
+                                                GroupName="quality"
+                                                IsChecked="{Binding IsPiper, Mode=TwoWay}" />
+                                            <RadioButton
+                                                Grid.Column="1"
+                                                Classes="segment"
+                                                Content="Natural"
+                                                GroupName="quality"
+                                                IsChecked="{Binding IsKokoro, Mode=TwoWay}" />
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
 
-            <TextBlock Classes="section" Text="ENGINE" />
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
-              <RadioButton Grid.Column="0" Classes="choice-card" GroupName="engine"
-                           IsChecked="{Binding IsSapi, Mode=TwoWay}">
-                <StackPanel Spacing="6">
-                  <TextBlock Classes="icon" FontSize="20" Text="{StaticResource Icon.Desktop}" />
-                  <TextBlock Classes="fct-body" Text="Windows (SAPI)" />
-                  <TextBlock Classes="fct-meta" Text="Built-in system voices." />
-                </StackPanel>
-              </RadioButton>
-              <RadioButton Grid.Column="1" Classes="choice-card" GroupName="engine"
-                           IsChecked="{Binding IsOnnx, Mode=TwoWay}">
-                <StackPanel Spacing="6">
-                  <TextBlock Classes="icon" FontSize="20" Text="{StaticResource Icon.Sparkle}" />
-                  <TextBlock Classes="fct-body" Text="ONNX — neural" />
-                  <TextBlock Classes="fct-meta" Text="Downloadable neural voices." />
-                </StackPanel>
-              </RadioButton>
-            </Grid>
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="Voice" />
+                                    <controls:VoicePicker />
+                                    <Border Classes="callout" IsVisible="{Binding ShowDownloadStrip}">
+                                        <Grid>
+                                            <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding DownloadButtonVisible}">
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    Margin="0,0,10,0"
+                                                    Classes="icon"
+                                                    Text="{StaticResource Icon.Download}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Classes="fct-meta"
+                                                    Text="{Binding DownloadNoticeText}" />
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Classes="fct-ghost"
+                                                    Command="{Binding DownloadVoiceCommand}"
+                                                    Content="{Binding DownloadButtonText}" />
+                                            </Grid>
+                                            <StackPanel IsVisible="{Binding IsDownloading}" Spacing="6">
+                                                <TextBlock Classes="fct-meta" Text="{Binding DownloadStatusText}" />
+                                                <ProgressBar
+                                                    Maximum="100"
+                                                    Minimum="0"
+                                                    Value="{Binding DownloadProgress}" />
+                                            </StackPanel>
+                                            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding DownloadJustCompleted}">
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    Margin="0,0,10,0"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource FctAccent}"
+                                                    Text="✓" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Classes="fct-meta"
+                                                    Text="{Binding DownloadDoneText}" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
 
-            <!-- SAPI fold -->
-            <StackPanel Spacing="8" IsVisible="{Binding IsSapi}">
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="Voice" />
-                  <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Voices}"
-                            SelectedItem="{Binding TtsVoice}" />
-                </StackPanel>
-              </Border>
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="{Binding TtsVolume, StringFormat='Volume: {0}'}" />
-                  <Slider Minimum="0" Maximum="20" Value="{Binding TtsVolume}" />
-                </StackPanel>
-              </Border>
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="{Binding TtsSpeed, StringFormat='Speed: {0}'}" />
-                  <Slider Minimum="0" Maximum="20" Value="{Binding TtsSpeed}" />
-                </StackPanel>
-              </Border>
-            </StackPanel>
+                            <Border Classes="fct-card">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Classes="fct-body" Text="{Binding TtsSpeed, StringFormat='Speed: {0}'}" />
+                                    <Slider
+                                        Maximum="20"
+                                        Minimum="0"
+                                        Value="{Binding TtsSpeed}" />
+                                </StackPanel>
+                            </Border>
 
-            <!-- ONNX fold -->
-            <StackPanel Spacing="8" IsVisible="{Binding IsOnnx}">
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="Quality" />
-                  <TextBlock Classes="fct-meta" Text="{Binding QualityDescription}" />
-                  <Border Classes="segmented">
-                    <Grid ColumnDefinitions="*,*">
-                      <RadioButton Grid.Column="0" Classes="segment" GroupName="quality" Content="Fast"
-                                   IsChecked="{Binding IsPiper, Mode=TwoWay}" />
-                      <RadioButton Grid.Column="1" Classes="segment" GroupName="quality" Content="Natural"
-                                   IsChecked="{Binding IsKokoro, Mode=TwoWay}" />
-                    </Grid>
-                  </Border>
-                </StackPanel>
-              </Border>
+                            <Expander Header="Advanced" IsExpanded="{Binding IsAdvancedExpanded}">
+                                <StackPanel Margin="0,8,0,0" Spacing="12">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Classes="fct-body" Text="CPU usage" />
+                                        <Border Classes="segmented">
+                                            <Grid ColumnDefinitions="*,*,*">
+                                                <RadioButton
+                                                    Grid.Column="0"
+                                                    Classes="segment"
+                                                    Content="Low · 1"
+                                                    GroupName="threads"
+                                                    IsChecked="{Binding IsThreads1, Mode=TwoWay}" />
+                                                <RadioButton
+                                                    Grid.Column="1"
+                                                    Classes="segment"
+                                                    Content="Balanced · 2"
+                                                    GroupName="threads"
+                                                    IsChecked="{Binding IsThreads2, Mode=TwoWay}" />
+                                                <RadioButton
+                                                    Grid.Column="2"
+                                                    Classes="segment"
+                                                    Content="Fast · 4"
+                                                    GroupName="threads"
+                                                    IsChecked="{Binding IsThreads4, Mode=TwoWay}" />
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="fct-body" Text="Models folder" />
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBox
+                                                Grid.Column="0"
+                                                IsReadOnly="True"
+                                                Text="{Binding ModelsDir}" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Margin="8,0,0,0"
+                                                Classes="fct-ghost"
+                                                Click="OnBrowseModels"
+                                                Content="Browse…" />
+                                        </Grid>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
 
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="Voice" />
-                  <controls:VoicePicker />
-                  <Border Classes="callout" IsVisible="{Binding ShowDownloadStrip}">
-                    <Grid>
-                      <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding DownloadButtonVisible}">
-                        <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Download}" />
-                        <TextBlock Grid.Column="1" Classes="fct-meta" VerticalAlignment="Center"
-                                   Text="{Binding DownloadNoticeText}" />
-                        <Button Grid.Column="2" Classes="fct-ghost" Content="{Binding DownloadButtonText}"
-                                Command="{Binding DownloadVoiceCommand}" />
-                      </Grid>
-                      <StackPanel Spacing="6" IsVisible="{Binding IsDownloading}">
-                        <TextBlock Classes="fct-meta" Text="{Binding DownloadStatusText}" />
-                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding DownloadProgress}" />
-                      </StackPanel>
-                      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding DownloadJustCompleted}">
-                        <TextBlock Grid.Column="0" Text="✓" Margin="0,0,10,0"
-                                   Foreground="{DynamicResource FctAccent}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Classes="fct-meta" VerticalAlignment="Center"
-                                   Text="{Binding DownloadDoneText}" />
-                      </Grid>
-                    </Grid>
-                  </Border>
-                </StackPanel>
-              </Border>
+                        <!--  Shared Test card  -->
+                        <Border Classes="fct-card">
+                            <StackPanel Spacing="8">
+                                <TextBlock Classes="fct-body" Text="Test your setup" />
+                                <TextBlock
+                                    Classes="fct-meta"
+                                    IsVisible="{Binding IsBotMode}"
+                                    Text="Join a channel first, then play a sample." />
+                                <TextBlock
+                                    Classes="fct-meta"
+                                    IsVisible="{Binding IsLocalMode}"
+                                    Text="Plays a sample on this PC." />
+                                <Button
+                                    HorizontalAlignment="Left"
+                                    Classes="fct-ghost"
+                                    Command="{Binding TestCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.PlayCircle}" />
+                                        <TextBlock Text="Test" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Border>
 
-              <Border Classes="fct-card">
-                <StackPanel Spacing="8">
-                  <TextBlock Classes="fct-body" Text="{Binding TtsSpeed, StringFormat='Speed: {0}'}" />
-                  <Slider Minimum="0" Maximum="20" Value="{Binding TtsSpeed}" />
-                </StackPanel>
-              </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-              <Expander Header="Advanced" IsExpanded="{Binding IsAdvancedExpanded}">
-                <StackPanel Spacing="12" Margin="0,8,0,0">
-                  <StackPanel Spacing="8">
-                    <TextBlock Classes="fct-body" Text="CPU usage" />
-                    <Border Classes="segmented">
-                      <Grid ColumnDefinitions="*,*,*">
-                        <RadioButton Grid.Column="0" Classes="segment" GroupName="threads" Content="Low · 1"
-                                     IsChecked="{Binding IsThreads1, Mode=TwoWay}" />
-                        <RadioButton Grid.Column="1" Classes="segment" GroupName="threads" Content="Balanced · 2"
-                                     IsChecked="{Binding IsThreads2, Mode=TwoWay}" />
-                        <RadioButton Grid.Column="2" Classes="segment" GroupName="threads" Content="Fast · 4"
-                                     IsChecked="{Binding IsThreads4, Mode=TwoWay}" />
-                      </Grid>
-                    </Border>
-                  </StackPanel>
-                  <StackPanel Spacing="6">
-                    <TextBlock Classes="fct-body" Text="Models folder" />
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBox Grid.Column="0" Text="{Binding ModelsDir}" IsReadOnly="True" />
-                      <Button Grid.Column="1" Classes="fct-ghost" Margin="8,0,0,0" Content="Browse…"
-                              Click="OnBrowseModels" />
-                    </Grid>
-                  </StackPanel>
-                </StackPanel>
-              </Expander>
-            </StackPanel>
+            <!--  ══ TAB 3 — SOUND ═══════════════════════════════════════════════════════════════════  -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="icon" Text="{StaticResource Icon.Sound}" />
+                        <TextBlock VerticalAlignment="Center" Text="Sound" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer>
+                    <StackPanel
+                        MaxWidth="640"
+                        Margin="20,16"
+                        HorizontalAlignment="Left"
+                        Spacing="8">
 
-            <!-- Shared Test card -->
-            <Border Classes="fct-card">
-              <StackPanel Spacing="8">
-                <TextBlock Classes="fct-body" Text="Test your setup" />
-                <TextBlock Classes="fct-meta" IsVisible="{Binding IsBotMode}"
-                           Text="Join a channel first, then play a sample." />
-                <TextBlock Classes="fct-meta" IsVisible="{Binding IsLocalMode}"
-                           Text="Plays a sample on this PC." />
-                <Button Classes="fct-ghost" HorizontalAlignment="Left" Command="{Binding TestCommand}">
-                  <StackPanel Orientation="Horizontal" Spacing="6">
-                    <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.PlayCircle}" />
-                    <TextBlock Text="Test" />
-                  </StackPanel>
-                </Button>
-              </StackPanel>
-            </Border>
+                        <TextBlock Classes="section" Text="EFFECTS" />
+                        <Border Classes="fct-card">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Margin="0,0,10,0"
+                                    Classes="icon"
+                                    Text="{StaticResource Icon.Wand}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Classes="fct-body" Text="Random sound effects" />
+                                    <TextBlock Classes="fct-meta" Text="Occasionally season callouts with an effect." />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="2" IsChecked="{Binding RandomFx}" />
+                            </Grid>
+                        </Border>
+                        <Border Classes="fct-card">
+                            <StackPanel IsEnabled="{Binding RandomFx}" Spacing="8">
+                                <TextBlock Classes="fct-body" Text="{Binding FxChanceLabel}" />
+                                <Slider
+                                    Maximum="100"
+                                    Minimum="0"
+                                    Value="{Binding FxChance}" />
+                            </StackPanel>
+                        </Border>
 
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
+                        <TextBlock Classes="section" Text="MASTERING" />
+                        <Border Classes="fct-card">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Margin="0,0,10,0"
+                                    Classes="icon"
+                                    Text="{StaticResource Icon.Level}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Classes="fct-body" Text="Auto-level volume" />
+                                    <TextBlock Classes="fct-meta" Text="Even out loudness across clips." />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="2" IsChecked="{Binding Normalize}" />
+                            </Grid>
+                        </Border>
+                        <Border Classes="fct-card">
+                            <StackPanel IsEnabled="{Binding Normalize}" Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        Classes="fct-body"
+                                        Text="{Binding NormalizeTargetLabel}" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Classes="fct-ghost"
+                                        Command="{Binding ResetNormalizeTargetCommand}"
+                                        Content="Recommended"
+                                        IsEnabled="{Binding IsNormalizeTargetCustom}" />
+                                </Grid>
+                                <Slider
+                                    Maximum="27"
+                                    Minimum="9"
+                                    Value="{Binding NormalizeTarget}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="fct-card">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Margin="0,0,10,0"
+                                    Classes="icon"
+                                    Text="{StaticResource Icon.TopSpeed}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Classes="fct-body" Text="Master limiter" />
+                                    <TextBlock Classes="fct-meta" Text="Catch inter-voice peaks before clipping." />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="2" IsChecked="{Binding LimiterEnabled}" />
+                            </Grid>
+                        </Border>
+                        <Border Classes="fct-card">
+                            <StackPanel IsEnabled="{Binding LimiterEnabled}" Spacing="8">
+                                <TextBlock Classes="fct-body" Text="Limiter ceiling" />
+                                <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding LimiterCeilingIndex}">
+                                    <ComboBoxItem>-0.5 dBTP</ComboBoxItem>
+                                    <ComboBoxItem>-1 dBTP</ComboBoxItem>
+                                    <ComboBoxItem>-2 dBTP</ComboBoxItem>
+                                    <ComboBoxItem>-3 dBTP</ComboBoxItem>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
 
-      <!-- ══ TAB 3 — SOUND ═══════════════════════════════════════════════════════════════════ -->
-      <TabItem>
-        <TabItem.Header>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Classes="icon" Text="{StaticResource Icon.Sound}" />
-            <TextBlock Text="Sound" VerticalAlignment="Center" />
-          </StackPanel>
-        </TabItem.Header>
-        <ScrollViewer>
-          <StackPanel HorizontalAlignment="Left" MaxWidth="640" Margin="20,16" Spacing="8">
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-            <TextBlock Classes="section" Text="EFFECTS" />
-            <Border Classes="fct-card">
-              <Grid ColumnDefinitions="Auto,*,Auto">
-                <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Wand}" />
-                <StackPanel Grid.Column="1">
-                  <TextBlock Classes="fct-body" Text="Random sound effects" />
-                  <TextBlock Classes="fct-meta" Text="Occasionally season callouts with an effect." />
-                </StackPanel>
-                <ToggleSwitch Grid.Column="2" IsChecked="{Binding RandomFx}" />
-              </Grid>
-            </Border>
-            <Border Classes="fct-card">
-              <StackPanel Spacing="8" IsEnabled="{Binding RandomFx}">
-                <TextBlock Classes="fct-body" Text="{Binding FxChanceLabel}" />
-                <Slider Minimum="0" Maximum="100" Value="{Binding FxChance}" />
-              </StackPanel>
-            </Border>
+            <!--  ══ TAB 4 — INFORMATION ═════════════════════════════════════════════════════════════  -->
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Classes="icon" Text="{StaticResource Icon.Info}" />
+                        <TextBlock VerticalAlignment="Center" Text="Information" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer>
+                    <StackPanel
+                        MaxWidth="520"
+                        Margin="24"
+                        HorizontalAlignment="Center"
+                        Spacing="10">
+                        <Image
+                            Width="104"
+                            Height="104"
+                            HorizontalAlignment="Center"
+                            Source="avares://Fct.Plugins.DiscordTriggers/Assets/logo.png" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Classes="fct-h1"
+                            Text="ACT Discord Triggers" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Classes="fct-meta"
+                            Text="{x:Static plugin:DiscordTriggersPlugin.VersionDisplay}" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Classes="fct-subtitle"
+                            Text="Speaks your ACT triggers into a Discord voice channel — or on this PC."
+                            TextAlignment="Center" />
 
-            <TextBlock Classes="section" Text="MASTERING" />
-            <Border Classes="fct-card">
-              <Grid ColumnDefinitions="Auto,*,Auto">
-                <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.Level}" />
-                <StackPanel Grid.Column="1">
-                  <TextBlock Classes="fct-body" Text="Auto-level volume" />
-                  <TextBlock Classes="fct-meta" Text="Even out loudness across clips." />
-                </StackPanel>
-                <ToggleSwitch Grid.Column="2" IsChecked="{Binding Normalize}" />
-              </Grid>
-            </Border>
-            <Border Classes="fct-card">
-              <StackPanel Spacing="8" IsEnabled="{Binding Normalize}">
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Grid.Column="0" Classes="fct-body" Text="{Binding NormalizeTargetLabel}" VerticalAlignment="Center" />
-                  <Button Grid.Column="1" Classes="fct-ghost" Content="Recommended"
-                          Command="{Binding ResetNormalizeTargetCommand}"
-                          IsEnabled="{Binding IsNormalizeTargetCustom}" />
-                </Grid>
-                <Slider Minimum="9" Maximum="27" Value="{Binding NormalizeTarget}" />
-              </StackPanel>
-            </Border>
-            <Border Classes="fct-card">
-              <Grid ColumnDefinitions="Auto,*,Auto">
-                <TextBlock Grid.Column="0" Classes="icon" Margin="0,0,10,0" Text="{StaticResource Icon.TopSpeed}" />
-                <StackPanel Grid.Column="1">
-                  <TextBlock Classes="fct-body" Text="Master limiter" />
-                  <TextBlock Classes="fct-meta" Text="Catch inter-voice peaks before clipping." />
-                </StackPanel>
-                <ToggleSwitch Grid.Column="2" IsChecked="{Binding LimiterEnabled}" />
-              </Grid>
-            </Border>
-            <Border Classes="fct-card">
-              <StackPanel Spacing="8" IsEnabled="{Binding LimiterEnabled}">
-                <TextBlock Classes="fct-body" Text="Limiter ceiling" />
-                <ComboBox HorizontalAlignment="Stretch" SelectedIndex="{Binding LimiterCeilingIndex}">
-                  <ComboBoxItem>-0.5 dBTP</ComboBoxItem>
-                  <ComboBoxItem>-1 dBTP</ComboBoxItem>
-                  <ComboBoxItem>-2 dBTP</ComboBoxItem>
-                  <ComboBoxItem>-3 dBTP</ComboBoxItem>
-                </ComboBox>
-              </StackPanel>
-            </Border>
+                        <Border Margin="0,10" Classes="fct-rule" />
 
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
+                        <Button
+                            HorizontalAlignment="Center"
+                            Classes="link"
+                            Click="OnOpenProject">
+                            <StackPanel Orientation="Horizontal" Spacing="9">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Open}" />
+                                <TextBlock Text="Project on GitHub" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Center"
+                            Classes="link"
+                            Click="OnReportProblem">
+                            <StackPanel Orientation="Horizontal" Spacing="9">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Bug}" />
+                                <TextBlock Text="Report a problem" />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Center"
+                            Classes="link"
+                            Click="OnSetupGuide">
+                            <StackPanel Orientation="Horizontal" Spacing="9">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Guide}" />
+                                <TextBlock Text="First-time setup guide" />
+                            </StackPanel>
+                        </Button>
 
-      <!-- ══ TAB 4 — INFORMATION ═════════════════════════════════════════════════════════════ -->
-      <TabItem>
-        <TabItem.Header>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Classes="icon" Text="{StaticResource Icon.Info}" />
-            <TextBlock Text="Information" VerticalAlignment="Center" />
-          </StackPanel>
-        </TabItem.Header>
-        <ScrollViewer>
-          <StackPanel HorizontalAlignment="Center" MaxWidth="520" Margin="24" Spacing="10">
-            <Image Source="avares://Fct.Plugins.DiscordTriggers/Assets/logo.png"
-                   Width="104" Height="104" HorizontalAlignment="Center" />
-            <TextBlock Classes="fct-h1" HorizontalAlignment="Center" Text="ACT Discord Triggers" />
-            <TextBlock Classes="fct-meta" HorizontalAlignment="Center"
-                       Text="{x:Static plugin:DiscordTriggersPlugin.VersionDisplay}" />
-            <TextBlock Classes="fct-subtitle" HorizontalAlignment="Center" TextAlignment="Center"
-                       Text="Speaks your ACT triggers into a Discord voice channel — or on this PC." />
+                        <Border Margin="0,10" Classes="fct-rule" />
 
-            <Border Classes="fct-rule" Margin="0,10" />
+                        <Button
+                            HorizontalAlignment="Center"
+                            Classes="fct-ghost"
+                            Command="{Binding OpenLogFolderCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Folder}" />
+                                <TextBlock Text="Open log folder" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            Classes="fct-meta"
+                            Text="MIT-licensed. Not affiliated with Square Enix or Discord."
+                            TextAlignment="Center" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-            <Button Classes="link" HorizontalAlignment="Center" Click="OnOpenProject">
-              <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Open}" />
-                <TextBlock Text="Project on GitHub" />
-              </StackPanel>
-            </Button>
-            <Button Classes="link" HorizontalAlignment="Center" Click="OnReportProblem">
-              <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Bug}" />
-                <TextBlock Text="Report a problem" />
-              </StackPanel>
-            </Button>
-            <Button Classes="link" HorizontalAlignment="Center" Click="OnSetupGuide">
-              <StackPanel Orientation="Horizontal" Spacing="9">
-                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Guide}" />
-                <TextBlock Text="First-time setup guide" />
-              </StackPanel>
-            </Button>
-
-            <Border Classes="fct-rule" Margin="0,10" />
-
-            <Button Classes="fct-ghost" HorizontalAlignment="Center" Command="{Binding OpenLogFolderCommand}">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBlock FontFamily="{StaticResource IconFont}" Text="{StaticResource Icon.Folder}" />
-                <TextBlock Text="Open log folder" />
-              </StackPanel>
-            </Button>
-            <TextBlock Classes="fct-meta" HorizontalAlignment="Center" TextAlignment="Center"
-                       Text="MIT-licensed. Not affiliated with Square Enix or Discord." />
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
-
-    </TabControl>
-  </DockPanel>
+        </TabControl>
+    </DockPanel>
 </UserControl>

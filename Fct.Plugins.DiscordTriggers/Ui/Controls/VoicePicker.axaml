@@ -1,75 +1,116 @@
-<UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:ACT_DiscordTriggers.Core.ViewModels"
-             xmlns:local="using:Fct.Plugins.DiscordTriggers.Ui.Controls"
-             x:Class="Fct.Plugins.DiscordTriggers.Ui.Controls.VoicePicker"
-             x:DataType="vm:DiscordTriggersViewModel">
-  <!-- Closed state: a ToggleButton showing the selected voice; open state: a light-dismiss Popup
-       with a search box + locale-grouped list. Filtering/grouping is a view concern (code-behind),
-       exactly as the WPF CollectionViewSource path was; selection is pushed to the VM on click. -->
-  <Grid>
-    <ToggleButton x:Name="Toggle" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Grid.Column="0" VerticalAlignment="Center"
-                   Text="{Binding SelectedOnnxVoice.Label, FallbackValue='Select a voice', TargetNullValue='Select a voice'}" />
-        <TextBlock Grid.Column="1" Classes="icon" Text="&#xE70D;" FontSize="12" Margin="8,0,0,0" />
-      </Grid>
-    </ToggleButton>
+﻿<UserControl
+    x:Class="Fct.Plugins.DiscordTriggers.Ui.Controls.VoicePicker"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Fct.Plugins.DiscordTriggers.Ui.Controls"
+    xmlns:vm="using:ACT_DiscordTriggers.Core.ViewModels"
+    x:DataType="vm:DiscordTriggersViewModel">
+    <!--
+        Closed state: a ToggleButton showing the selected voice; open state: a light-dismiss Popup
+        with a search box + locale-grouped list. Filtering/grouping is a view concern (code-behind),
+        exactly as the WPF CollectionViewSource path was; selection is pushed to the VM on click.
+    -->
+    <Grid>
+        <ToggleButton
+            x:Name="Toggle"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Text="{Binding SelectedOnnxVoice.Label, FallbackValue='Select a voice', TargetNullValue='Select a voice'}" />
+                <TextBlock
+                    Grid.Column="1"
+                    Margin="8,0,0,0"
+                    Classes="icon"
+                    FontSize="12"
+                    Text="&#xE70D;" />
+            </Grid>
+        </ToggleButton>
 
-    <Popup PlacementTarget="{Binding #Toggle}" Placement="BottomEdgeAlignedLeft"
-           IsLightDismissEnabled="True" Opened="OnOpened"
-           IsOpen="{Binding #Toggle.IsChecked, Mode=TwoWay}">
-      <Border Width="300" Background="{DynamicResource FctSurface}"
-              BorderBrush="{DynamicResource FctHairline}" BorderThickness="1"
-              CornerRadius="10" Padding="8" Margin="0,4,0,0">
-        <DockPanel>
-          <TextBox x:Name="Search" DockPanel.Dock="Top" PlaceholderText="Search voices…"
-                   TextChanged="OnSearchChanged" Margin="0,0,0,8" />
-          <ScrollViewer MaxHeight="340">
-            <ItemsControl x:Name="GroupList">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="local:VoiceGroup">
-                  <StackPanel Margin="0,0,0,6">
-                    <TextBlock Text="{Binding Name}" Classes="section" Margin="4,4,0,2" />
-                    <ItemsControl ItemsSource="{Binding Items}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:OnnxVoiceItem">
-                          <Button Classes="link" HorizontalAlignment="Stretch"
-                                  HorizontalContentAlignment="Stretch"
-                                  Padding="6,5" Click="OnVoiceClick">
-                            <Grid ColumnDefinitions="16,*,Auto">
-                              <TextBlock Grid.Column="0" Text="★" FontSize="12"
-                                         Foreground="{DynamicResource FctEmphasis}"
-                                         VerticalAlignment="Center"
-                                         AutomationProperties.Name="Recommended" ToolTip.Tip="Recommended"
-                                         IsVisible="{Binding Recommended}" />
-                              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="{Binding Name}"
-                                           Foreground="{DynamicResource FctText}" />
-                                <TextBlock Text="{Binding TierLabel}"
-                                           Foreground="{DynamicResource FctTextDim}" />
-                              </StackPanel>
-                              <TextBlock Grid.Column="2" Text="✓"
-                                         Foreground="{DynamicResource FctAccent}"
-                                         VerticalAlignment="Center"
-                                         AutomationProperties.Name="Installed" ToolTip.Tip="Installed"
-                                         IsVisible="{Binding Installed}" />
-                              <TextBlock Grid.Column="2" Text="{Binding SizeText}"
-                                         Foreground="{DynamicResource FctTextDim}"
-                                         VerticalAlignment="Center"
-                                         IsVisible="{Binding !Installed}" />
-                            </Grid>
-                          </Button>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </StackPanel>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
-        </DockPanel>
-      </Border>
-    </Popup>
-  </Grid>
+        <Popup
+            IsLightDismissEnabled="True"
+            IsOpen="{Binding #Toggle.IsChecked, Mode=TwoWay}"
+            Opened="OnOpened"
+            Placement="BottomEdgeAlignedLeft"
+            PlacementTarget="{Binding #Toggle}">
+            <Border
+                Width="300"
+                Margin="0,4,0,0"
+                Padding="8"
+                Background="{DynamicResource FctSurface}"
+                BorderBrush="{DynamicResource FctHairline}"
+                BorderThickness="1"
+                CornerRadius="10">
+                <DockPanel>
+                    <TextBox
+                        x:Name="Search"
+                        Margin="0,0,0,8"
+                        DockPanel.Dock="Top"
+                        PlaceholderText="Search voices…"
+                        TextChanged="OnSearchChanged" />
+                    <ScrollViewer MaxHeight="340">
+                        <ItemsControl x:Name="GroupList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:VoiceGroup">
+                                    <StackPanel Margin="0,0,0,6">
+                                        <TextBlock
+                                            Margin="4,4,0,2"
+                                            Classes="section"
+                                            Text="{Binding Name}" />
+                                        <ItemsControl ItemsSource="{Binding Items}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:OnnxVoiceItem">
+                                                    <Button
+                                                        Padding="6,5"
+                                                        HorizontalAlignment="Stretch"
+                                                        HorizontalContentAlignment="Stretch"
+                                                        Classes="link"
+                                                        Click="OnVoiceClick">
+                                                        <Grid ColumnDefinitions="16,*,Auto">
+                                                            <TextBlock
+                                                                Grid.Column="0"
+                                                                VerticalAlignment="Center"
+                                                                AutomationProperties.Name="Recommended"
+                                                                FontSize="12"
+                                                                Foreground="{DynamicResource FctEmphasis}"
+                                                                IsVisible="{Binding Recommended}"
+                                                                Text="★"
+                                                                ToolTip.Tip="Recommended" />
+                                                            <StackPanel
+                                                                Grid.Column="1"
+                                                                Orientation="Horizontal"
+                                                                Spacing="6">
+                                                                <TextBlock Foreground="{DynamicResource FctText}" Text="{Binding Name}" />
+                                                                <TextBlock Foreground="{DynamicResource FctTextDim}" Text="{Binding TierLabel}" />
+                                                            </StackPanel>
+                                                            <TextBlock
+                                                                Grid.Column="2"
+                                                                VerticalAlignment="Center"
+                                                                AutomationProperties.Name="Installed"
+                                                                Foreground="{DynamicResource FctAccent}"
+                                                                IsVisible="{Binding Installed}"
+                                                                Text="✓"
+                                                                ToolTip.Tip="Installed" />
+                                                            <TextBlock
+                                                                Grid.Column="2"
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{DynamicResource FctTextDim}"
+                                                                IsVisible="{Binding !Installed}"
+                                                                Text="{Binding SizeText}" />
+                                                        </Grid>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Popup>
+    </Grid>
 </UserControl>
