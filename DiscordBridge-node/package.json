@@ -18,20 +18,20 @@
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "audify": "^1.10.1",
-    "audio-decode": "^3.10.2",
-    "discord.js": "^14.26.4",
+    "audio-decode": "^3.12.0",
+    "discord.js": "^14.27.0",
     "libsodium-wrappers": "^0.8.4",
     "opusscript": "^0.1.1",
     "r8brain-wasm": "github:jlagedo/r8brain-wasm#cafc8fe",
-    "sherpa-onnx-node": "^1.13.3"
+    "sherpa-onnx-node": "^1.13.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.10.0",
-    "esbuild": "^0.28.1",
-    "eslint": "^10.5.0",
-    "tsx": "^4.22.4",
+    "@types/node": "^24.13.3",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.8.1",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.1"
+    "typescript-eslint": "^8.67.0"
   }
 }

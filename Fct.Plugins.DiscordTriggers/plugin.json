@@ -1,6 +1,6 @@
 {
   "id": "com.discordtriggers",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "contract": "1.0",
   "assembly": "Fct.Plugins.DiscordTriggers.dll",
   "entry": "Fct.Plugins.DiscordTriggers.DiscordTriggersPlugin",
